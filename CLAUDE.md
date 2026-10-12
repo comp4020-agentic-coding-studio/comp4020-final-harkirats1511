@@ -31,6 +31,21 @@ pick, and the room works out who is faking. They are decisions, not defaults.
 - A change one person makes reaches every open session of that table within about
   a second with no reload. Reconnecting, or returning the next day, restores the
   current state from the database, never from memory.
+- Nobody sees who has picked or voted, not even a count. The public state must not
+  change when someone picks or votes; only the phase moving on shows it.
+- Deadlines are fixed. A pick or vote that arrives after its deadline does not
+  count. A phase ends early once everyone eligible has submitted.
+- A vote is final once cast. The most-voted is ejected; a tie ejects nobody, and
+  "skip" counts as an option.
+- Someone reconnecting mid-round keeps their role and gets whatever pick time is
+  left; once the pick deadline has passed they watch that round. Someone who joins
+  a table mid-game spectates until the next game.
+- The game runs until every mole is out (players win) or the moles are at least as
+  many as everyone else still in (moles win), as in Among Us. Leaving counts the
+  same way, and a host who leaves passes the host role on.
+- The mole gets a new target each round.
+- Audio plays on the host's phone by default; a table can choose every phone
+  instead, for groups not in one room.
 
 ## Where things live
 
