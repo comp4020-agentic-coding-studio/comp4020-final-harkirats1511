@@ -1,0 +1,9 @@
+---
+import Base from "../../layouts/Base.astro";
+import { renderReadme } from "../../lib/readme.ts";
+const html = renderReadme();
+---
+<Base title="README" wide>
+  <p><a href="/">Back to the app</a></p>
+  <div class="prose" set:html={html} />
+</Base>
