@@ -1,5 +1,9 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { session, uniqueName } from "./helpers";
+
+// These go through Deezer, which answers in 2-4s from the Fly machine in
+// Sydney: the default 5s limit timed out on the live app, not the app itself.
+vi.setConfig({ testTimeout: 60_000 });
 
 // Contract: a person's taste file is up to 10 tracks they'd actually play. It is
 // what a mole studies from the very first game, so it has to persist.
