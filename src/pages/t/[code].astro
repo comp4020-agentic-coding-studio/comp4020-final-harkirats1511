@@ -62,18 +62,18 @@ const host = isHost(code, me.id);
     );
     document.getElementById("count")!.textContent = String(s.members.length);
     const n = s.members.length;
-    const ready = s.status === "lobby_ready";
+    const ready = s.status === "playing";
     if (isHost && start && note) {
       start.disabled = n < min || ready;
       note.textContent = ready
-        ? "Table is ready. The game itself is coming soon."
+        ? "The game has started. The game screens are coming soon."
         : n < min
           ? `Needs at least ${min} players to start (${min - n} more). 4 or more is best.`
           : n < 4
             ? "You can start now. 4 or more players is recommended."
             : "Everyone in? Start when ready.";
     } else if (note) {
-      note.textContent = ready ? "Table is ready. The game itself is coming soon." : "Waiting for the host to start.";
+      note.textContent = ready ? "The game has started. The game screens are coming soon." : "Waiting for the host to start.";
     }
   }
 
