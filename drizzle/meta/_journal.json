@@ -8,6 +8,13 @@
       "when": 1791795249154,
       "tag": "0000_redundant_sugar_man",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791795712719,
+      "tag": "0001_square_power_man",
+      "breakpoints": true
     }
   ]
 }

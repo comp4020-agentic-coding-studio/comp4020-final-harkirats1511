@@ -52,3 +52,21 @@ export const tableMembers = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.tableCode, t.personId] })],
 );
+
+// A person's taste file: up to 10 tracks they'd actually play. Deezer ids plus
+// metadata only; audio is never hosted.
+export const tasteTracks = sqliteTable(
+  "taste_tracks",
+  {
+    personId: text("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    trackId: integer("track_id").notNull(),
+    title: text("title").notNull(),
+    artist: text("artist").notNull(),
+    album: text("album"),
+    cover: text("cover"),
+    addedAt: integer("added_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.personId, t.trackId] })],
+);
