@@ -21,6 +21,35 @@ const tasteCount = me ? listTaste(me.id).length : 0;
     <section class="card" aria-labelledby="create-h">
       <h2 id="create-h">Start a table</h2>
       <p class="hint">You get a code to share with the room.</p>
+      <details class="options">
+        <summary>Table options</summary>
+        <label for="pick-s">Time to pick a song</label>
+        <select id="pick-s">
+          <option value="30">30 seconds</option>
+          <option value="60" selected>60 seconds</option>
+          <option value="90">90 seconds</option>
+        </select>
+        <label for="vote-s">Time to vote</label>
+        <select id="vote-s">
+          <option value="30">30 seconds</option>
+          <option value="45" selected>45 seconds</option>
+          <option value="60">60 seconds</option>
+        </select>
+        <label for="speaker">Where the music plays</label>
+        <select id="speaker">
+          <option value="host" selected>This phone plays the music</option>
+          <option value="every">Every phone plays</option>
+        </select>
+        <label for="moles">Moles</label>
+        <select id="moles" aria-describedby="moles-hint">
+          <option value="" selected>Auto (1 up to 5 players, 2 up to 10)</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+        </select>
+        <p class="hint" id="moles-hint">Moles must stay fewer than everyone else: 2 need 5 players, 3 need 7, 4 need 9. Start tells you if the table is too small.</p>
+      </details>
       <button id="create" type="button">Create a table</button>
     </section>
     <section class="card" aria-labelledby="join-h">
@@ -68,7 +97,13 @@ const tasteCount = me ? listTaste(me.id).length : 0;
   });
 
   document.getElementById("create")?.addEventListener("click", async () => {
-    const { res, data } = await post("/api/tables", {});
+    const value = (id: string) => (document.getElementById(id) as HTMLSelectElement).value;
+    const { res, data } = await post("/api/tables", {
+      pickSeconds: Number(value("pick-s")),
+      voteSeconds: Number(value("vote-s")),
+      speaker: value("speaker"),
+      moles: value("moles") ? Number(value("moles")) : null,
+    });
     if (!res.ok) return say(data.error ?? "Could not create a table.");
     location.href = `/t/${data.code}`;
   });

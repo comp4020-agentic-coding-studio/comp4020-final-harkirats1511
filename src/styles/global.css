@@ -35,7 +35,7 @@ h1 { font-size: 1.6rem; line-height: 1.2; margin: 0 0 1rem; }
 h2 { font-size: 1.15rem; margin: 2rem 0 .5rem; }
 a { color: var(--accent); }
 label { display: block; font-weight: 600; margin: 0 0 .25rem; }
-input {
+input, select {
   width: 100%;
   font: inherit;
   padding: .7rem .75rem;
@@ -89,3 +89,5 @@ ul.tracks button { flex: none; min-width: 2.75rem; padding: .5rem .75rem; }
 .counter { font-weight: 600; color: var(--muted); }
 .nudge { border-left: 4px solid var(--accent); padding-left: .75rem; }
 audio { width: 100%; margin-bottom: 1rem; }
+details.options { margin-bottom: 1rem; }
+details.options summary { cursor: pointer; font-weight: 600; min-height: 2.75rem; display: flex; align-items: center; }
