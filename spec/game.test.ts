@@ -65,7 +65,7 @@ async function me(p: Player, code: string) {
 let ids: number[] = [];
 async function trackIds(s: Session): Promise<number[]> {
   if (!ids.length) {
-    const found = (await (await s.call("/api/search?q=pop")).json()) as { id: number }[];
+    const found = (await (await s.call("/api/search?q=love")).json()) as { id: number }[];
     ids = found.map((t) => t.id);
   }
   return ids;

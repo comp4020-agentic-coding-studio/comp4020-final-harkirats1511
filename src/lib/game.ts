@@ -204,6 +204,9 @@ export function schedule(code: string) {
   timers.delete(code);
   const g = currentGame(code);
   if (!g || g.winner || g.deadline === null) return;
+  // Overdue (the server was down past it): step now, so whoever's request loaded
+  // the server gets the current phase back, not the one that already ended.
+  if (g.deadline <= Date.now()) return fire(code, g.round, g.phase);
   const timer = setTimeout(() => fire(code, g.round, g.phase), Math.max(0, g.deadline - Date.now()));
   timer.unref();
   timers.set(code, timer);

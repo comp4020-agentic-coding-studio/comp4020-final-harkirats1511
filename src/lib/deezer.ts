@@ -39,22 +39,10 @@ function toTrack(r: Raw): Track | null {
   return { id: r.id, title: r.title, artist: r.artist.name, album: r.album?.title, cover: r.album?.cover_medium };
 }
 
-async function searchOnce(q: string, limit: number): Promise<Track[]> {
+export async function searchTracks(q: string, limit = 25): Promise<Track[]> {
   const body = await get(`/search?q=${encodeURIComponent(q)}&limit=${limit}`);
   const rows = (body?.data as Raw[] | undefined) ?? [];
-  return rows.map(toTrack).filter((t): t is Track => t !== null).slice(0, limit);
-}
-
-export async function searchTracks(q: string, limit = 25): Promise<Track[]> {
-  let tracks = await searchOnce(q, limit);
-  // For some short queries (observed: "pop") Deezer returns only the few exact
-  // title matches. A trailing space asks it for the loose match instead, so top
-  // the list up from that rather than hand back three results.
-  if (tracks.length < limit) {
-    const seen = new Set(tracks.map((t) => t.id));
-    const more = (await searchOnce(`${q} `, limit)).filter((t) => !seen.has(t.id));
-    tracks = [...tracks, ...more].slice(0, limit);
-  }
+  const tracks = rows.map(toTrack).filter((t): t is Track => t !== null).slice(0, limit);
   // Whatever someone picks next was probably just on their screen.
   for (const t of tracks) remember(t);
   return tracks;
