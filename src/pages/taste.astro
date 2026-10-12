@@ -1,0 +1,129 @@
+---
+import Base from "../layouts/Base.astro";
+import { personFromCookies } from "../lib/auth.ts";
+import { listTaste, TASTE_MAX } from "../lib/taste.ts";
+const me = personFromCookies(Astro.cookies);
+if (!me) return Astro.redirect("/?next=/taste");
+const initial = listTaste(me.id);
+---
+<Base title="Your taste file · Mole">
+  <p class="hint"><a href="/">Back</a></p>
+  <h1>Your taste file</h1>
+  <p class="hint">Up to {TASTE_MAX} tracks you would actually play. A mole studies this to pass as you.</p>
+
+  <section class="card" aria-labelledby="mine-h">
+    <h2 id="mine-h" style="margin-top:0">Your tracks <span class="counter" id="counter" aria-live="polite"></span></h2>
+    <ul class="tracks" id="mine" aria-labelledby="mine-h"></ul>
+    <p class="hint" id="empty" hidden>Nothing yet. Search below and add a few.</p>
+    <audio id="player" controls hidden aria-label="Track preview"></audio>
+  </section>
+
+  <section class="card" aria-labelledby="find-h">
+    <h2 id="find-h" style="margin-top:0">Add a track</h2>
+    <form id="search" role="search">
+      <label for="q">Search songs or artists</label>
+      <input id="q" name="q" type="search" autocomplete="off" required />
+      <button type="submit">Search</button>
+    </form>
+    <p class="hint" id="full" hidden>Your taste file is full. Remove a track to add another.</p>
+    <p id="msg" class="error" role="alert"></p>
+    <p class="hint" id="status" role="status"></p>
+    <ul class="tracks" id="results"></ul>
+  </section>
+</Base>
+<script define:vars={{ initial, max: TASTE_MAX }}>
+  const mine = document.getElementById("mine");
+  const results = document.getElementById("results");
+  const msg = document.getElementById("msg");
+  const status = document.getElementById("status");
+  const player = document.getElementById("player");
+  let taste = initial;
+  let found = [];
+
+  const say = (t) => { msg.textContent = t; };
+  async function api(url, init) {
+    const res = await fetch(url, init);
+    const data = await res.json().catch(() => null);
+    return { res, data };
+  }
+
+  function row(t, action) {
+    const li = document.createElement("li");
+    const art = t.cover ? Object.assign(document.createElement("img"), { src: t.cover, alt: "", width: 48, height: 48, loading: "lazy" }) : Object.assign(document.createElement("div"), { className: "nocover" });
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    const title = document.createElement("strong");
+    title.textContent = t.title;
+    const artist = document.createElement("span");
+    artist.textContent = t.artist;
+    meta.append(title, artist);
+    const play = Object.assign(document.createElement("button"), { type: "button", className: "secondary", textContent: "Play" });
+    play.setAttribute("aria-label", `Play preview of ${t.title} by ${t.artist}`);
+    play.addEventListener("click", () => preview(t.id));
+    li.append(art, meta, play, action);
+    return li;
+  }
+
+  function render() {
+    const ids = new Set(taste.map((t) => t.id));
+    const full = taste.length >= max;
+    document.getElementById("counter").textContent = `${taste.length} / ${max}`;
+    document.getElementById("empty").hidden = taste.length > 0;
+    document.getElementById("full").hidden = !full;
+    mine.replaceChildren(...taste.map((t) => {
+      const b = Object.assign(document.createElement("button"), { type: "button", className: "secondary", textContent: "Remove" });
+      b.setAttribute("aria-label", `Remove ${t.title} by ${t.artist}`);
+      b.addEventListener("click", () => remove(t.id));
+      return row(t, b);
+    }));
+    results.replaceChildren(...found.map((t) => {
+      const b = Object.assign(document.createElement("button"), { type: "button" });
+      const has = ids.has(t.id);
+      b.textContent = has ? "Added" : "Add";
+      b.disabled = has || full;
+      b.setAttribute("aria-label", `${has ? "Already added" : "Add"} ${t.title} by ${t.artist}`);
+      b.addEventListener("click", () => add(t.id));
+      return row(t, b);
+    }));
+  }
+
+  async function add(id) {
+    say("");
+    const { res, data } = await api("/api/taste", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ trackId: id }) });
+    if (!res.ok) return say(data?.error ?? "Could not add that track.");
+    taste = data;
+    render();
+  }
+
+  async function remove(id) {
+    say("");
+    const { res } = await api(`/api/taste/${id}`, { method: "DELETE" });
+    if (!res.ok) return say("Could not remove that track.");
+    taste = taste.filter((t) => t.id !== id);
+    render();
+  }
+
+  // The preview URL is signed and expires, so ask for a fresh one every play.
+  async function preview(id) {
+    say("");
+    const { res, data } = await api(`/api/tracks/${id}/preview`);
+    if (!res.ok) return say(data?.error ?? "No preview available.");
+    player.src = data.url;
+    player.hidden = false;
+    player.play().catch(() => say("Press play on the player to hear it."));
+  }
+
+  document.getElementById("search").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    say("");
+    const q = document.getElementById("q").value.trim();
+    status.textContent = "Searching...";
+    const { res, data } = await api(`/api/search?q=${encodeURIComponent(q)}`);
+    if (!res.ok) { status.textContent = ""; return say(data?.error ?? "Search failed."); }
+    found = data;
+    status.textContent = found.length ? `${found.length} results` : "No results.";
+    render();
+  });
+
+  render();
+</script>

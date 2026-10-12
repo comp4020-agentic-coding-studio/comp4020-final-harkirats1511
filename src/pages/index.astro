@@ -1,15 +1,23 @@
 ---
 import Base from "../layouts/Base.astro";
 import { personFromCookies } from "../lib/auth.ts";
+import { listTaste } from "../lib/taste.ts";
 const me = personFromCookies(Astro.cookies);
 const next = Astro.url.searchParams.get("next") ?? "";
-const safeNext = /^\/t\/[A-Za-z]{4}$/.test(next) ? next : "";
+const safeNext = /^(\/t\/[A-Za-z]{4}|\/taste)$/.test(next) ? next : "";
 if (me && safeNext) return Astro.redirect(safeNext);
+const tasteCount = me ? listTaste(me.id).length : 0;
 ---
 <Base title="Mole">
   <h1>Mole</h1>
   {me ? (
     <p>Signed in as <strong>{me.name}</strong>.</p>
+    <section class="card" aria-labelledby="taste-h">
+      <h2 id="taste-h" style="margin-top:0">Your taste file</h2>
+      <p class="hint">{tasteCount} / 10 tracks.</p>
+      {tasteCount < 5 && <p class="nudge">A mole needs something to study. Add a few tracks you would actually play.</p>}
+      <p><a href="/taste">{tasteCount === 0 ? "Build your taste file" : "Edit your taste file"}</a></p>
+    </section>
     <section class="card" aria-labelledby="create-h">
       <h2 id="create-h">Start a table</h2>
       <p class="hint">You get a code to share with the room.</p>

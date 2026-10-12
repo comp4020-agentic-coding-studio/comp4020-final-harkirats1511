@@ -79,3 +79,13 @@ ul.members li { padding: .6rem 0; border-bottom: 1px solid var(--line); }
 .prose table { border-collapse: collapse; display: block; overflow-x: auto; }
 .prose td, .prose th { border: 1px solid var(--line); padding: .3rem .5rem; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+ul.tracks { list-style: none; padding: 0; margin: 0 0 1rem; }
+ul.tracks li { display: flex; gap: .75rem; align-items: center; padding: .6rem 0; border-bottom: 1px solid var(--line); }
+ul.tracks img, ul.tracks .nocover { width: 3rem; height: 3rem; flex: none; border-radius: .35rem; background: var(--line); object-fit: cover; }
+ul.tracks .meta { flex: 1; min-width: 0; }
+ul.tracks .meta strong, ul.tracks .meta span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ul.tracks .meta span { color: var(--muted); font-size: .9rem; }
+ul.tracks button { flex: none; min-width: 2.75rem; padding: .5rem .75rem; }
+.counter { font-weight: 600; color: var(--muted); }
+.nudge { border-left: 4px solid var(--accent); padding-left: .75rem; }
+audio { width: 100%; margin-bottom: 1rem; }
