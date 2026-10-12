@@ -1,91 +1,647 @@
 ---
 import Base from "../../layouts/Base.astro";
 import { personFromCookies } from "../../lib/auth.ts";
-import { MIN_PLAYERS, isHost, normaliseCode, publicState } from "../../lib/tables.ts";
+import { MIN_PLAYERS, normaliseCode, publicState } from "../../lib/tables.ts";
 
 const code = normaliseCode(Astro.params.code);
 const state = publicState(code);
 if (!state) return new Response("No such table.", { status: 404 });
 const me = personFromCookies(Astro.cookies);
 if (!me) return Astro.redirect(`/?next=/t/${code}`);
-const host = isHost(code, me.id);
 ---
 <Base title={`Table ${code}`}>
-  <p><a href="/">Leave the lobby</a></p>
-  <h1>Table</h1>
-  <p class="hint" id="code-label">Share this code with the room</p>
-  <div class="code" aria-labelledby="code-label" id="table-code">{code}</div>
+  <div id="app" data-code={code} data-me={me.name} data-min={MIN_PLAYERS}>
+    <p class="sr-only" id="announce" role="status" aria-live="polite"></p>
 
-  <section class="card" aria-labelledby="players-h">
-    <h2 id="players-h" style="margin-top:0">Players (<span id="count">{state.members.length}</span>)</h2>
-    <ul class="members" id="members" aria-live="polite">
-      {state.members.map((m) => <li>{m}{m === state.host && <span class="badge">host</span>}</li>)}
-    </ul>
-  </section>
+    <div class="bar">
+      <button id="leave" type="button" class="secondary">Leave table</button>
+      <span class="hint" id="leave-note"></span>
+    </div>
+    <div id="leave-confirm" class="card" role="alertdialog" aria-labelledby="leave-q" hidden>
+      <p id="leave-q"><strong>Leave the game?</strong> You will be out of it for good.</p>
+      <div class="row">
+        <button id="leave-yes" type="button">Yes, leave</button>
+        <button id="leave-no" type="button" class="secondary">Stay</button>
+      </div>
+    </div>
 
-  <div id="lobby" data-code={code} data-host={host ? "1" : "0"} data-min={MIN_PLAYERS} data-status={state.status}>
-    {host ? (
-      <>
-        <button id="start" type="button" disabled>Start game</button>
-        <p class="hint" id="start-note" aria-live="polite"></p>
-      </>
-    ) : (
-      <p class="hint" id="wait-note" aria-live="polite">Waiting for the host to start.</p>
-    )}
+    <h1 id="title">Table</h1>
+    <div id="lobby-code">
+      <p class="hint" id="code-label">Share this code with the room</p>
+      <div class="code" aria-labelledby="code-label" id="table-code">{code}</div>
+    </div>
+    <p class="status" id="status" hidden>
+      <span id="status-label"></span>
+      <span class="countdown" id="countdown" role="timer" aria-live="off"></span>
+    </p>
+
+    <section class="card role" id="v-role" aria-labelledby="role-h" hidden>
+      <div class="role-head">
+        <h2 id="role-h">Your role</h2>
+        <button id="role-toggle" type="button" class="secondary" aria-controls="role-body" aria-expanded="true">Hide</button>
+      </div>
+      <div id="role-body">
+        <p id="role-text"></p>
+        <div id="dossier" hidden>
+          <h3 id="dossier-h"></h3>
+          <ul class="tracks" id="dossier-taste" aria-labelledby="dossier-h"></ul>
+          <h3>What they picked before</h3>
+          <p class="hint" id="dossier-none" hidden>Nothing yet. You are guessing from the taste file alone.</p>
+          <ul class="tracks" id="dossier-picks"></ul>
+        </div>
+      </div>
+      <p class="hint" id="role-hidden" hidden>Your role is hidden. Show it when nobody is looking.</p>
+    </section>
+
+    <section class="card" id="v-pick" aria-labelledby="pick-h" hidden>
+      <h2 id="pick-h" style="margin-top:0">Pick a song</h2>
+      <p class="hint" id="pick-wait" hidden>You're watching this game. The room is picking songs.</p>
+      <div id="pick-done" hidden>
+        <p><strong>Your pick is in.</strong> It is final. Wait for the others.</p>
+      </div>
+      <div id="pick-ui" hidden>
+        <p class="hint">A pick is final once you tap it.</p>
+        <h3>From your taste file</h3>
+        <p class="hint" id="quick-empty" hidden>Your taste file is empty. Search for a song instead.</p>
+        <ul class="tracks" id="quick" aria-label="Your taste file"></ul>
+        <h3>Search</h3>
+        <form id="search" role="search">
+          <label for="q">Search songs or artists</label>
+          <input id="q" name="q" type="search" autocomplete="off" required />
+          <button type="submit">Search</button>
+        </form>
+        <p class="hint" id="search-status" role="status"></p>
+        <ul class="tracks" id="results" aria-label="Search results"></ul>
+      </div>
+      <p id="pick-msg" class="error" role="alert"></p>
+    </section>
+
+    <section class="card" id="v-listen" aria-labelledby="listen-h" hidden>
+      <h2 id="listen-h" style="margin-top:0">Listen</h2>
+      <p id="np" aria-live="polite"></p>
+      <button id="unlock" type="button" hidden>Tap to let this phone play</button>
+      <ol class="slots" id="slots" aria-label="Tracks"></ol>
+      <p class="hint" id="audio-msg" role="status"></p>
+      <audio id="audio" preload="none"></audio>
+      <button id="to-vote" type="button" hidden>Go to voting</button>
+    </section>
+
+    <section class="card" id="v-vote" aria-labelledby="vote-h" hidden>
+      <h2 id="vote-h" style="margin-top:0">Vote someone out</h2>
+      <p class="hint" id="vote-note"></p>
+      <div id="vote-ui">
+        <div class="names" id="names"></div>
+      </div>
+      <div id="vote-done" hidden>
+        <p><strong>Your vote is in.</strong> It is final. Wait for the others.</p>
+      </div>
+      <p id="vote-msg" class="error" role="alert"></p>
+    </section>
+
+    <section class="card" id="v-reveal" aria-labelledby="reveal-h" hidden>
+      <h2 id="reveal-h" style="margin-top:0">Reveal</h2>
+      <p id="eject"></p>
+      <ul class="tracks reveal" id="reveal-slots" aria-label="Who picked what"></ul>
+      <p id="winner" class="winner" hidden></p>
+      <button id="next" type="button" hidden>Next round</button>
+      <button id="again" type="button" hidden>Play again</button>
+      <p class="hint" id="reveal-wait" hidden></p>
+      <p id="reveal-msg" class="error" role="alert"></p>
+    </section>
+
+    <section class="card" aria-labelledby="players-h">
+      <h2 id="players-h" style="margin-top:0">Players (<span id="count">{state.members.length}</span>)</h2>
+      <ul class="members" id="members">
+        {state.members.map((m) => <li>{m}{m === state.host && <span class="badge">host</span>}</li>)}
+      </ul>
+    </section>
+
+    <div id="v-lobby">
+      <button id="start" type="button" disabled hidden>Start game</button>
+      <p class="hint" id="start-note" aria-live="polite"></p>
+      <p id="msg" class="error" role="alert"></p>
+    </div>
   </div>
-  <p id="msg" class="error" role="alert"></p>
 </Base>
 <script>
-  type State = { code: string; status: string; host: string; members: string[] };
-  const lobby = document.getElementById("lobby")!;
-  const code = lobby.dataset.code!;
-  const isHost = lobby.dataset.host === "1";
-  const min = Number(lobby.dataset.min);
-  const msg = document.getElementById("msg")!;
-  const start = document.getElementById("start") as HTMLButtonElement | null;
-  const note = document.getElementById("start-note") ?? document.getElementById("wait-note");
+  type Track = { title: string; artist: string; cover?: string };
+  type Found = Track & { id: number };
+  type RevealSlot = Track & { slot: number; owner: string };
+  type Game = {
+    round: number;
+    phase: "pick" | "listen" | "vote" | "reveal";
+    deadline: number | null;
+    nowPlaying: number | null;
+    alive: string[];
+    ghosts: string[];
+    reveal?: { ejected: string | null; wasMole: boolean; slots: RevealSlot[] };
+    winner?: "players" | "moles";
+  };
+  type State = { status: string; host: string; speaker: "host" | "every"; members: string[]; game?: Game };
+  type Me = { role: "player" | "mole" | "ghost" | "spectator"; target?: string };
+  type Dossier = { name: string; taste: Track[]; picks: Track[] };
 
-  function render(s: State) {
-    const list = document.getElementById("members")!;
-    list.replaceChildren(
-      ...s.members.map((name) => {
-        const li = document.createElement("li");
-        li.textContent = name;
-        if (name === s.host) {
-          const b = document.createElement("span");
-          b.className = "badge";
-          b.textContent = "host";
-          li.append(b);
-        }
-        return li;
-      }),
-    );
-    document.getElementById("count")!.textContent = String(s.members.length);
+  const app = document.getElementById("app")!;
+  const code = app.dataset.code!;
+  const myName = app.dataset.me!;
+  const minPlayers = Number(app.dataset.min);
+  const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+  const show = (id: string, on: boolean) => { $(id).hidden = !on; };
+
+  // DOM built from parts, never from markup strings: names and titles are data.
+  function h(tag: string, attrs: Record<string, string> = {}, ...kids: (Node | string)[]): HTMLElement {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    el.append(...kids);
+    return el;
+  }
+  function button(label: string, onClick: () => void, opts: { secondary?: boolean; aria?: string; disabled?: boolean } = {}) {
+    const b = h("button", { type: "button" }, label) as HTMLButtonElement;
+    if (opts.secondary) b.className = "secondary";
+    if (opts.aria) b.setAttribute("aria-label", opts.aria);
+    b.disabled = !!opts.disabled;
+    b.addEventListener("click", onClick);
+    return b;
+  }
+  function trackRow(t: Track, ...extra: (Node | string)[]) {
+    const art = t.cover
+      ? Object.assign(document.createElement("img"), { src: t.cover, alt: "", width: 48, height: 48, loading: "lazy" })
+      : h("div", { class: "nocover" });
+    return h("li", {}, art, h("div", { class: "meta" }, h("strong", {}, t.title), h("span", {}, t.artist)), ...extra);
+  }
+  async function api<T = Record<string, unknown>>(url: string, body?: unknown) {
+    const res = await fetch(url, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    return { res, data: (await res.json().catch(() => ({}))) as T & { error?: string } };
+  }
+  // Drop a rebuild when nothing it draws has changed, so focus survives updates.
+  const sigs = new Map<string, string>();
+  function once(key: string, sig: string, draw: () => void) {
+    if (sigs.get(key) === sig) return;
+    sigs.set(key, sig);
+    draw();
+  }
+  // What this phone has already done this round. Only a convenience for a
+  // reload; the server is the one that refuses a second pick or vote.
+  const done = (kind: string, round: number, set?: boolean) => {
+    const key = `mole:${code}:${kind}:${round}`;
+    try {
+      if (set) sessionStorage.setItem(key, "1");
+      return sessionStorage.getItem(key) === "1";
+    } catch {
+      return !!set;
+    }
+  };
+
+  let state: State | null = null;
+  let me: Me | null = null;
+  let dossier: Dossier | null = null;
+  let slots: number[] = [];
+  let taste: Found[] | null = null;
+  let roleShown = true;
+  let lastKey = "";
+  let announcedLow = "";
+  let clockSkew = 0;
+  const phaseWords = { pick: "Pick a song", listen: "Listen", vote: "Vote", reveal: "Reveal" };
+
+  const announce = (t: string) => { $("announce").textContent = t; };
+  const isHost = () => state?.host === myName;
+  // Phones that make sound: the host's by default, all of them when the table said so.
+  const speakerHere = () => !!state && (state.speaker === "every" || isHost());
+
+  // ---- rendering ----
+
+  function render() {
+    if (!state) return;
+    const g = state.game;
+    const playing = state.status === "playing" && !!g;
+    const over = !!g?.winner;
+    const inGame = playing || over;
+    const phase = g?.phase;
+
+    $("title").textContent = !inGame ? "Table" : over ? "Game over" : `Round ${g!.round}`;
+    show("lobby-code", !inGame || over);
+    show("status", playing && !over);
+    $("status-label").textContent = phase ? phaseWords[phase] : "";
+    show("v-lobby", !inGame);
+    renderMembers();
+    renderLobby();
+    renderRole(playing && phase !== "reveal" && !over);
+    renderPick(playing && phase === "pick");
+    renderListen(playing && (phase === "listen" || phase === "vote"));
+    renderVote(playing && phase === "vote");
+    renderReveal(inGame && (phase === "reveal" || over));
+    tick();
+  }
+
+  function renderMembers() {
+    const s = state!;
+    const g = s.game;
+    const inGame = s.status === "playing" && !!g;
+    once("members", JSON.stringify([s.members, s.host, inGame, g?.alive, g?.ghosts]), () => {
+      $("members").replaceChildren(
+        ...s.members.map((name) => {
+          const li = h("li", {}, name);
+          const badge = (t: string) => li.append(h("span", { class: "badge" }, t));
+          if (name === s.host) badge("host");
+          if (inGame && g!.ghosts.includes(name)) badge("out");
+          else if (inGame && !g!.alive.includes(name)) badge("watching");
+          return li;
+        }),
+      );
+      $("count").textContent = String(s.members.length);
+    });
+  }
+
+  function renderLobby() {
+    const s = state!;
     const n = s.members.length;
-    const ready = s.status === "playing";
-    if (isHost && start && note) {
-      start.disabled = n < min || ready;
-      note.textContent = ready
-        ? "The game has started. The game screens are coming soon."
-        : n < min
-          ? `Needs at least ${min} players to start (${min - n} more). 4 or more is best.`
-          : n < 4
-            ? "You can start now. 4 or more players is recommended."
-            : "Everyone in? Start when ready.";
-    } else if (note) {
-      note.textContent = ready ? "The game has started. The game screens are coming soon." : "Waiting for the host to start.";
+    const start = $<HTMLButtonElement>("start");
+    show("start", isHost());
+    start.textContent = s.game ? "Play again" : "Start game";
+    start.disabled = n < minPlayers;
+    $("start-note").textContent = isHost()
+      ? n < minPlayers
+        ? `Needs at least ${minPlayers} players to start (${minPlayers - n} more). 4 or more is best.`
+        : n < 4
+          ? "You can start now. 4 or more players is recommended."
+          : "Everyone in? Start when ready."
+      : "Waiting for the host to start.";
+  }
+
+  function renderRole(on: boolean) {
+    show("v-role", on && !!me);
+    if (!on || !me) return;
+    const secret = me.role === "player" || me.role === "mole";
+    show("role-toggle", secret);
+    const open = !secret || roleShown;
+    show("role-body", open);
+    show("role-hidden", !open);
+    $("role-toggle").textContent = open ? "Hide" : "Show";
+    $("role-toggle").setAttribute("aria-expanded", String(open));
+    const text = $("role-text");
+    text.replaceChildren();
+    if (me.role === "player") text.append("You're a player. Pick a song you'd actually play.");
+    else if (me.role === "mole") text.append("You're the mole. This round you're faking ", h("strong", {}, me.target ?? "someone"), ". Pick what they'd pick.");
+    else if (me.role === "ghost") text.append("You were voted out. You still pick, but you can't vote.");
+    else text.append("You're watching this game.");
+    const d = me.role === "mole" ? dossier : null;
+    show("dossier", !!d && open);
+    if (d) {
+      once("dossier", JSON.stringify(d), () => {
+        $("dossier-h").textContent = `What ${d.name} plays`;
+        $("dossier-taste").replaceChildren(...d.taste.map((t) => trackRow(t)));
+        $("dossier-picks").replaceChildren(...d.picks.map((t) => trackRow(t)));
+        show("dossier-none", d.picks.length === 0);
+        if (!d.taste.length) $("dossier-taste").replaceChildren(h("li", {}, "Their taste file is empty."));
+      });
     }
   }
 
-  // The page is signed in (the server redirects otherwise); make sure this
-  // person is a member, then watch the table. EventSource reconnects by itself.
-  fetch(`/api/tables/${code}/join`, { method: "POST" }).finally(() => {
-    const es = new EventSource(`/api/tables/${code}/events`);
-    es.addEventListener("state", (e) => render(JSON.parse((e as MessageEvent).data) as State));
+  function renderPick(on: boolean) {
+    show("v-pick", on && !!me);
+    if (!on || !me) return;
+    const g = state!.game!;
+    const watching = me.role === "spectator";
+    const locked = done("pick", g.round);
+    show("pick-wait", watching);
+    show("pick-done", !watching && locked);
+    show("pick-ui", !watching && !locked);
+    if (!watching && !locked && !taste) loadTaste();
+  }
+
+  function renderListen(on: boolean) {
+    show("v-listen", on);
+    if (!on) return;
+    const g = state!.game!;
+    const host = isHost();
+    const np = g.nowPlaying;
+    const name = (n: number) => `Track ${n + 1}`;
+    $("listen-h").textContent = g.phase === "vote" ? "Listen again" : "Listen";
+    $("np").textContent =
+      np === null
+        ? host
+          ? "Tap a number to play it."
+          : `Waiting for ${state!.host} to play a track.`
+        : speakerHere() && !host
+          ? `${name(np)} is playing on this phone.`
+          : host
+            ? `${name(np)} is playing. Tap a number to play another.`
+            : `${name(np)} is playing on ${state!.host}'s phone.`;
+    once("slots", JSON.stringify([slots, host]), () => {
+      $("slots").replaceChildren(
+        ...slots.map((n) => h("li", {}, host ? button(name(n), () => playByHost(n), { aria: `Play ${name(n)}` }) : h("span", { class: "slot" }, name(n)))),
+      );
+    });
+    for (const [i, li] of [...$("slots").children].entries()) {
+      const active = slots[i] === np;
+      li.classList.toggle("playing", active);
+      if (active) li.setAttribute("aria-current", "true");
+      else li.removeAttribute("aria-current");
+    }
+    show("to-vote", host && g.phase === "listen");
+    show("unlock", speakerHere() && !host && !audioUnlocked);
+  }
+
+  function renderVote(on: boolean) {
+    show("v-vote", on && !!me);
+    if (!on || !me) return;
+    const g = state!.game!;
+    const voter = me.role === "player" || me.role === "mole";
+    const locked = done("vote", g.round);
+    $("vote-note").textContent = !voter
+      ? me.role === "ghost" ? "You were voted out, so you can't vote. You can still listen and talk." : "You're watching this game, so you can't vote."
+      : "Talk it over, then vote for who you think is the mole, or skip. Your vote is final.";
+    show("vote-ui", !locked);
+    show("vote-done", voter && locked);
+    once("names", JSON.stringify([g.alive, voter]), () => {
+      $("names").replaceChildren(
+        ...g.alive.filter((n) => n !== myName).map((n) => button(n, () => vote(n), { disabled: !voter, aria: `Vote for ${n}` })),
+        button("Skip", () => vote("skip"), { secondary: true, disabled: !voter, aria: "Skip: vote for nobody" }),
+      );
+    });
+  }
+
+  function renderReveal(on: boolean) {
+    show("v-reveal", on);
+    if (!on) return;
+    const g = state!.game!;
+    const r = g.reveal;
+    const host = isHost();
+    $("reveal-h").textContent = g.winner ? "Final reveal" : "Reveal";
+    $("eject").textContent = !r
+      ? ""
+      : r.ejected
+        ? `${r.ejected} was voted out. ${r.wasMole ? "They were a mole." : "They were not a mole."}`
+        : "Nobody was voted out.";
+    once("reveal", JSON.stringify(r?.slots ?? []), () => {
+      $("reveal-slots").replaceChildren(
+        ...(r?.slots ?? []).map((t) => {
+          const li = trackRow(t, h("span", { class: "owner" }, `Track ${t.slot + 1}: `, h("strong", {}, t.owner)));
+          return li;
+        }),
+      );
+    });
+    const win = $("winner");
+    win.hidden = !g.winner;
+    win.textContent = g.winner === "players" ? "The players caught every mole." : g.winner === "moles" ? "The moles took over." : "";
+    show("next", host && !g.winner);
+    show("again", host && !!g.winner);
+    $<HTMLButtonElement>("again").disabled = state!.members.length < minPlayers;
+    show("reveal-wait", !host);
+    $("reveal-wait").textContent = g.winner ? "Waiting for the host to play again." : "Waiting for the host to start the next round.";
+  }
+
+  // ---- countdown ----
+
+  function tick() {
+    const g = state?.game;
+    const el = $("countdown");
+    if (!state || !g || g.winner || g.deadline === null) return void (el.textContent = "");
+    const left = Math.max(0, Math.ceil((g.deadline - (Date.now() + clockSkew)) / 1000));
+    el.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+    // Announce once per phase, not every second.
+    const key = `${g.round}:${g.phase}`;
+    if (left <= 10 && left > 0 && announcedLow !== key && (g.phase === "pick" || g.phase === "vote")) {
+      announcedLow = key;
+      announce("10 seconds left.");
+    }
+  }
+  setInterval(tick, 500);
+
+  // ---- loading what the stream doesn't carry ----
+
+  let meSeq = 0;
+  async function refreshMe() {
+    const n = ++meSeq;
+    const res = await fetch(`/api/tables/${code}/me`).catch(() => null);
+    if (!res?.ok || n !== meSeq) return;
+    me = (await res.json()) as Me;
+    render();
+    if (me.role === "mole" && state?.game && !state.game.winner) refreshDossier();
+  }
+
+  let dossierSeq = 0;
+  async function refreshDossier() {
+    const n = ++dossierSeq;
+    const res = await fetch(`/api/tables/${code}/dossier`).catch(() => null);
+    if (n !== dossierSeq) return;
+    dossier = res?.ok ? ((await res.json()) as Dossier) : null;
+    render();
+  }
+
+  let slotsSeq = 0;
+  async function refreshSlots() {
+    const n = ++slotsSeq;
+    const res = await fetch(`/api/tables/${code}/round`).catch(() => null);
+    if (!res?.ok || n !== slotsSeq) return;
+    slots = ((await res.json()) as { slots: { slot: number }[] }).slots.map((s) => s.slot);
+    render();
+  }
+
+  async function loadTaste() {
+    taste = [];
+    const { res, data } = await api<Found[]>("/api/taste");
+    taste = res.ok && Array.isArray(data) ? data : [];
+    $("quick-empty").hidden = taste.length > 0;
+    $("quick").replaceChildren(...taste.map((t) => pickRow(t)));
+  }
+
+  // ---- picking, voting, hosting ----
+
+  function pickRow(t: Found) {
+    return trackRow(t, button("Pick", () => pick(t.id, t), { aria: `Pick ${t.title} by ${t.artist}` }));
+  }
+
+  let picking = false;
+  async function pick(id: number, t: Found) {
+    if (picking || !state?.game) return;
+    picking = true;
+    const round = state.game.round;
+    const msg = $("pick-msg");
+    msg.textContent = "";
+    const { res, data } = await api("/api/tables/" + code + "/pick", { trackId: id });
+    picking = false;
+    // Already picked (say, on another tab) is the same lock as just picking.
+    if (res.ok || (res.status === 409 && /already picked/i.test(data.error ?? ""))) {
+      done("pick", round, true);
+      announce(`Your pick is in.`);
+      return render();
+    }
+    msg.textContent = res.status === 409 ? "Too late: picking is over for this round." : (data.error ?? `Could not pick ${t.title}.`);
+  }
+
+  document.getElementById("search")!.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    $("pick-msg").textContent = "";
+    $("search-status").textContent = "Searching...";
+    const { res, data } = await api<Found[]>(`/api/search?q=${encodeURIComponent($<HTMLInputElement>("q").value.trim())}`);
+    if (!res.ok || !Array.isArray(data)) {
+      $("search-status").textContent = "";
+      return void ($("pick-msg").textContent = (data as { error?: string }).error ?? "Search failed.");
+    }
+    $("search-status").textContent = data.length ? `${data.length} results` : "No results.";
+    $("results").replaceChildren(...data.map((t) => pickRow(t)));
   });
 
-  start?.addEventListener("click", async () => {
-    const res = await fetch(`/api/tables/${code}/start`, { method: "POST" });
-    msg.textContent = res.ok ? "" : ((await res.json().catch(() => ({}))) as { error?: string }).error ?? "Could not start.";
+  let voting = false;
+  async function vote(choice: string) {
+    if (voting || !state?.game) return;
+    voting = true;
+    const round = state.game.round;
+    $("vote-msg").textContent = "";
+    const { res, data } = await api("/api/tables/" + code + "/vote", { name: choice });
+    voting = false;
+    if (res.ok || (res.status === 409 && /final/i.test(data.error ?? ""))) {
+      done("vote", round, true);
+      announce("Your vote is in.");
+      return render();
+    }
+    $("vote-msg").textContent = res.status === 409 ? "Too late: voting is over." : (data.error ?? "Could not vote.");
+  }
+
+  $("start").addEventListener("click", async () => {
+    const { res, data } = await api(`/api/tables/${code}/start`, {});
+    $("msg").textContent = res.ok ? "" : (data.error ?? "Could not start.");
+  });
+  $("again").addEventListener("click", async () => {
+    const { res, data } = await api(`/api/tables/${code}/start`, {});
+    $("reveal-msg").textContent = res.ok ? "" : (data.error ?? "Could not start a new game.");
+  });
+  for (const [id, msgId] of [["next", "reveal-msg"], ["to-vote", "audio-msg"]] as const) {
+    $(id).addEventListener("click", async () => {
+      const { res, data } = await api(`/api/tables/${code}/advance`, {});
+      $(msgId).textContent = res.ok ? "" : (data.error ?? "Could not move on.");
+    });
+  }
+
+  $("role-toggle").addEventListener("click", () => {
+    roleShown = !roleShown;
+    render();
+  });
+
+  // ---- audio: a plain element, no title, no artwork ----
+
+  const audio = $<HTMLAudioElement>("audio");
+  // A silent clip: playing it from a tap tells the browser this page may make sound.
+  const SILENCE = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+  let audioUnlocked = false;
+  let playingSlot: number | null = null;
+  let playSeq = 0;
+
+  async function playSlot(n: number) {
+    const seq = ++playSeq;
+    playingSlot = n;
+    $("audio-msg").textContent = "";
+    const { res, data } = await api<{ url: string }>(`/api/tables/${code}/round/slots/${n}/audio`);
+    if (seq !== playSeq) return;
+    if (!res.ok) return void ($("audio-msg").textContent = data.error ?? "That track has no preview.");
+    audio.src = data.url;
+    try {
+      await audio.play();
+      audioUnlocked = true;
+    } catch {
+      // The browser wants a tap first; the unlock button waits for one.
+      audioUnlocked = false;
+      $("audio-msg").textContent = "Tap the button to let this phone play.";
+    }
+    render();
+  }
+
+  function stopAudio() {
+    playSeq++;
+    playingSlot = null;
+    audio.pause();
+  }
+
+  async function playByHost(n: number) {
+    // Play right here, inside the tap, then tell everyone else.
+    void playSlot(n);
+    const { res, data } = await api(`/api/tables/${code}/round/play`, { slot: n });
+    if (!res.ok) $("audio-msg").textContent = data.error ?? "Could not play that track.";
+  }
+
+  $("unlock").addEventListener("click", async () => {
+    audio.src = SILENCE;
+    await audio.play().catch(() => {});
+    audioUnlocked = true;
+    $("audio-msg").textContent = "";
+    const np = state?.game?.nowPlaying;
+    if (np !== null && np !== undefined) void playSlot(np);
+    else render();
+  });
+
+  // Speaker phones follow game.nowPlaying; everyone else stays silent.
+  function syncAudio() {
+    const g = state?.game;
+    const live = state?.status === "playing" && g && (g.phase === "listen" || g.phase === "vote");
+    if (!live || !speakerHere() || g.nowPlaying === null) {
+      if (playingSlot !== null) stopAudio();
+      return;
+    }
+    if (g.nowPlaying !== playingSlot) void playSlot(g.nowPlaying);
+  }
+
+  // ---- leaving ----
+
+  async function leave() {
+    await api(`/api/tables/${code}/leave`, {});
+    location.href = "/";
+  }
+  $("leave").addEventListener("click", () => {
+    if (state?.status !== "playing") return void leave();
+    show("leave-confirm", true);
+    $("leave-yes").focus();
+  });
+  $("leave-no").addEventListener("click", () => {
+    show("leave-confirm", false);
+    $("leave").focus();
+  });
+  $("leave-yes").addEventListener("click", () => void leave());
+  $("leave-confirm").addEventListener("keydown", (e) => {
+    if ((e as KeyboardEvent).key === "Escape") $("leave-no").click();
+  });
+
+  // ---- following the table ----
+
+  function onState(next: State) {
+    const prev = state;
+    state = next;
+    const g = next.game;
+    const key = `${next.status}|${g?.round}|${g?.phase}`;
+    if (key !== lastKey) {
+      const newRound = !prev || prev.game?.round !== g?.round || prev.status !== next.status;
+      lastKey = key;
+      roleShown = g?.phase === "pick";
+      $("pick-msg").textContent = "";
+      $("vote-msg").textContent = "";
+      $("reveal-msg").textContent = "";
+      if (g?.phase === "pick") slots = [];
+      if (newRound) {
+        me = null;
+        dossier = null;
+      }
+      if (g && next.status === "playing") announce(g.phase === "pick" ? `Round ${g.round}. Pick a song.` : `${phaseWords[g.phase]}.`);
+      else if (g?.winner) announce(g.winner === "players" ? "Game over. The players caught every mole." : "Game over. The moles took over.");
+      void refreshMe();
+      if (g && (g.phase === "listen" || g.phase === "vote")) void refreshSlots();
+    }
+    render();
+    syncAudio();
+  }
+
+  // The page is signed in (the server redirects otherwise); make sure this
+  // person is a member, then watch the table. EventSource reconnects by itself,
+  // and on every reopening we ask again who we are, to land in the right view.
+  api(`/api/tables/${code}/join`, {}).finally(async () => {
+    const first = await fetch(`/api/tables/${code}`).catch(() => null);
+    const date = first?.headers.get("date");
+    if (date) clockSkew = Date.parse(date) - Date.now() + 500;
+    const es = new EventSource(`/api/tables/${code}/events`);
+    es.addEventListener("state", (e) => onState(JSON.parse((e as MessageEvent).data) as State));
+    let opened = false;
+    es.addEventListener("open", () => {
+      if (opened) void refreshMe();
+      opened = true;
+    });
   });
 </script>
