@@ -1,4 +1,75 @@
 ---
 import Base from "../layouts/Base.astro";
+import { personFromCookies } from "../lib/auth.ts";
+const me = personFromCookies(Astro.cookies);
+const next = Astro.url.searchParams.get("next") ?? "";
+const safeNext = /^\/t\/[A-Za-z]{4}$/.test(next) ? next : "";
+if (me && safeNext) return Astro.redirect(safeNext);
 ---
-<Base title="Mole"><h1>Mole</h1></Base>
+<Base title="Mole">
+  <h1>Mole</h1>
+  {me ? (
+    <p>Signed in as <strong>{me.name}</strong>.</p>
+    <section class="card" aria-labelledby="create-h">
+      <h2 id="create-h">Start a table</h2>
+      <p class="hint">You get a code to share with the room.</p>
+      <button id="create" type="button">Create a table</button>
+    </section>
+    <section class="card" aria-labelledby="join-h">
+      <h2 id="join-h">Join a table</h2>
+      <form id="join-code" class="row">
+        <div>
+          <label for="code">Table code</label>
+          <input id="code" name="code" maxlength="4" autocomplete="off" autocapitalize="characters" required />
+        </div>
+        <button type="submit">Join</button>
+      </form>
+    </section>
+    <p id="msg" class="error" role="alert"></p>
+  ) : (
+    <p>A party game for friends in one room. Pick a name and a PIN to get in.</p>
+    <form id="sign-in" class="card" data-next={safeNext}>
+      <label for="name">Name</label>
+      <input id="name" name="name" maxlength="24" autocomplete="username" required />
+      <label for="pin">PIN (4 to 8 digits)</label>
+      <input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4,8}" minlength="4" maxlength="8" autocomplete="current-password" required />
+      <p class="hint">New name? It is yours with this PIN. Taken? Enter its PIN to sign back in.</p>
+      <p id="msg" class="error" role="alert"></p>
+      <button type="submit">Continue</button>
+    </form>
+  )}
+  <p class="hint"><a href="/readme/">About this project</a></p>
+</Base>
+<script>
+  const msg = document.getElementById("msg");
+  const say = (t: string) => { if (msg) msg.textContent = t; };
+  async function post(url: string, body: unknown) {
+    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    return { res, data: (await res.json().catch(() => ({}))) as Record<string, string> };
+  }
+
+  document.getElementById("sign-in")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const form = e.currentTarget as HTMLFormElement;
+    const { res, data } = await post("/api/join", {
+      name: (form.elements.namedItem("name") as HTMLInputElement).value,
+      pin: (form.elements.namedItem("pin") as HTMLInputElement).value,
+    });
+    if (!res.ok) return say(data.error ?? "Could not sign in.");
+    location.href = form.dataset.next || "/";
+  });
+
+  document.getElementById("create")?.addEventListener("click", async () => {
+    const { res, data } = await post("/api/tables", {});
+    if (!res.ok) return say(data.error ?? "Could not create a table.");
+    location.href = `/t/${data.code}`;
+  });
+
+  document.getElementById("join-code")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const code = (document.getElementById("code") as HTMLInputElement).value.trim().toUpperCase();
+    const { res, data } = await post(`/api/tables/${encodeURIComponent(code)}/join`, {});
+    if (!res.ok) return say(data.error ?? "Could not join that table.");
+    location.href = `/t/${code}`;
+  });
+</script>

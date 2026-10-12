@@ -1,0 +1,91 @@
+---
+import Base from "../../layouts/Base.astro";
+import { personFromCookies } from "../../lib/auth.ts";
+import { MIN_PLAYERS, isHost, normaliseCode, publicState } from "../../lib/tables.ts";
+
+const code = normaliseCode(Astro.params.code);
+const state = publicState(code);
+if (!state) return new Response("No such table.", { status: 404 });
+const me = personFromCookies(Astro.cookies);
+if (!me) return Astro.redirect(`/?next=/t/${code}`);
+const host = isHost(code, me.id);
+---
+<Base title={`Table ${code}`}>
+  <p><a href="/">Leave the lobby</a></p>
+  <h1>Table</h1>
+  <p class="hint" id="code-label">Share this code with the room</p>
+  <div class="code" aria-labelledby="code-label" id="table-code">{code}</div>
+
+  <section class="card" aria-labelledby="players-h">
+    <h2 id="players-h" style="margin-top:0">Players (<span id="count">{state.members.length}</span>)</h2>
+    <ul class="members" id="members" aria-live="polite">
+      {state.members.map((m) => <li>{m}{m === state.host && <span class="badge">host</span>}</li>)}
+    </ul>
+  </section>
+
+  <div id="lobby" data-code={code} data-host={host ? "1" : "0"} data-min={MIN_PLAYERS} data-status={state.status}>
+    {host ? (
+      <>
+        <button id="start" type="button" disabled>Start game</button>
+        <p class="hint" id="start-note" aria-live="polite"></p>
+      </>
+    ) : (
+      <p class="hint" id="wait-note" aria-live="polite">Waiting for the host to start.</p>
+    )}
+  </div>
+  <p id="msg" class="error" role="alert"></p>
+</Base>
+<script>
+  type State = { code: string; status: string; host: string; members: string[] };
+  const lobby = document.getElementById("lobby")!;
+  const code = lobby.dataset.code!;
+  const isHost = lobby.dataset.host === "1";
+  const min = Number(lobby.dataset.min);
+  const msg = document.getElementById("msg")!;
+  const start = document.getElementById("start") as HTMLButtonElement | null;
+  const note = document.getElementById("start-note") ?? document.getElementById("wait-note");
+
+  function render(s: State) {
+    const list = document.getElementById("members")!;
+    list.replaceChildren(
+      ...s.members.map((name) => {
+        const li = document.createElement("li");
+        li.textContent = name;
+        if (name === s.host) {
+          const b = document.createElement("span");
+          b.className = "badge";
+          b.textContent = "host";
+          li.append(b);
+        }
+        return li;
+      }),
+    );
+    document.getElementById("count")!.textContent = String(s.members.length);
+    const n = s.members.length;
+    const ready = s.status === "lobby_ready";
+    if (isHost && start && note) {
+      start.disabled = n < min || ready;
+      note.textContent = ready
+        ? "Table is ready. The game itself is coming soon."
+        : n < min
+          ? `Needs at least ${min} players to start (${min - n} more). 4 or more is best.`
+          : n < 4
+            ? "You can start now. 4 or more players is recommended."
+            : "Everyone in? Start when ready.";
+    } else if (note) {
+      note.textContent = ready ? "Table is ready. The game itself is coming soon." : "Waiting for the host to start.";
+    }
+  }
+
+  // The page is signed in (the server redirects otherwise); make sure this
+  // person is a member, then watch the table. EventSource reconnects by itself.
+  fetch(`/api/tables/${code}/join`, { method: "POST" }).finally(() => {
+    const es = new EventSource(`/api/tables/${code}/events`);
+    es.addEventListener("state", (e) => render(JSON.parse((e as MessageEvent).data) as State));
+  });
+
+  start?.addEventListener("click", async () => {
+    const res = await fetch(`/api/tables/${code}/start`, { method: "POST" });
+    msg.textContent = res.ok ? "" : ((await res.json().catch(() => ({}))) as { error?: string }).error ?? "Could not start.";
+  });
+</script>
