@@ -39,10 +39,25 @@ function toTrack(r: Raw): Track | null {
   return { id: r.id, title: r.title, artist: r.artist.name, album: r.album?.title, cover: r.album?.cover_medium };
 }
 
-export async function searchTracks(q: string, limit = 25): Promise<Track[]> {
+async function searchOnce(q: string, limit: number): Promise<Track[]> {
   const body = await get(`/search?q=${encodeURIComponent(q)}&limit=${limit}`);
   const rows = (body?.data as Raw[] | undefined) ?? [];
   return rows.map(toTrack).filter((t): t is Track => t !== null).slice(0, limit);
+}
+
+export async function searchTracks(q: string, limit = 25): Promise<Track[]> {
+  let tracks = await searchOnce(q, limit);
+  // For some short queries (observed: "pop") Deezer returns only the few exact
+  // title matches. A trailing space asks it for the loose match instead, so top
+  // the list up from that rather than hand back three results.
+  if (tracks.length < limit) {
+    const seen = new Set(tracks.map((t) => t.id));
+    const more = (await searchOnce(`${q} `, limit)).filter((t) => !seen.has(t.id));
+    tracks = [...tracks, ...more].slice(0, limit);
+  }
+  // Whatever someone picks next was probably just on their screen.
+  for (const t of tracks) remember(t);
+  return tracks;
 }
 
 // Track metadata rarely changes, so a small cache saves round trips.
@@ -50,15 +65,17 @@ const cache = new Map<number, { track: Track; at: number }>();
 const TTL = 60 * 60 * 1000;
 const CACHE_MAX = 500;
 
+function remember(track: Track) {
+  if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value!);
+  cache.set(track.id, { track, at: Date.now() });
+}
+
 export async function getTrack(id: number): Promise<Track | null> {
   const hit = cache.get(id);
   if (hit && Date.now() - hit.at < TTL) return hit.track;
   const body = await get(`/track/${id}`);
   const track = body ? toTrack(body as Raw) : null;
-  if (track) {
-    if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value!);
-    cache.set(id, { track, at: Date.now() });
-  }
+  if (track) remember(track);
   return track;
 }
 
