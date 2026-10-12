@@ -19,7 +19,7 @@ export const POST: APIRoute = async ({ params, cookies, request }) => {
   if (!pre.ok) return json({ error: pre.error }, pre.status);
 
   // Title and artist are kept for the reveal. Own taste file first, then Deezer.
-  let track: { id: number; title: string; artist: string } | null | undefined = listTaste(me.id).find((t) => t.id === id);
+  let track: { id: number; title: string; artist: string; cover?: string | null } | null | undefined = listTaste(me.id).find((t) => t.id === id);
   try {
     track ??= await getTrack(id);
   } catch (e) {
@@ -28,6 +28,6 @@ export const POST: APIRoute = async ({ params, cookies, request }) => {
   }
   if (!track) return json({ error: "No such track." }, 400);
   // recordPick checks the phase and deadline again: the lookup took time.
-  const res = recordPick(code, me.id, { id, title: track.title, artist: track.artist });
+  const res = recordPick(code, me.id, { id, title: track.title, artist: track.artist, cover: track.cover });
   return res.ok ? json({ ok: true }) : json({ error: res.error }, res.status);
 };

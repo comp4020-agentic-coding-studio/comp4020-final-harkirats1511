@@ -102,7 +102,7 @@ export type PublicGame = {
   reveal?: {
     ejected: string | null;
     wasMole: boolean;
-    slots: { slot: number; owner: string; title: string; artist: string }[];
+    slots: { slot: number; owner: string; title: string; artist: string; cover?: string }[];
   };
   winner?: string;
 };
@@ -139,12 +139,13 @@ function publicGame(code: string): PublicGame | undefined {
   if (g.phase === "reveal" || g.winner) {
     const ejected = inGame.find((p) => p.id === g.ejectedPersonId);
     const slots = db
-      .select({ slot: picks.slot, owner: people.name, title: picks.title, artist: picks.artist })
+      .select({ slot: picks.slot, owner: people.name, title: picks.title, artist: picks.artist, cover: picks.cover })
       .from(picks)
       .innerJoin(people, eq(people.id, picks.personId))
       .where(and(eq(picks.gameId, g.id), eq(picks.round, g.round), isNotNull(picks.slot)))
       .orderBy(asc(picks.slot))
-      .all() as { slot: number; owner: string; title: string; artist: string }[];
+      .all()
+      .map((r) => ({ ...r, slot: r.slot!, cover: r.cover ?? undefined }));
     out.reveal = {
       // A person who left after being ejected is gone from the table; their name still shows.
       ejected: g.ejectedPersonId ? (ejected?.name ?? ejectedName(g.ejectedPersonId)) : null,

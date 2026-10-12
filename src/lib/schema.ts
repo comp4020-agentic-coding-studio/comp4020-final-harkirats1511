@@ -151,6 +151,8 @@ export const picks = sqliteTable(
     trackId: integer("track_id").notNull(),
     title: text("title").notNull(),
     artist: text("artist").notNull(),
+    // Kept with the title for the reveal and for a mole's dossier.
+    cover: text("cover"),
     slot: integer("slot"),
     pickedAt: integer("picked_at").notNull(),
   },

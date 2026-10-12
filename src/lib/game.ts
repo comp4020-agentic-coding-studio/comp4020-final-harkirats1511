@@ -279,14 +279,14 @@ export function checkPick(code: string, personId: string): { ok: true; game: Gam
 // A pick is final once made: changing it would let someone probe the others'
 // choices, and nothing in the rules asks for it.
 export function recordPick(
-  code: string, personId: string, track: { id: number; title: string; artist: string },
+  code: string, personId: string, track: { id: number; title: string; artist: string; cover?: string | null },
 ): { ok: true } | Fail {
   const res = db.transaction((tx): { ok: true } | Fail => {
     const checked = checkPick(code, personId);
     if (!checked.ok) return checked;
     const { game } = checked;
     tx.insert(picks)
-      .values({ gameId: game.id, round: game.round, personId, trackId: track.id, title: track.title, artist: track.artist, pickedAt: Date.now() })
+      .values({ gameId: game.id, round: game.round, personId, trackId: track.id, title: track.title, artist: track.artist, cover: track.cover ?? null, pickedAt: Date.now() })
       .run();
     settle(tx, code);
     return { ok: true };
@@ -444,13 +444,13 @@ export function dossierFor(code: string, personId: string) {
     .all()
     .map((r) => ({ title: r.title, artist: r.artist, ...(r.cover ? { cover: r.cover } : {}) }));
   const past = db
-    .select({ title: picks.title, artist: picks.artist })
+    .select({ title: picks.title, artist: picks.artist, cover: picks.cover })
     .from(picks)
     .where(and(eq(picks.personId, t.id), or(ne(picks.gameId, g.id), ne(picks.round, g.round))))
     .orderBy(desc(picks.pickedAt))
     .limit(DOSSIER_PICKS)
     .all();
-  return { name, taste, picks: past };
+  return { name, taste, picks: past.map((r) => ({ title: r.title, artist: r.artist, ...(r.cover ? { cover: r.cover } : {}) })) };
 }
 
 // The host says which anonymous slot is playing; every phone follows it.
