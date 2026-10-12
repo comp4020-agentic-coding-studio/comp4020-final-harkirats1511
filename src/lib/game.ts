@@ -1,7 +1,7 @@
 import { randomInt, randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { db } from "./db.ts";
-import { gamePlayers, games, people, picks, tableMembers, tables, targets, votes } from "./schema.ts";
+import { gamePlayers, games, people, picks, tableMembers, tables, targets, tasteTracks, votes } from "./schema.ts";
 import {
   currentGame, defaultMoles, MAX_PLAYERS, maxMoles, MIN_PLAYERS, notifyTable, tableOptions,
 } from "./tables.ts";
@@ -150,7 +150,7 @@ function step(d: Tx, g: Game) {
   if (g.phase === "pick") {
     const slots = assignSlots(d, g);
     d.update(games)
-      .set({ phase: "listen", deadline: now + slots * LISTEN_MS_PER_SLOT + LISTEN_SLACK_MS })
+      .set({ phase: "listen", nowPlaying: null, deadline: now + slots * LISTEN_MS_PER_SLOT + LISTEN_SLACK_MS })
       .where(eq(games.id, g.id))
       .run();
   } else if (g.phase === "listen") {
@@ -159,7 +159,7 @@ function step(d: Tx, g: Game) {
     resolveVote(d, g);
   } else if (g.phase === "reveal") {
     d.update(games)
-      .set({ round: g.round + 1, phase: "pick", deadline: now + t.pickSeconds * 1000, ejectedPersonId: null })
+      .set({ round: g.round + 1, phase: "pick", deadline: now + t.pickSeconds * 1000, ejectedPersonId: null, nowPlaying: null })
       .where(eq(games.id, g.id))
       .run();
     assignTargets(d, g.id, g.round + 1);
@@ -413,4 +413,60 @@ export function slotTrackId(code: string, slot: number): number | Fail {
     .where(and(eq(picks.gameId, g.id), eq(picks.round, g.round), eq(picks.slot, slot)))
     .get();
   return row ? row.id : fail(404, "No such slot.");
+}
+
+// ---- the mole's dossier and the speaker's now-playing ----
+
+const DOSSIER_PICKS = 10;
+
+// What a mole studies about this round's target: their taste file and what they
+// picked in earlier rounds and games here, most recent first. Only the current
+// round's pick is left out, since it is still a secret. Null for anyone but a
+// mole with a target. Names and tracks only: no ids, no PIN.
+export function dossierFor(code: string, personId: string) {
+  const g = currentGame(code);
+  if (!g || g.winner) return null;
+  const me = playerRow(g, personId);
+  if (!me || me.role !== "mole" || me.ejectedRound !== null) return null;
+  const t = db
+    .select({ id: targets.targetPersonId })
+    .from(targets)
+    .where(and(eq(targets.gameId, g.id), eq(targets.round, g.round), eq(targets.molePersonId, personId)))
+    .get();
+  if (!t) return null;
+  const name = db.select({ n: people.name }).from(people).where(eq(people.id, t.id)).get()?.n;
+  if (!name) return null;
+  const taste = db
+    .select({ title: tasteTracks.title, artist: tasteTracks.artist, cover: tasteTracks.cover })
+    .from(tasteTracks)
+    .where(eq(tasteTracks.personId, t.id))
+    .orderBy(asc(tasteTracks.addedAt), sql`rowid`)
+    .all()
+    .map((r) => ({ title: r.title, artist: r.artist, ...(r.cover ? { cover: r.cover } : {}) }));
+  const past = db
+    .select({ title: picks.title, artist: picks.artist })
+    .from(picks)
+    .where(and(eq(picks.personId, t.id), or(ne(picks.gameId, g.id), ne(picks.round, g.round))))
+    .orderBy(desc(picks.pickedAt))
+    .limit(DOSSIER_PICKS)
+    .all();
+  return { name, taste, picks: past };
+}
+
+// The host says which anonymous slot is playing; every phone follows it.
+export function setNowPlaying(code: string, slot: number): { ok: true } | Fail {
+  const res = db.transaction((tx): { ok: true } | Fail => {
+    const g = currentGame(code);
+    if (!g || g.winner || (g.phase !== "listen" && g.phase !== "vote")) return fail(409, "Nothing to play right now.");
+    const exists = tx
+      .select({ s: picks.slot })
+      .from(picks)
+      .where(and(eq(picks.gameId, g.id), eq(picks.round, g.round), eq(picks.slot, slot)))
+      .get();
+    if (!exists) return fail(400, "No such slot.");
+    tx.update(games).set({ nowPlaying: slot }).where(eq(games.id, g.id)).run();
+    return { ok: true };
+  });
+  if (res.ok) notifyTable(code);
+  return res;
 }

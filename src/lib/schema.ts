@@ -96,6 +96,9 @@ export const games = sqliteTable(
     deadline: integer("deadline"),
     // Who the last vote ejected (null: nobody); read in phase reveal.
     ejectedPersonId: text("ejected_person_id"),
+    // The anonymous slot the host has playing now, or null; public, it says
+    // which number is playing and nothing about whose it is.
+    nowPlaying: integer("now_playing"),
     // "players" | "moles" once the game is over.
     winner: text("winner"),
     startedAt: integer("started_at").notNull(),

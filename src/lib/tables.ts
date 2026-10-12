@@ -96,6 +96,7 @@ export type PublicGame = {
   round: number;
   phase: string;
   deadline: number | null;
+  nowPlaying: number | null;
   alive: string[];
   ghosts: string[];
   reveal?: {
@@ -130,6 +131,7 @@ function publicGame(code: string): PublicGame | undefined {
     round: g.round,
     phase: g.phase,
     deadline: g.deadline,
+    nowPlaying: g.nowPlaying,
     alive: inGame.filter((p) => p.ejected === null).map((p) => p.name),
     ghosts: inGame.filter((p) => p.ejected !== null).map((p) => p.name),
   };
