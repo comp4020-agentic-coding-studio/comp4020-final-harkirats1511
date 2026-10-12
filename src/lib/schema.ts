@@ -37,8 +37,14 @@ export const tables = sqliteTable("tables", {
   hostPersonId: text("host_person_id")
     .notNull()
     .references(() => people.id),
-  // "open" -> "lobby_ready" now; later phases add the game states.
+  // "open" (lobby) -> "playing" -> "finished"; a finished table can start again.
   status: text("status").notNull().default("open"),
+  // Options chosen when the table is made. Seconds; moles null means the default
+  // for the player count; speaker is "host" or "every".
+  pickSeconds: integer("pick_seconds").notNull().default(60),
+  voteSeconds: integer("vote_seconds").notNull().default(45),
+  speaker: text("speaker").notNull().default("host"),
+  moles: integer("moles"),
   createdAt: integer("created_at").notNull(),
 });
 
@@ -72,4 +78,92 @@ export const tasteTracks = sqliteTable(
     addedAt: integer("added_at").notNull(),
   },
   (t) => [primaryKey({ columns: [t.personId, t.trackId] })],
+);
+
+// One game at a table; a table can play several, the latest is the current one.
+// Everything the engine needs to resume after a restart lives in these rows.
+export const games = sqliteTable(
+  "games",
+  {
+    id: text("id").primaryKey(),
+    tableCode: text("table_code")
+      .notNull()
+      .references(() => tables.code, { onDelete: "cascade" }),
+    round: integer("round").notNull(),
+    // "pick" -> "listen" -> "vote" -> "reveal", then the next round's pick.
+    phase: text("phase").notNull(),
+    // Epoch ms the phase ends by, or null when only the host moves it on.
+    deadline: integer("deadline"),
+    // Who the last vote ejected (null: nobody); read in phase reveal.
+    ejectedPersonId: text("ejected_person_id"),
+    // "players" | "moles" once the game is over.
+    winner: text("winner"),
+    startedAt: integer("started_at").notNull(),
+  },
+  (t) => [index("games_table").on(t.tableCode)],
+);
+
+// Who is playing. Members with no row here joined after the start and spectate.
+export const gamePlayers = sqliteTable(
+  "game_players",
+  {
+    gameId: text("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "cascade" }),
+    personId: text("person_id")
+      .notNull()
+      .references(() => people.id),
+    role: text("role").notNull(), // "player" | "mole"
+    // The round they were voted out in: from then on a ghost.
+    ejectedRound: integer("ejected_round"),
+    left: integer("left").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.gameId, t.personId] })],
+);
+
+// Each mole's target for a round.
+export const targets = sqliteTable(
+  "targets",
+  {
+    gameId: text("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "cascade" }),
+    round: integer("round").notNull(),
+    molePersonId: text("mole_person_id").notNull(),
+    targetPersonId: text("target_person_id").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.gameId, t.round, t.molePersonId] })],
+);
+
+// A person's pick for a round. slot is the anonymous position it plays in,
+// shuffled once when listening starts and then fixed.
+export const picks = sqliteTable(
+  "picks",
+  {
+    gameId: text("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "cascade" }),
+    round: integer("round").notNull(),
+    personId: text("person_id").notNull(),
+    trackId: integer("track_id").notNull(),
+    title: text("title").notNull(),
+    artist: text("artist").notNull(),
+    slot: integer("slot"),
+    pickedAt: integer("picked_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.gameId, t.round, t.personId] })],
+);
+
+// A vote, final once cast. choice is the person voted for, null for "skip".
+export const votes = sqliteTable(
+  "votes",
+  {
+    gameId: text("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "cascade" }),
+    round: integer("round").notNull(),
+    voterPersonId: text("voter_person_id").notNull(),
+    choice: text("choice"),
+  },
+  (t) => [primaryKey({ columns: [t.gameId, t.round, t.voterPersonId] })],
 );
