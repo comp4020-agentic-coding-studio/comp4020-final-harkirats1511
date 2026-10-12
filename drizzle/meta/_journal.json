@@ -15,6 +15,13 @@
       "when": 1791795712719,
       "tag": "0001_square_power_man",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791796623073,
+      "tag": "0002_talented_meteorite",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,1 @@
+ALTER TABLE `people` ADD `pin_params` text;

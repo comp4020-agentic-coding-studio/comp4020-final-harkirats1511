@@ -12,6 +12,9 @@ export const people = sqliteTable(
     // scrypt output and its per-person salt, both hex. Never leaves the server.
     pinHash: text("pin_hash").notNull(),
     pinSalt: text("pin_salt").notNull(),
+    // scrypt cost as "N:r:p". Null means Node's defaults (16384:8:1), which is
+    // how every hash made before this column existed was computed.
+    pinParams: text("pin_params"),
     createdAt: integer("created_at").notNull(),
   },
   (t) => [uniqueIndex("people_name_nocase").on(sql`lower(${t.name})`)],

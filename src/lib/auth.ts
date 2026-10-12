@@ -5,7 +5,12 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "./db.ts";
 import { people, sessions } from "./schema.ts";
 
-const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
+const scrypt = promisify(scryptCb) as (
+  pw: string,
+  salt: Buffer,
+  len: number,
+  opts: { N: number; r: number; p: number; maxmem: number },
+) => Promise<Buffer>;
 
 export const COOKIE = "mole_session";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 90;
@@ -22,17 +27,46 @@ export function validPin(raw: unknown): string | null {
   return typeof raw === "string" && /^\d{4,8}$/.test(raw) ? raw : null;
 }
 
-async function hashPin(pin: string, salt: Buffer): Promise<string> {
-  return (await scrypt(pin, salt, 32)).toString("hex");
+// PINs are 4 to 8 digits, so the throttle below is the real defence against
+// guessing; scrypt only needs to be non-trivial. N=4096, r=8 costs ~4 MB per
+// hash (Node's default N=16384 costs 16 MB), which matters on a 256 MB machine.
+const NEW_PARAMS = "4096:8:1";
+// What hashes made before pin_params existed used (Node's scrypt defaults).
+const LEGACY_PARAMS = "16384:8:1";
+
+async function hashPin(pin: string, salt: Buffer, params: string): Promise<Buffer> {
+  const [N, r, p] = params.split(":").map(Number);
+  return scrypt(pin, salt, 32, { N, r, p, maxmem: 128 * N * r * 2 });
+}
+
+// At most two hashes in flight, so a burst of sign-ins queues rather than
+// holding many scrypt buffers at once.
+const MAX_HASHING = 2;
+let hashing = 0;
+const waiting: Array<() => void> = [];
+async function limited<T>(fn: () => Promise<T>): Promise<T> {
+  if (hashing >= MAX_HASHING) await new Promise<void>((resolve) => waiting.push(resolve));
+  hashing++;
+  try {
+    return await fn();
+  } finally {
+    hashing--;
+    waiting.shift()?.();
+  }
 }
 
 export async function newPinHash(pin: string) {
   const salt = randomBytes(16);
-  return { pinSalt: salt.toString("hex"), pinHash: await hashPin(pin, salt) };
+  const hash = await limited(() => hashPin(pin, salt, NEW_PARAMS));
+  return { pinSalt: salt.toString("hex"), pinHash: hash.toString("hex"), pinParams: NEW_PARAMS };
 }
 
-export async function pinMatches(pin: string, row: { pinHash: string; pinSalt: string }) {
-  const got = Buffer.from(await hashPin(pin, Buffer.from(row.pinSalt, "hex")), "hex");
+export async function pinMatches(
+  pin: string,
+  row: { pinHash: string; pinSalt: string; pinParams: string | null },
+) {
+  const salt = Buffer.from(row.pinSalt, "hex");
+  const got = await limited(() => hashPin(pin, salt, row.pinParams ?? LEGACY_PARAMS));
   const want = Buffer.from(row.pinHash, "hex");
   return got.length === want.length && timingSafeEqual(got, want);
 }
@@ -41,7 +75,7 @@ export function findPersonByName(name: string) {
   return db.select().from(people).where(sql`lower(${people.name}) = lower(${name})`).get();
 }
 
-export function createPerson(name: string, hash: { pinHash: string; pinSalt: string }) {
+export function createPerson(name: string, hash: { pinHash: string; pinSalt: string; pinParams: string }) {
   const id = randomUUID();
   db.insert(people).values({ id, name, ...hash, createdAt: Date.now() }).run();
   return id;
