@@ -138,6 +138,22 @@ export const targets = sqliteTable(
   (t) => [primaryKey({ columns: [t.gameId, t.round, t.molePersonId] })],
 );
 
+// The theme pair drawn for a round: most of the table gets `majority`, the
+// mole(s) get `mole`. Never sent to anyone until the game is over, except that
+// each person's own side reaches only their own /me.
+export const gameThemes = sqliteTable(
+  "game_themes",
+  {
+    gameId: text("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "cascade" }),
+    round: integer("round").notNull(),
+    majority: text("majority").notNull(),
+    mole: text("mole").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.gameId, t.round] })],
+);
+
 // A person's pick for a round. slot is the anonymous position it plays in,
 // shuffled once when listening starts and then fixed.
 export const picks = sqliteTable(
