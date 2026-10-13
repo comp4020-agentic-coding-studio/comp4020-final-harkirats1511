@@ -331,8 +331,8 @@ ol.slots { list-style: none; padding: 0; margin: 0 0 1rem; display: grid; grid-t
 .slots .record {
   position: absolute; top: 50%; right: -28%; width: 78%; aspect-ratio: 1; margin-top: -39%; border-radius: 50%;
   background:
-    radial-gradient(circle, var(--accent) 0 14%, var(--ink) 15% 17%, transparent 18%),
-    repeating-radial-gradient(circle, var(--ink) 0 2px, var(--ink-2) 3px 4px);
+    radial-gradient(circle, var(--accent) 0 14%, #16161a 15% 17%, transparent 18%),
+    repeating-radial-gradient(circle, #16161a 0 2px, #45434a 3px 4px);
   border: 2px solid var(--ink);
 }
 .slots .record::after { content: ""; position: absolute; top: 12%; left: 50%; width: 3px; height: 22%; background: var(--paper); opacity: 0.7; }
