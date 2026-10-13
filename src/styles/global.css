@@ -356,7 +356,8 @@ ol.slots { list-style: none; padding: 0; margin: 0 0 1rem; display: grid; grid-t
 /* Reveal: sleeves dealt in one by one */
 ul.tracks.reveal > li { padding: 0.9rem 0; animation: deal 450ms var(--ease) backwards; animation-delay: calc(var(--i, 0) * 140ms); }
 @keyframes deal { from { opacity: 0; transform: translate(-30px, -12px) rotate(-4deg); } to { opacity: 1; transform: none; } }
-.owner { grid-column: 2; font-size: var(--step-0); }
+.owner { grid-column: 2; font-size: var(--step-0); display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.owner .avatar { --s: 2rem; }
 .owner .slot-no { font-family: var(--font-mono); font-weight: 800; }
 .eject { font-weight: 700; font-size: var(--step-1); margin: 0 0 1rem; }
 
@@ -407,14 +408,16 @@ details.howto li { margin-bottom: 0.5rem; }
 details.howto summary { font-family: var(--font-display); font-size: var(--step-1); }
 
 /* Character editor (/me) */
-.preview-card { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; padding: 1.25rem; position: sticky; top: 0.5rem; z-index: 2; }
-.preview .avatar-lg { --s: 8rem; }
-.preview-name { margin: 0; font: 400 var(--step-1)/1.2 var(--font-display); overflow-wrap: anywhere; text-align: center; }
+.preview-card { display: flex; align-items: center; gap: 1rem; padding: 0.75rem 1rem; position: sticky; top: 0.5rem; z-index: 2; margin-bottom: 1.25rem; }
+.preview .avatar-lg { --s: 5.5rem; }
+.preview-name { margin: 0; font: 400 var(--step-2)/1.2 var(--font-display); overflow-wrap: anywhere; min-width: 0; }
+#editor { scroll-padding-top: 8rem; }
+html { scroll-padding-top: 8rem; }
 fieldset.part { margin: 0 0 1rem; min-width: 0; }
 fieldset.part legend { font: 400 var(--step-1)/1.2 var(--font-display); padding: 0 0.4rem; margin-left: -0.4rem; background: var(--card); }
 .chips { display: flex; flex-wrap: wrap; gap: 0.6rem; }
 .chip { position: relative; }
-.chip input { position: absolute; opacity: 0; width: 100%; height: 100%; min-height: 0; margin: 0; inset: 0; cursor: pointer; }
+.chip input { position: absolute; opacity: 0; width: 1px; height: 1px; min-height: 0; margin: 0; padding: 0; border: 0; pointer-events: none; }
 .chip label {
   display: flex; align-items: center; justify-content: center; gap: 0.5rem; min-height: 48px; min-width: 48px;
   padding: 0.4rem 0.9rem; margin: 0; border: 2px solid var(--ink); background: var(--card); color: var(--ink);
@@ -429,3 +432,5 @@ fieldset.part legend { font: 400 var(--step-1)/1.2 var(--font-display); padding:
 .status-line.ok { color: var(--ok); }
 .status-line.bad { color: var(--bad); }
 @media (prefers-reduced-motion: reduce) { .chip label { transition: none; } }
+.editor-btns { flex-wrap: wrap; }
+.editor-btns > button { flex: 1 1 9rem; white-space: nowrap; }

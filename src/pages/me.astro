@@ -36,7 +36,7 @@ const current = getAvatar(me.id);
         </fieldset>
       ))}
 
-      <div class="row btns">
+      <div class="row btns editor-btns">
         <button id="save" type="submit">Save character</button>
         <button id="randomise" type="button" class="secondary"><i class="ph-bold ph-dice-five" aria-hidden="true"></i>Randomise</button>
       </div>
@@ -66,9 +66,9 @@ const current = getAvatar(me.id);
     const big = avatar(me, a);
     big.classList.add("avatar-lg");
     preview.replaceChildren(big);
-    // Character chips show that character in the current outfit.
+    // Character chips show each character bare, in the chosen outfit colour.
     for (const el of document.querySelectorAll<HTMLElement>(".chip-badge")) {
-      el.replaceChildren(avatar(me, { ...a, character: el.dataset.char! }));
+      el.replaceChildren(avatar(me, { ...a, character: el.dataset.char!, hat: "none", accessory: "none", aid: "none", mood: "chill" }));
     }
   }
 
