@@ -225,18 +225,18 @@ details.options select { margin-bottom: 0.9rem; }
 .ticket-wrap button { margin-top: 0.5rem; }
 .ticket-label { font: 700 var(--step--1)/1 var(--font-body); }
 
-/* Avatar placeholder (colours from tokens only; see src/ui/avatar.ts) */
-.avatar {
-  flex: none; width: 2.5rem; height: 2.5rem; border-radius: 50%; border: 2px solid var(--ink);
-  display: inline-flex; align-items: center; justify-content: center;
-  font: 400 var(--step-1)/1 var(--font-display);
+/* Avatar badge: drawn by src/ui/avatar.ts. Size it with --s. */
+.avatar { --s: 2.5rem; position: relative; flex: none; display: inline-block; width: var(--s); height: var(--s); }
+.avatar .av-disc { display: block; width: 100%; height: 100%; border-radius: 50%; border: 2px solid var(--ink); overflow: hidden; background: var(--paper-2); }
+.avatar svg { display: block; }
+.avatar .av-aid {
+  position: absolute; right: -12%; bottom: -8%; width: 46%; height: 46%; border-radius: 50%;
+  background: var(--card); border: 2px solid var(--ink); display: flex; align-items: center; justify-content: center;
+  color: var(--ink); font-size: calc(var(--s) * 0.3); line-height: 1;
 }
-.avatar::before { content: attr(data-initial); }
-.av-0 { background: var(--accent); color: var(--accent-ink); }
-.av-1 { background: var(--accent-2); color: var(--paper); }
-.av-2 { background: var(--ink); color: var(--paper); }
-.av-3 { background: var(--paper-2); color: var(--ink); }
-.av-4 { background: var(--ok); color: var(--paper); }
+.avatar .av-aid i { font-size: 1em; }
+.avatar-lg { --s: 6rem; }
+.avatar-lg .av-disc, .avatar-lg .av-aid { border-width: 3px; }
 
 /* Members */
 ul.members { list-style: none; padding: 0; margin: 0; }
@@ -351,7 +351,7 @@ ol.slots { list-style: none; padding: 0; margin: 0 0 1rem; display: grid; grid-t
 /* Vote */
 .names { display: grid; gap: 0.75rem; }
 .names button { width: 100%; justify-content: flex-start; padding-left: 0.75rem; }
-.names button .avatar { width: 2rem; height: 2rem; font-size: var(--step-0); box-shadow: none; }
+.names button .avatar { --s: 2.25rem; }
 
 /* Reveal: sleeves dealt in one by one */
 ul.tracks.reveal > li { padding: 0.9rem 0; animation: deal 450ms var(--ease) backwards; animation-delay: calc(var(--i, 0) * 140ms); }

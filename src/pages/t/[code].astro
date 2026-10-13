@@ -2,7 +2,6 @@
 import Base from "../../layouts/Base.astro";
 import { personFromCookies } from "../../lib/auth.ts";
 import { MIN_PLAYERS, normaliseCode, publicState } from "../../lib/tables.ts";
-import { avatarInitial, avatarSlot } from "../../ui/avatar.ts";
 
 const code = normaliseCode(Astro.params.code);
 const state = publicState(code);
@@ -44,6 +43,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
         </p>
 
         <div id="v-lobby">
+          <p class="hint"><a href="/me">Change your character</a></p>
           <button id="start" type="button" class="full" disabled hidden>Start game</button>
           <p class="hint" id="start-note" aria-live="polite"></p>
           <p id="msg" class="error" role="alert"></p>
@@ -143,9 +143,9 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
           <ul class="members" id="members">
             {state.members.map((m) => (
               <li>
-                <span class={`avatar av-${avatarSlot(m)}`} aria-hidden="true" data-initial={avatarInitial(m)}></span>
-                <span class="name">{m}</span>
-                {m === state.host && <span class="stamps"><span class="stamp host">Host</span></span>}
+                <span class="avatar" aria-hidden="true"><span class="av-disc"></span></span>
+                <span class="name">{m.name}</span>
+                {m.name === state.host && <span class="stamps"><span class="stamp host">Host</span></span>}
               </li>
             ))}
           </ul>
@@ -168,6 +168,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
 </Base>
 <script>
   import { avatar } from "../../ui/avatar.ts";
+  import type { Avatar } from "../../lib/avatar.ts";
   type Track = { title: string; artist: string; cover?: string };
   type Found = Track & { id: number };
   type RevealSlot = Track & { slot: number; owner: string };
@@ -182,7 +183,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     winner?: "players" | "moles";
     themes?: { round: number; majority: string; mole: string }[];
   };
-  type State = { status: string; host: string; members: string[]; game?: Game };
+  type State = { status: string; host: string; members: { name: string; avatar: Avatar }[]; game?: Game };
   type Me = { role: "player" | "ghost" | "spectator"; theme?: string; picked?: boolean };
 
   const app = document.getElementById("app")!;
@@ -292,19 +293,24 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     tick();
   }
 
+  // A name's badge from the members list; someone who left gets a default.
+  function face(name: string): HTMLElement {
+    return avatar(name, state?.members.find((m) => m.name === name)?.avatar);
+  }
+
   function renderMembers() {
     const s = state!;
     const g = s.game;
     const inGame = s.status === "playing" && !!g;
     once("members", JSON.stringify([s.members, s.host, inGame, g?.alive, g?.ghosts]), () => {
       $("members").replaceChildren(
-        ...s.members.map((name) => {
+        ...s.members.map(({ name }) => {
           const stamps = h("span", { class: "stamps" });
           const stamp = (t: string, kind: string) => stamps.append(h("span", { class: `stamp ${kind}` }, t));
           if (name === s.host) stamp("Host", "host");
           if (inGame && g!.ghosts.includes(name)) stamp("Out", "out");
           else if (inGame && !g!.alive.includes(name)) stamp("Watching", "watching");
-          return h("li", {}, avatar(name), h("span", { class: "name" }, name), stamps);
+          return h("li", {}, face(name), h("span", { class: "name" }, name), stamps);
         }),
       );
       $("count").textContent = String(s.members.length);
@@ -421,11 +427,11 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
       : me.role === "ghost" ? "You were voted out, so you can't vote. You can still listen and talk." : "You're watching this game, so you can't vote.";
     show("vote-ui", !locked);
     show("vote-done", voter && locked);
-    once("names", JSON.stringify([g.alive, voter]), () => {
+    once("names", JSON.stringify([g.alive, voter, state!.members]), () => {
       $("names").replaceChildren(
         ...g.alive.filter((n) => n !== myName).map((n) => {
           const b = button("", () => vote(n), { disabled: !voter, aria: `Vote for ${n}` });
-          b.append(avatar(n), h("span", {}, n));
+          b.append(face(n), h("span", {}, n));
           return b;
         }),
         button("Skip", () => vote("skip"), { secondary: true, disabled: !voter, aria: "Skip: vote for nobody" }),
@@ -456,10 +462,10 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
       : r.ejected
         ? `${r.ejected} was voted out. ${r.wasMole ? "They were a mole." : "They were not a mole."}`
         : "Nobody was voted out.";
-    once("reveal", JSON.stringify(r?.slots ?? []), () => {
+    once("reveal", JSON.stringify([r?.slots ?? [], state!.members]), () => {
       $("reveal-slots").replaceChildren(
         ...(r?.slots ?? []).map((t, i) => {
-          const li = trackRow(t, h("span", { class: "owner" }, h("span", { class: "slot-no" }, `Track ${t.slot + 1}: `), h("strong", {}, t.owner)));
+          const li = trackRow(t, h("span", { class: "owner" }, h("span", { class: "slot-no" }, `Track ${t.slot + 1}: `), face(t.owner), h("strong", {}, t.owner)));
           li.style.setProperty("--i", String(i));
           return li;
         }),
