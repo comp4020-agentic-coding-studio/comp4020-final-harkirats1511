@@ -64,6 +64,13 @@
       "when": 1791905725512,
       "tag": "0008_common_doctor_faustus",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1791933749083,
+      "tag": "0009_military_ghost_rider",
+      "breakpoints": true
     }
   ]
 }

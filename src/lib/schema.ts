@@ -46,6 +46,9 @@ export const tables = sqliteTable("tables", {
   voteSeconds: integer("vote_seconds").notNull().default(45),
   speaker: text("speaker").notNull().default("host"),
   moles: integer("moles"),
+  // Autoplay: the server plays the round's slots in order, slotSeconds each.
+  autoplay: integer("autoplay", { mode: "boolean" }).notNull().default(false),
+  slotSeconds: integer("slot_seconds").notNull().default(30),
   createdAt: integer("created_at").notNull(),
 });
 
@@ -103,8 +106,11 @@ export const games = sqliteTable(
     // "players" | "moles" once the game is over.
     winner: text("winner"),
     startedAt: integer("started_at").notNull(),
+    // Epoch ms the game ended; null while it runs. Games that ended before this
+    // column existed carry their startedAt.
+    finishedAt: integer("finished_at"),
   },
-  (t) => [index("games_table").on(t.tableCode)],
+  (t) => [index("games_table").on(t.tableCode), index("games_finished").on(t.finishedAt)],
 );
 
 // Who is playing. Members with no row here joined after the start and spectate.
