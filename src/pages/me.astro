@@ -1,0 +1,116 @@
+---
+import Base from "../layouts/Base.astro";
+import { personFromCookies } from "../lib/auth.ts";
+import { OPTIONS, PART_LABELS, PARTS, valueLabel } from "../lib/avatar.ts";
+import { getAvatar } from "../lib/avatars.ts";
+const me = personFromCookies(Astro.cookies);
+if (!me) return Astro.redirect("/?next=/me");
+const current = getAvatar(me.id);
+---
+<Base title="Your character · Mole">
+  <a class="back-link" href="/"><i class="ph-bold ph-arrow-left" aria-hidden="true"></i>Back</a>
+  <h1>Your character</h1>
+  <p class="hint">Everyone at your table sees this next to your name.</p>
+
+  <div id="editor" data-me={me.name} data-start={JSON.stringify(current)} data-options={JSON.stringify(OPTIONS)}>
+    <section class="card preview-card" aria-label="Preview">
+      <div id="preview" class="preview"></div>
+      <p class="preview-name">{me.name}</p>
+    </section>
+
+    <form id="avatar-form" novalidate>
+      {PARTS.map((part) => (
+        <fieldset class="card part" data-part={part}>
+          <legend>{PART_LABELS[part]}</legend>
+          <div class={`chips${part === "character" ? " chips-char" : ""}`}>
+            {OPTIONS[part].map((value, i) => (
+              <div class="chip">
+                <input type="radio" name={part} id={`${part}-${value}`} value={value} checked={current[part] === value} />
+                <label for={`${part}-${value}`}>
+                  {part === "character" && <span class="chip-badge" data-char={value}></span>}
+                  <span class="chip-text">{valueLabel(part, value)}</span>
+                </label>
+              </div>
+            ))}
+          </div>
+        </fieldset>
+      ))}
+
+      <div class="row btns">
+        <button id="save" type="submit">Save character</button>
+        <button id="randomise" type="button" class="secondary"><i class="ph-bold ph-dice-five" aria-hidden="true"></i>Randomise</button>
+      </div>
+      <p id="status" class="status-line" role="status" aria-live="polite"></p>
+    </form>
+  </div>
+</Base>
+<script>
+  import { avatar } from "../ui/avatar.ts";
+  import { PARTS, type Avatar, type Part } from "../lib/avatar.ts";
+
+  const root = document.getElementById("editor")!;
+  const options = JSON.parse(root.dataset.options!) as Record<Part, string[]>;
+  const me = root.dataset.me!;
+  const form = document.getElementById("avatar-form") as HTMLFormElement;
+  const status = document.getElementById("status")!;
+  const preview = document.getElementById("preview")!;
+  const save = document.getElementById("save") as HTMLButtonElement;
+
+  const read = (): Avatar =>
+    Object.fromEntries(PARTS.map((p) => [p, (form.querySelector(`input[name=${p}]:checked`) as HTMLInputElement | null)?.value ?? options[p][0]])) as Avatar;
+
+  let saved = JSON.stringify(read());
+
+  function draw() {
+    const a = read();
+    const big = avatar(me, a);
+    big.classList.add("avatar-lg");
+    preview.replaceChildren(big);
+    // Character chips show that character in the current outfit.
+    for (const el of document.querySelectorAll<HTMLElement>(".chip-badge")) {
+      el.replaceChildren(avatar(me, { ...a, character: el.dataset.char! }));
+    }
+  }
+
+  function say(text: string, kind: "ok" | "bad" | "") {
+    status.textContent = text;
+    status.className = `status-line ${kind}`;
+  }
+
+  form.addEventListener("change", () => {
+    draw();
+    say(JSON.stringify(read()) === saved ? "" : "Not saved yet.", "");
+  });
+
+  document.getElementById("randomise")!.addEventListener("click", () => {
+    for (const p of PARTS) {
+      const list = options[p];
+      const pick = list[Math.floor(Math.random() * list.length)];
+      (form.querySelector(`input[name=${p}][value="${pick}"]`) as HTMLInputElement).checked = true;
+    }
+    draw();
+    say("Not saved yet.", "");
+  });
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    save.disabled = true;
+    say("Saving...", "");
+    try {
+      const res = await fetch("/api/avatar", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(read()) });
+      if (res.status === 401) return say("You are signed out. Sign in again from the home page.", "bad");
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        return say(data.error ?? "Could not save. Try again.", "bad");
+      }
+      saved = JSON.stringify(read());
+      say("Saved. Your table will see it now.", "ok");
+    } catch {
+      say("Could not reach the server. Try again.", "bad");
+    } finally {
+      save.disabled = false;
+    }
+  });
+
+  draw();
+</script>

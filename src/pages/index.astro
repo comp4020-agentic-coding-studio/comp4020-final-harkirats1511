@@ -2,11 +2,12 @@
 import Base from "../layouts/Base.astro";
 import { personFromCookies } from "../lib/auth.ts";
 import { listTaste } from "../lib/taste.ts";
-import { avatarInitial, avatarSlot } from "../ui/avatar.ts";
+import { getAvatar } from "../lib/avatars.ts";
 const me = personFromCookies(Astro.cookies);
 const next = Astro.url.searchParams.get("next") ?? "";
-const safeNext = /^(\/t\/[A-Za-z]{4}|\/taste)$/.test(next) ? next : "";
+const safeNext = /^(\/t\/[A-Za-z]{4}|\/taste|\/me)$/.test(next) ? next : "";
 if (me && safeNext) return Astro.redirect(safeNext);
+const mine = me ? getAvatar(me.id) : null;
 const tasteCount = me ? listTaste(me.id).length : 0;
 ---
 <Base title="Mole">
@@ -14,7 +15,7 @@ const tasteCount = me ? listTaste(me.id).length : 0;
   <p class="pitch">A party game for friends in one room. Everyone picks a song. One of you got a slightly different theme.</p>
   {me ? (
     <>
-      <p class="who"><span class={`avatar av-${avatarSlot(me.name)}`} aria-hidden="true" data-initial={avatarInitial(me.name)}></span><span>Signed in as <strong>{me.name}</strong>.</span></p>
+      <p class="who"><span id="who-badge" class="avatar" aria-hidden="true" data-avatar={JSON.stringify(mine)}></span><span>Signed in as <strong>{me.name}</strong>.</span></p>
       <section class="card" aria-labelledby="create-h">
         <h2 id="create-h">Start a table</h2>
         <p class="hint">You get a code to share with the room.</p>
@@ -58,6 +59,11 @@ const tasteCount = me ? listTaste(me.id).length : 0;
         {tasteCount < 5 && <p class="nudge">A mole needs something to study. Add a few tracks you would actually play.</p>}
         <p><a href="/taste">{tasteCount === 0 ? "Build your taste file" : "Edit your taste file"}</a></p>
       </section>
+      <section class="card" aria-labelledby="char-h">
+        <h2 id="char-h">Your character</h2>
+        <p class="hint">Pick how you look at the table.</p>
+        <p><a href="/me">Change your character</a></p>
+      </section>
       <p id="msg" class="error" role="alert"></p>
     </>
   ) : (
@@ -79,6 +85,9 @@ const tasteCount = me ? listTaste(me.id).length : 0;
   <p class="hint"><a href="/readme/">About this project</a></p>
 </Base>
 <script>
+  import { avatar } from "../ui/avatar.ts";
+  const badge = document.getElementById("who-badge");
+  if (badge) badge.replaceWith(avatar("", JSON.parse(badge.dataset.avatar!)));
   const msg = document.getElementById("msg");
   const say = (t: string) => { if (msg) msg.textContent = t; };
   async function post(url: string, body: unknown) {

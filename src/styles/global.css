@@ -405,3 +405,27 @@ details.howto[open] { padding-bottom: 0.5rem; }
 details.howto ol { margin: 0 0 0.75rem; padding-left: 1.4rem; }
 details.howto li { margin-bottom: 0.5rem; }
 details.howto summary { font-family: var(--font-display); font-size: var(--step-1); }
+
+/* Character editor (/me) */
+.preview-card { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; padding: 1.25rem; position: sticky; top: 0.5rem; z-index: 2; }
+.preview .avatar-lg { --s: 8rem; }
+.preview-name { margin: 0; font: 400 var(--step-1)/1.2 var(--font-display); overflow-wrap: anywhere; text-align: center; }
+fieldset.part { margin: 0 0 1rem; min-width: 0; }
+fieldset.part legend { font: 400 var(--step-1)/1.2 var(--font-display); padding: 0 0.4rem; margin-left: -0.4rem; background: var(--card); }
+.chips { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.chip { position: relative; }
+.chip input { position: absolute; opacity: 0; width: 100%; height: 100%; min-height: 0; margin: 0; inset: 0; cursor: pointer; }
+.chip label {
+  display: flex; align-items: center; justify-content: center; gap: 0.5rem; min-height: 48px; min-width: 48px;
+  padding: 0.4rem 0.9rem; margin: 0; border: 2px solid var(--ink); background: var(--card); color: var(--ink);
+  box-shadow: 2px 2px 0 var(--ink); font-weight: 700; cursor: pointer;
+}
+.chip input:checked + label { background: var(--accent); color: var(--accent-ink); box-shadow: none; transform: translate(2px, 2px); }
+.chip input:focus-visible + label { outline: 3px solid var(--accent-2); outline-offset: 3px; }
+.chips-char { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.chips-char .chip label { flex-direction: column; padding: 0.5rem 0.25rem; font-size: var(--step--1); }
+.chip-badge .avatar { --s: 3.25rem; }
+.status-line { min-height: 1.5em; font-weight: 700; margin: 0.75rem 0 0; }
+.status-line.ok { color: var(--ok); }
+.status-line.bad { color: var(--bad); }
+@media (prefers-reduced-motion: reduce) { .chip label { transition: none; } }
