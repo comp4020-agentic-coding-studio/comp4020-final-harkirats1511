@@ -56,6 +56,21 @@ works out whose pick doesn't quite fit. They are decisions, not defaults.
   host's. The host's phone always plays. The choice is per person, saved, and can
   be changed during a game.
 
+## The 3D table scene
+
+- It is decoration on top of the game, never the game. Every action, every piece
+  of information, and every state stays available in the 2D page, which is what
+  the keyboard, screen readers and small or slow phones use.
+- It only loads on the table page, after the page is usable, and only when the
+  device can run WebGL 2 and the person hasn't asked for reduced motion or turned
+  the scene off. Anything else gets the 2D page alone, with no error.
+- It shows only what the public table state already shows. It never knows a
+  theme, who the mole is, a track's owner or title before the reveal, or who has
+  picked or voted, so it can't leak them.
+- Models are the CC0 Kenney Mini Characters in `public/models/` (credited in
+  `public/models/CREDITS.md`). New assets need a licence that allows it, recorded
+  there.
+
 ## Where things live
 
 - Decisions: `docs/decisions/`. Write a new record when one changes.
