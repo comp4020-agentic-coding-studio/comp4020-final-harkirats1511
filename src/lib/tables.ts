@@ -12,7 +12,10 @@ export const MIN_PLAYERS = 3;
 export const MAX_PLAYERS = 10;
 export const DEFAULT_PICK_SECONDS = 60;
 export const DEFAULT_VOTE_SECONDS = 45;
-export type TableOptions = { pickSeconds: number; voteSeconds: number; moles: number | null };
+export const DEFAULT_SLOT_SECONDS = 30;
+export type TableOptions = {
+  pickSeconds: number; voteSeconds: number; moles: number | null; autoplay: boolean; slotSeconds: number;
+};
 
 export function normaliseCode(raw: unknown): string {
   return String(raw ?? "").trim().toUpperCase();
@@ -98,6 +101,8 @@ export type PublicGame = {
   phase: string;
   deadline: number | null;
   nowPlaying: number | null;
+  // Whether the server plays the slots by itself; a table setting, public.
+  autoplay: boolean;
   alive: string[];
   ghosts: string[];
   reveal?: {
@@ -134,6 +139,7 @@ function publicGame(code: string): PublicGame | undefined {
     phase: g.phase,
     deadline: g.deadline,
     nowPlaying: g.nowPlaying,
+    autoplay: tableOptions(code)?.autoplay ?? false,
     alive: inGame.filter((p) => p.ejected === null).map((p) => p.name),
     ghosts: inGame.filter((p) => p.ejected !== null).map((p) => p.name),
   };
