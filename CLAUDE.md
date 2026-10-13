@@ -1,8 +1,9 @@
 # Harness
 
 The rules below follow from what this app is for: a music game for a group of
-friends, where one player (the mole) is secretly told to pick what a target would
-pick, and the room works out who is faking. They are decisions, not defaults.
+friends. Each round everyone gets a secret theme and picks a song for it; the
+mole has a different but close theme and doesn't know it. The room listens and
+works out whose pick doesn't quite fit. They are decisions, not defaults.
 
 ## What the app must never do
 
@@ -10,13 +11,15 @@ pick, and the room works out who is faking. They are decisions, not defaults.
   server sends to a player (HTML, JSON or an SSE event) may contain who picked a
   track or what it is called. The speaker device plays preview audio from a plain
   `<audio>` element with no title or artwork on screen.
-- **Tell the target they are the target.** Neither the room nor the target is told.
-  Only the mole's own session receives its target.
+- **Tell anyone they are the mole, or show two themes before the game ends.** Each
+  person's session gets only their own theme, worded the same way for everyone.
+  Nothing says whose theme is the odd one until the game is over, when every
+  round's pair is shown.
 - **Let one person act as another.** A name is claimed with a PIN. Acting on
   someone's history needs their session.
-- **Expose more of a person than the table rules allow.** A public table may show
-  a person's taste file and past picks inside this app. It never shows anything
-  from outside it (we cannot see anyone's listening anyway), and never a PIN.
+- **Expose more of a person than the app needs.** Taste files are for picking
+  quickly from your own songs; nothing from outside the app is ever shown, and
+  never a PIN.
 - **Host audio.** Tracks are Deezer ids and metadata. Preview URLs are signed and
   expire, so store the id and fetch a fresh URL per round.
 
@@ -24,10 +27,8 @@ pick, and the room works out who is faking. They are decisions, not defaults.
 
 - A game needs 3 players to start and the UI recommends 4 or more.
 - Moles default by player count (1 up to 5 players, 2 up to 10); the host may
-  override within a cap. Nobody targets themselves and moles never target each
-  other.
-- Voted-out players become ghosts: they still pick tracks, they cannot vote, and
-  they are never a target.
+  override within a cap. With two moles both get the same odd theme.
+- Voted-out players become ghosts: they still pick tracks, and they cannot vote.
 - A change one person makes reaches every open session of that table within about
   a second with no reload. Reconnecting, or returning the next day, restores the
   current state from the database, never from memory.
@@ -46,9 +47,14 @@ pick, and the room works out who is faking. They are decisions, not defaults.
 - The game runs until every mole is out (players win) or the moles are at least as
   many as everyone else still in (moles win), as in Among Us. Leaving counts the
   same way, and a host who leaves passes the host role on.
-- The mole gets a new target each round.
-- Audio plays on the host's phone by default; a table can choose every phone
-  instead, for groups not in one room.
+- Each round draws a new theme pair from `src/lib/themes.ts`, not repeating
+  within a game. Which side the majority gets is random. A pair must be close
+  enough that one song could answer both.
+- The reveal after a vote shows every track and its owner, and who was voted out
+  and whether they were a mole. The themes are shown only when the game ends.
+- Each player chooses where they hear tracks: on their own phone, or from the
+  host's. The host's phone always plays. The choice is per person, saved, and can
+  be changed during a game.
 
 ## Where things live
 

@@ -7,14 +7,16 @@ import { baseUrl, session, uniqueName } from "./helpers";
 //   POST /api/tables/:code/start            host, 3+ members -> game starts
 //   GET  /api/tables/:code                   public state (same as the stream)
 //   GET  /api/tables/:code/me                this person's private view:
-//        {role: "player"|"mole"|"ghost"|"spectator", target?}; only a mole has a target
+//        {role: "player"|"ghost"|"spectator", theme?, picked?}. A mole's role reads
+//        "player" like everyone else's: nobody is told they are the mole
 //   POST /api/tables/:code/pick {trackId}    during pick
 //   GET  /api/tables/:code/round             anonymous slots while listening/voting
 //   GET  /api/tables/:code/round/slots/:n/audio -> {url}
 //   POST /api/tables/:code/vote {name|"skip"} during vote; final once cast
 //   POST /api/tables/:code/advance           host: listen -> vote, reveal -> next round
 //   POST /api/tables/:code/leave
-// Public state carries game: {round, phase, deadline, alive, ghosts, reveal?, winner?}.
+// Public state carries game: {round, phase, deadline, alive, ghosts, reveal?, winner?,
+// themes?}; themes is every round's {majority, mole} pair, only once the game ends.
 
 vi.setConfig({ testTimeout: 90_000 });
 
@@ -28,6 +30,7 @@ type Game = {
   ghosts: string[];
   reveal?: { ejected: string | null; wasMole: boolean; slots: { owner: string; title: string }[] };
   winner?: "players" | "moles";
+  themes?: { round: number; majority: string; mole: string }[];
 };
 type State = { status: string; members: string[]; game?: Game };
 
@@ -57,7 +60,8 @@ async function waitFor(code: string, ok: (s: State) => boolean, ms = 8000): Prom
 async function me(p: Player, code: string) {
   return (await (await p.s.call(`/api/tables/${code}/me`)).json()) as {
     role: string;
-    target?: string;
+    theme?: string;
+    picked?: boolean;
   };
 }
 
@@ -88,8 +92,13 @@ async function started(n: number, opts: Record<string, unknown> = {}) {
   await waitFor(t.code, (s) => s.game?.phase === "pick");
   const roles = new Map<string, Awaited<ReturnType<typeof me>>>();
   for (const p of t.players) roles.set(p.name, await me(p, t.code));
-  const moles = t.players.filter((p) => roles.get(p.name)!.role === "mole");
-  const others = t.players.filter((p) => roles.get(p.name)!.role !== "mole");
+  // Nobody is told they're the mole, so the spec finds them the way the room
+  // would if it could see every phone: the theme fewer people have.
+  const count = new Map<string, number>();
+  for (const r of roles.values()) count.set(r.theme!, (count.get(r.theme!) ?? 0) + 1);
+  const odd = [...count.entries()].sort((x, y) => x[1] - y[1])[0][0];
+  const moles = t.players.filter((p) => roles.get(p.name)!.theme === odd);
+  const others = t.players.filter((p) => roles.get(p.name)!.theme !== odd);
   return { ...t, roles, moles, others };
 }
 
@@ -105,15 +114,24 @@ async function toVote(g: Awaited<ReturnType<typeof started>>) {
   await waitFor(g.code, (s) => s.game?.phase === "vote");
 }
 
-it("gives one mole to a table of 4, and tells each person only their own role", async () => {
+it("gives one mole a different theme at a table of 4, and tells nobody who the mole is", async () => {
   const g = await started(4);
   expect(g.moles).toHaveLength(1);
-  const target = g.roles.get(g.moles[0].name)!.target;
-  expect(g.others.map((p) => p.name)).toContain(target);
-  for (const p of g.others) expect(g.roles.get(p.name)!.target).toBeUndefined();
+  const moleTheme = g.roles.get(g.moles[0].name)!.theme!;
+  const theme = g.roles.get(g.others[0].name)!.theme!;
+  expect(moleTheme).toBeTruthy();
+  expect(theme).toBeTruthy();
+  expect(moleTheme).not.toBe(theme);
+  for (const p of g.others) expect(g.roles.get(p.name)!.theme).toBe(theme);
+  // Every phone looks the same: no role, field or wording gives the mole away.
+  for (const p of g.players) {
+    const view = g.roles.get(p.name)!;
+    expect(view.role).toBe("player");
+    expect(Object.keys(view).sort()).toEqual(["picked", "role", "theme"]);
+  }
 });
 
-it("restores a reconnecting person's role and target from the server", async () => {
+it("restores a reconnecting person's theme from the server", async () => {
   const g = await started(3);
   const mole = g.moles[0];
   const again = session();
@@ -128,7 +146,8 @@ it("never shows roles, targets, or who has picked on the public state", async ()
   const after = await state(g.code);
   expect(after).toEqual(before);
   const text = JSON.stringify(after);
-  expect(text).not.toMatch(/"(role|roles|target|moles?|picked|owner)"\s*:/);
+  expect(text).not.toMatch(/"(role|roles|theme|themes|moles?|picked|owner)"\s*:/);
+  for (const r of g.roles.values()) expect(text).not.toContain(r.theme!);
 });
 
 it("moves on early once everyone has picked, and the slots are anonymous", async () => {
@@ -187,7 +206,7 @@ it("makes a final vote final, and a tie ejects nobody", async () => {
   expect(s.game!.reveal!.ejected).toBeNull();
 });
 
-it("turns a wrongly ejected player into a ghost: picks, doesn't vote, never targeted; moles win at parity", async () => {
+it("turns a wrongly ejected player into a ghost: picks, doesn't vote; moles win at parity", async () => {
   const g = await started(4);
   const mole = g.moles[0];
   const [innocent, ...rest] = g.others;
@@ -202,7 +221,6 @@ it("turns a wrongly ejected player into a ghost: picks, doesn't vote, never targ
   await g.host.s.call(`/api/tables/${g.code}/advance`, { body: {} });
   await waitFor(g.code, (s) => s.game?.round === 2 && s.game?.phase === "pick");
   expect((await me(innocent, g.code)).role).toBe("ghost");
-  expect((await me(mole, g.code)).target).not.toBe(innocent.name);
   await pickAll(g.code, g.players);
 
   await toVote(g);
@@ -248,4 +266,51 @@ it("doesn't let someone who missed the pick vote, and doesn't wait for them eith
   // Everyone who can vote has: the vote ends long before its 60s deadline.
   for (const p of pickers) await p.s.call(`/api/tables/${g.code}/vote`, { body: { name: "skip" } });
   await waitFor(g.code, (s) => s.game?.phase === "reveal", 3000);
+});
+
+it("draws a new theme pair each round, and shows every pair only when the game ends", async () => {
+  const g = await started(4);
+  const first = g.roles.get(g.others[0].name)!.theme!;
+  await pickAll(g.code, g.players);
+  await toVote(g);
+  // Vote out an innocent, so the game goes on to a second round.
+  const innocent = g.others[0];
+  for (const p of g.players) await p.s.call(`/api/tables/${g.code}/vote`, { body: { name: innocent.name } });
+  const r1 = await waitFor(g.code, (s) => s.game?.phase === "reveal");
+  expect(r1.game!.themes).toBeUndefined();
+  expect(JSON.stringify(r1)).not.toContain(first);
+
+  await g.host.s.call(`/api/tables/${g.code}/advance`, { body: {} });
+  await waitFor(g.code, (s) => s.game?.round === 2 && s.game?.phase === "pick");
+  const second = (await me(g.others[1], g.code)).theme!;
+  expect(second).not.toBe(first);
+  expect([first, second]).not.toContain((await me(g.moles[0], g.code)).theme);
+
+  await pickAll(g.code, g.players);
+  await toVote(g);
+  for (const p of g.players.filter((p) => p !== innocent)) {
+    await p.s.call(`/api/tables/${g.code}/vote`, { body: { name: g.moles[0].name } });
+  }
+  const end = await waitFor(g.code, (s) => s.status === "finished");
+  expect(end.game!.themes).toHaveLength(2);
+  expect(end.game!.themes![0].majority).toBe(first);
+  expect(end.game!.themes![1].majority).toBe(second);
+  expect(end.game!.themes![0].mole).toBe(g.roles.get(g.moles[0].name)!.theme);
+});
+
+// Playtest 1: in a second game at the same table only the mole could pick. The
+// page had remembered "already picked" per table and round number, and a new
+// game starts at round 1 again. The server is the record of who has picked.
+it("lets everyone pick again in a second game at the same table", async () => {
+  const t = await started(3);
+  await pickAll(t.code, t.players);
+  await toVote(t);
+  for (const p of t.players) await p.s.call(`/api/tables/${t.code}/vote`, { body: { name: t.moles[0].name } });
+  await waitFor(t.code, (s) => s.status === "finished");
+
+  expect((await t.host.s.call(`/api/tables/${t.code}/start`, { body: {} })).status).toBeLessThan(300);
+  await waitFor(t.code, (s) => s.status === "playing" && s.game?.round === 1 && s.game?.phase === "pick");
+  for (const p of t.players) expect((await me(p, t.code)).picked).toBe(false);
+  await pickAll(t.code, t.players);
+  await waitFor(t.code, (s) => s.game?.phase === "listen");
 });
