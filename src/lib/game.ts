@@ -114,7 +114,7 @@ function assignSlots(d: Tx, g: Game) {
 
 function finish(d: Tx, g: Game, winner: "players" | "moles") {
   assignSlots(d, g);
-  d.update(games).set({ winner, phase: "reveal", deadline: null }).where(eq(games.id, g.id)).run();
+  d.update(games).set({ winner, phase: "reveal", deadline: null, finishedAt: Date.now() }).where(eq(games.id, g.id)).run();
   d.update(tables).set({ status: "finished" }).where(eq(tables.code, g.tableCode)).run();
 }
 
@@ -137,6 +137,15 @@ function resolveVote(d: Tx, g: Game) {
   if (winner) finish(d, { ...g, ejectedPersonId: out }, winner);
 }
 
+function pickCount(d: Tx, g: Game): number {
+  return d.select({ n: sql<number>`count(*)` }).from(picks).where(and(eq(picks.gameId, g.id), eq(picks.round, g.round))).get()?.n ?? 0;
+}
+
+function toVote(d: Tx, g: Game) {
+  const t = tableOptions(g.tableCode)!;
+  d.update(games).set({ phase: "vote", deadline: Date.now() + t.voteSeconds * 1000 }).where(eq(games.id, g.id)).run();
+}
+
 // Leave the phase the game is in for the next one. The caller has checked the
 // round and phase.
 function step(d: Tx, g: Game) {
@@ -144,12 +153,28 @@ function step(d: Tx, g: Game) {
   const now = Date.now();
   if (g.phase === "pick") {
     const slots = assignSlots(d, g);
-    d.update(games)
-      .set({ phase: "listen", nowPlaying: null, deadline: now + slots * LISTEN_MS_PER_SLOT + LISTEN_SLACK_MS })
-      .where(eq(games.id, g.id))
-      .run();
+    if (t.autoplay && slots > 0) {
+      // The server plays slot 0 now; the deadline is the next autoplay step.
+      d.update(games)
+        .set({ phase: "listen", nowPlaying: 0, deadline: now + t.slotSeconds * 1000 })
+        .where(eq(games.id, g.id))
+        .run();
+    } else {
+      d.update(games)
+        .set({ phase: "listen", nowPlaying: null, deadline: now + slots * LISTEN_MS_PER_SLOT + LISTEN_SLACK_MS })
+        .where(eq(games.id, g.id))
+        .run();
+    }
   } else if (g.phase === "listen") {
-    d.update(games).set({ phase: "vote", deadline: now + t.voteSeconds * 1000 }).where(eq(games.id, g.id)).run();
+    // Autoplay: the deadline hit means the slot's time is up, so play the next
+    // one; only after the last does listening end. Slots are numbered 0..n-1.
+    const slots = t.autoplay ? pickCount(d, g) : 0;
+    const next = (g.nowPlaying ?? -1) + 1;
+    if (t.autoplay && next < slots) {
+      d.update(games).set({ nowPlaying: next, deadline: now + t.slotSeconds * 1000 }).where(eq(games.id, g.id)).run();
+    } else {
+      toVote(d, g);
+    }
   } else if (g.phase === "vote") {
     resolveVote(d, g);
   } else if (g.phase === "reveal") {
@@ -253,7 +278,8 @@ export function advance(code: string): { ok: true } | Fail {
   const moved = db.transaction((tx) => {
     const now = currentGame(code);
     if (!now || now.winner || now.round !== g.round || now.phase !== g.phase) return false;
-    step(tx, now);
+    if (now.phase === "listen") toVote(tx, now);
+    else step(tx, now);
     return true;
   });
   if (!moved) return fail(409, "The game has already moved on.");
@@ -420,9 +446,16 @@ export function setNowPlaying(code: string, slot: number): { ok: true } | Fail {
       .where(and(eq(picks.gameId, g.id), eq(picks.round, g.round), eq(picks.slot, slot)))
       .get();
     if (!exists) return fail(400, "No such slot.");
-    tx.update(games).set({ nowPlaying: slot }).where(eq(games.id, g.id)).run();
+    // On an autoplay table, playing a slot by hand restarts the clock: autoplay
+    // carries on from this slot once its time is up.
+    const t = tableOptions(code)!;
+    const resume = t.autoplay && g.phase === "listen";
+    tx.update(games)
+      .set(resume ? { nowPlaying: slot, deadline: Date.now() + t.slotSeconds * 1000 } : { nowPlaying: slot })
+      .where(eq(games.id, g.id))
+      .run();
     return { ok: true };
   });
-  if (res.ok) notifyTable(code);
+  if (res.ok) changed(code);
   return res;
 }
