@@ -231,6 +231,7 @@ details.options select { margin-bottom: 0.9rem; }
   display: inline-flex; align-items: center; justify-content: center;
   font: 400 var(--step-1)/1 var(--font-display);
 }
+.avatar::before { content: attr(data-initial); }
 .av-0 { background: var(--accent); color: var(--accent-ink); }
 .av-1 { background: var(--accent-2); color: var(--paper); }
 .av-2 { background: var(--ink); color: var(--paper); }
@@ -395,3 +396,12 @@ ol.pairs em { font-style: normal; font-weight: 800; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* Table page extras */
+.bar { display: flex; align-items: center; gap: 0.75rem; margin: 0 0 1rem; }
+.bar .hint { margin: 0; }
+details.howto { padding: 0 1.1rem; }
+details.howto[open] { padding-bottom: 0.5rem; }
+details.howto ol { margin: 0 0 0.75rem; padding-left: 1.4rem; }
+details.howto li { margin-bottom: 0.5rem; }
+details.howto summary { font-family: var(--font-display); font-size: var(--step-1); }

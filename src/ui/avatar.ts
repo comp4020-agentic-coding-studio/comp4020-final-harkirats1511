@@ -18,6 +18,6 @@ export function avatar(name: string): HTMLElement {
   const el = document.createElement("span");
   el.className = `avatar av-${avatarSlot(name)}`;
   el.setAttribute("aria-hidden", "true");
-  el.textContent = avatarInitial(name);
+  el.dataset.initial = avatarInitial(name);
   return el;
 }

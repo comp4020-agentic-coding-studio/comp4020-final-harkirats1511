@@ -2,6 +2,7 @@
 import Base from "../../layouts/Base.astro";
 import { personFromCookies } from "../../lib/auth.ts";
 import { MIN_PLAYERS, normaliseCode, publicState } from "../../lib/tables.ts";
+import { avatarInitial, avatarSlot } from "../../ui/avatar.ts";
 
 const code = normaliseCode(Astro.params.code);
 const state = publicState(code);
@@ -9,137 +10,164 @@ if (!state) return new Response("No such table.", { status: 404 });
 const me = personFromCookies(Astro.cookies);
 if (!me) return Astro.redirect(`/?next=/t/${code}`);
 ---
-<Base title={`Table ${code}`}>
+<Base title={`Table ${code}`} width="table">
   <div id="app" data-code={code} data-me={me.name} data-min={MIN_PLAYERS}>
     <p class="sr-only" id="announce" role="status" aria-live="polite"></p>
 
     <div class="bar">
-      <button id="leave" type="button" class="secondary">Leave table</button>
+      <button id="leave" type="button" class="secondary sm"><i class="ph-bold ph-sign-out" aria-hidden="true"></i>Leave table</button>
       <span class="hint" id="leave-note"></span>
     </div>
     <div id="leave-confirm" class="card" role="alertdialog" aria-labelledby="leave-q" hidden>
       <p id="leave-q"><strong>Leave the game?</strong> You will be out of it for good.</p>
-      <div class="row">
+      <div class="row btns">
         <button id="leave-yes" type="button">Yes, leave</button>
         <button id="leave-no" type="button" class="secondary">Stay</button>
       </div>
     </div>
 
-    <h1 id="title">Table</h1>
-    <div id="lobby-code">
-      <p class="hint" id="code-label">Share this code with the room</p>
-      <div class="code" aria-labelledby="code-label" id="table-code">{code}</div>
-    </div>
-    <p class="status" id="status" hidden>
-      <span id="status-label"></span>
-      <span class="countdown" id="countdown" role="timer" aria-live="off"></span>
-    </p>
+    <div class="table-grid">
+      <div class="game-col">
+        <!-- 3D scene slot: a later phase mounts its canvas here. Keep it first in the game column. -->
+        <div id="scene-slot" hidden></div>
 
-    <details class="card howto" id="howto" hidden>
-      <summary>How to play</summary>
-      <ol>
-        <li>Everyone gets a secret theme, like "a song for crying in the car".</li>
-        <li>One or two people get a slightly different theme, and they are not told. It might be you.</li>
-        <li>Pick a song that fits your theme.</li>
-        <li>Every song plays without a name on it. Listen, then talk it over.</li>
-        <li>Vote out whoever's song doesn't seem to fit.</li>
-        <li>The game ends when the moles are all out, or when they are as many as everyone else.</li>
-      </ol>
-    </details>
+        <h1 id="title">Table</h1>
+        <div id="lobby-code" class="ticket-wrap">
+          <p class="hint" id="code-label">Share this code with the room</p>
+          <div class="ticket" aria-labelledby="code-label" id="table-code">{code}</div>
+          <button id="copy-code" type="button" class="secondary sm"><i class="ph-bold ph-copy" aria-hidden="true"></i>Copy code</button>
+          <p class="hint" id="copy-msg" role="status"></p>
+        </div>
+        <p class="status" id="status" hidden>
+          <span class="status-label" id="status-label"></span>
+          <span class="countdown" id="countdown" role="timer" aria-live="off"></span>
+        </p>
 
-    <section class="card role" id="v-role" aria-labelledby="role-h" hidden>
-      <div class="role-head">
-        <h2 id="role-h">Your theme</h2>
-        <button id="role-toggle" type="button" class="secondary" aria-controls="role-body" aria-expanded="true">Hide</button>
-      </div>
-      <div id="role-body">
-        <p class="theme" id="role-text"></p>
-      </div>
-      <p class="hint" id="role-hidden" hidden>Your theme is hidden. Show it when nobody is looking.</p>
-    </section>
+        <div id="v-lobby">
+          <button id="start" type="button" class="full" disabled hidden>Start game</button>
+          <p class="hint" id="start-note" aria-live="polite"></p>
+          <p id="msg" class="error" role="alert"></p>
+        </div>
 
-    <section class="card" id="v-pick" aria-labelledby="pick-h" hidden>
-      <h2 id="pick-h" style="margin-top:0">Pick a song</h2>
-      <p class="instr" id="pick-instr">Pick a song that fits your theme. Your pick is final once you tap it.</p>
-      <p class="hint" id="pick-wait" hidden>You're watching this game. The room is picking songs.</p>
-      <div id="pick-done" hidden>
-        <p><strong>Your pick is in.</strong> It is final. Wait for the others.</p>
-      </div>
-      <div id="pick-ui" hidden>
-        <h3>From your taste file</h3>
-        <p class="hint" id="quick-empty" hidden>Your taste file is empty. Search for a song instead.</p>
-        <ul class="tracks" id="quick" aria-label="Your taste file"></ul>
-        <h3>Search</h3>
-        <form id="search" role="search">
-          <label for="q">Search songs or artists</label>
-          <input id="q" name="q" type="search" autocomplete="off" required />
-          <button type="submit">Search</button>
-        </form>
-        <p class="hint" id="search-status" role="status"></p>
-        <ul class="tracks" id="results" aria-label="Search results"></ul>
-      </div>
-      <p id="pick-msg" class="error" role="alert"></p>
-    </section>
+        <section class="role phase" id="v-role" aria-labelledby="role-h" hidden>
+          <div class="role-head">
+            <h2 id="role-h">Your theme</h2>
+            <button id="role-toggle" type="button" class="secondary sm" aria-controls="role-body" aria-expanded="true"><i class="ph-bold ph-eye-slash" aria-hidden="true"></i><span id="role-toggle-text">Hide</span></button>
+          </div>
+          <div class="theme-card" id="theme-card">
+            <span class="tape" aria-hidden="true"></span>
+            <div class="flip">
+              <div class="face front" id="role-body">
+                <p class="theme" id="role-text"></p>
+              </div>
+              <div class="face back" id="role-back" aria-hidden="true">
+                <p class="back-note" id="role-hidden">Your theme is hidden. Show it when nobody is looking.</p>
+              </div>
+            </div>
+          </div>
+        </section>
 
-    <section class="card" id="v-listen" aria-labelledby="listen-h" hidden>
-      <h2 id="listen-h" style="margin-top:0">Listen</h2>
-      <p class="instr">Listen to every track, then talk it over: whose song sounds like it answered a slightly different theme? You might be the odd one out yourself.</p>
-      <div id="audio-choice" class="choice" hidden>
-        <label><input type="checkbox" id="own-audio" /> Play the tracks on this phone</label>
-        <p class="hint" id="audio-choice-note"></p>
-      </div>
-      <p id="np" aria-live="polite"></p>
-      <button id="unlock" type="button" hidden>Tap to let this phone play</button>
-      <ol class="slots" id="slots" aria-label="Tracks"></ol>
-      <p class="hint" id="audio-msg" role="status"></p>
-      <audio id="audio" preload="none"></audio>
-      <button id="to-vote" type="button" hidden>Go to voting</button>
-    </section>
+        <section class="card phase" id="v-pick" aria-labelledby="pick-h" hidden>
+          <h2 id="pick-h">Pick a song</h2>
+          <p class="instr" id="pick-instr">Pick a song that fits your theme. Your pick is final once you tap it.</p>
+          <p class="hint" id="pick-wait" hidden>You're watching this game. The room is picking songs.</p>
+          <div id="pick-done" hidden>
+            <p><span class="stamp">Picked</span></p>
+            <p><strong>Your pick is in.</strong> It is final. Wait for the others.</p>
+          </div>
+          <div id="pick-ui" hidden>
+            <h3>From your taste file</h3>
+            <p class="hint" id="quick-empty" hidden>Your taste file is empty. Search for a song instead.</p>
+            <ul class="tracks" id="quick" aria-label="Your taste file"></ul>
+            <h3>Search</h3>
+            <form id="search" role="search">
+              <label for="q">Search songs or artists</label>
+              <input id="q" name="q" type="search" autocomplete="off" required />
+              <button type="submit"><i class="ph-bold ph-magnifying-glass" aria-hidden="true"></i>Search</button>
+            </form>
+            <p class="hint" id="search-status" role="status"></p>
+            <ul class="tracks" id="results" aria-label="Search results"></ul>
+          </div>
+          <p id="pick-msg" class="error" role="alert"></p>
+        </section>
 
-    <section class="card" id="v-vote" aria-labelledby="vote-h" hidden>
-      <h2 id="vote-h" style="margin-top:0">Vote someone out</h2>
-      <p class="instr">Vote out whoever you think is the mole, or skip. You might be the mole without knowing it.</p>
-      <p class="hint" id="vote-note"></p>
-      <div id="vote-ui">
-        <div class="names" id="names"></div>
-      </div>
-      <div id="vote-done" hidden>
-        <p><strong>Your vote is in.</strong> It is final. Wait for the others.</p>
-      </div>
-      <p id="vote-msg" class="error" role="alert"></p>
-    </section>
+        <section class="card phase" id="v-listen" aria-labelledby="listen-h" hidden>
+          <h2 id="listen-h">Listen</h2>
+          <p class="instr">Listen to every track, then talk it over: whose song sounds like it answered a slightly different theme? You might be the odd one out yourself.</p>
+          <div id="audio-choice" class="choice" hidden>
+            <label><input type="checkbox" id="own-audio" /> Play the tracks on this phone</label>
+            <p class="hint" id="audio-choice-note"></p>
+          </div>
+          <p id="np" aria-live="polite"></p>
+          <button id="unlock" type="button" class="full" hidden>Tap to let this phone play</button>
+          <ol class="slots" id="slots" aria-label="Tracks"></ol>
+          <p class="hint" id="audio-msg" role="status"></p>
+          <audio id="audio" preload="none"></audio>
+          <button id="to-vote" type="button" class="full" hidden>Go to voting</button>
+        </section>
 
-    <section class="card" id="v-reveal" aria-labelledby="reveal-h" hidden>
-      <h2 id="reveal-h" style="margin-top:0">Reveal</h2>
-      <p class="instr" id="reveal-instr"></p>
-      <p id="eject"></p>
-      <ul class="tracks reveal" id="reveal-slots" aria-label="Who picked what"></ul>
-      <p id="winner" class="winner" hidden></p>
-      <div id="themes-end" hidden>
-        <h3>The themes</h3>
-        <ul class="pairs" id="themes-list"></ul>
+        <section class="card phase" id="v-vote" aria-labelledby="vote-h" hidden>
+          <h2 id="vote-h">Vote someone out</h2>
+          <p class="instr">Vote out whoever you think is the mole, or skip. You might be the mole without knowing it.</p>
+          <p class="hint" id="vote-note"></p>
+          <div id="vote-ui">
+            <div class="names" id="names"></div>
+          </div>
+          <div id="vote-done" hidden>
+            <p><span class="stamp">Voted</span></p>
+            <p><strong>Your vote is in.</strong> It is final. Wait for the others.</p>
+          </div>
+          <p id="vote-msg" class="error" role="alert"></p>
+        </section>
+
+        <section class="card phase" id="v-reveal" aria-labelledby="reveal-h" hidden>
+          <h2 id="reveal-h">Reveal</h2>
+          <p class="instr" id="reveal-instr"></p>
+          <p id="eject" class="eject"></p>
+          <ul class="tracks reveal" id="reveal-slots" aria-label="Who picked what"></ul>
+          <p id="winner" class="stamp-big" hidden></p>
+          <div id="themes-end" hidden>
+            <h3>The tracklist</h3>
+            <ol class="pairs" id="themes-list"></ol>
+          </div>
+          <button id="next" type="button" class="full" hidden>Next round</button>
+          <button id="again" type="button" class="full" hidden>Play again</button>
+          <p class="hint" id="reveal-wait" hidden></p>
+          <p id="reveal-msg" class="error" role="alert"></p>
+        </section>
       </div>
-      <button id="next" type="button" hidden>Next round</button>
-      <button id="again" type="button" hidden>Play again</button>
-      <p class="hint" id="reveal-wait" hidden></p>
-      <p id="reveal-msg" class="error" role="alert"></p>
-    </section>
 
-    <section class="card" aria-labelledby="players-h">
-      <h2 id="players-h" style="margin-top:0">Players (<span id="count">{state.members.length}</span>)</h2>
-      <ul class="members" id="members">
-        {state.members.map((m) => <li>{m}{m === state.host && <span class="badge">host</span>}</li>)}
-      </ul>
-    </section>
+      <aside class="side-col" aria-label="Players and rules">
+        <section class="card" aria-labelledby="players-h">
+          <h2 id="players-h">Players (<span id="count">{state.members.length}</span>)</h2>
+          <ul class="members" id="members">
+            {state.members.map((m) => (
+              <li>
+                <span class={`avatar av-${avatarSlot(m)}`} aria-hidden="true" data-initial={avatarInitial(m)}></span>
+                <span class="name">{m}</span>
+                {m === state.host && <span class="stamps"><span class="stamp host">Host</span></span>}
+              </li>
+            ))}
+          </ul>
+        </section>
 
-    <div id="v-lobby">
-      <button id="start" type="button" disabled hidden>Start game</button>
-      <p class="hint" id="start-note" aria-live="polite"></p>
-      <p id="msg" class="error" role="alert"></p>
+        <details class="card howto" id="howto" hidden>
+          <summary>How to play</summary>
+          <ol>
+            <li>Everyone gets a secret theme, like "a song for crying in the car".</li>
+            <li>One or two people get a slightly different theme, and they are not told. It might be you.</li>
+            <li>Pick a song that fits your theme.</li>
+            <li>Every song plays without a name on it. Listen, then talk it over.</li>
+            <li>Vote out whoever's song doesn't seem to fit.</li>
+            <li>The game ends when the moles are all out, or when they are as many as everyone else.</li>
+          </ol>
+        </details>
+      </aside>
     </div>
   </div>
 </Base>
 <script>
+  import { avatar } from "../../ui/avatar.ts";
   type Track = { title: string; artist: string; cover?: string };
   type Found = Track & { id: number };
   type RevealSlot = Track & { slot: number; owner: string };
@@ -179,11 +207,16 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     b.addEventListener("click", onClick);
     return b;
   }
+  function icon(name: string) {
+    return h("i", { class: `ph-bold ph-${name}`, "aria-hidden": "true" });
+  }
+  // A record sleeve row: cover art with a record peeking out, title and artist,
+  // then whatever the caller puts after (actions, or the owner on the reveal).
   function trackRow(t: Track, ...extra: (Node | string)[]) {
     const art = t.cover
-      ? Object.assign(document.createElement("img"), { src: t.cover, alt: "", width: 48, height: 48, loading: "lazy" })
-      : h("div", { class: "nocover" });
-    return h("li", {}, art, h("div", { class: "meta" }, h("strong", {}, t.title), h("span", {}, t.artist)), ...extra);
+      ? Object.assign(document.createElement("img"), { src: t.cover, alt: "", width: 56, height: 56, loading: "lazy" })
+      : h("div", { class: "nocover" }, icon("music-notes"));
+    return h("li", {}, h("div", { class: "sleeve-art" }, art), h("div", { class: "meta" }, h("strong", {}, t.title), h("span", {}, t.artist)), ...extra);
   }
   async function api<T = Record<string, unknown>>(url: string, body?: unknown) {
     const res = await fetch(url, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -266,12 +299,12 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     once("members", JSON.stringify([s.members, s.host, inGame, g?.alive, g?.ghosts]), () => {
       $("members").replaceChildren(
         ...s.members.map((name) => {
-          const li = h("li", {}, name);
-          const badge = (t: string) => li.append(h("span", { class: "badge" }, t));
-          if (name === s.host) badge("host");
-          if (inGame && g!.ghosts.includes(name)) badge("out");
-          else if (inGame && !g!.alive.includes(name)) badge("watching");
-          return li;
+          const stamps = h("span", { class: "stamps" });
+          const stamp = (t: string, kind: string) => stamps.append(h("span", { class: `stamp ${kind}` }, t));
+          if (name === s.host) stamp("Host", "host");
+          if (inGame && g!.ghosts.includes(name)) stamp("Out", "out");
+          else if (inGame && !g!.alive.includes(name)) stamp("Watching", "watching");
+          return h("li", {}, avatar(name), h("span", { class: "name" }, name), stamps);
         }),
       );
       $("count").textContent = String(s.members.length);
@@ -300,9 +333,12 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     const hasTheme = !!me.theme;
     show("role-toggle", hasTheme);
     const open = !hasTheme || roleShown;
-    show("role-body", open);
-    show("role-hidden", !open);
-    $("role-toggle").textContent = open ? "Hide" : "Show";
+    // Face-down shows a back that is the same for everyone: it says nothing about roles.
+    $("theme-card").classList.toggle("flipped", !open);
+    $("role-body").setAttribute("aria-hidden", String(!open));
+    $("role-back").setAttribute("aria-hidden", String(open));
+    $("role-toggle-text").textContent = open ? "Hide" : "Show";
+    $("role-toggle").querySelector("i")!.className = `ph-bold ${open ? "ph-eye-slash" : "ph-eye"}`;
     $("role-toggle").setAttribute("aria-expanded", String(open));
     $("role-text").textContent = me.theme ?? "You're watching this game.";
     $("role-h").textContent = hasTheme ? "Your theme" : "Watching";
@@ -340,7 +376,17 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
             : `${name(np)} is playing on ${state!.host}'s phone.`;
     once("slots", JSON.stringify([slots, host]), () => {
       $("slots").replaceChildren(
-        ...slots.map((n) => h("li", {}, host ? button(name(n), () => playByHost(n), { aria: `Play ${name(n)}` }) : h("span", { class: "slot" }, name(n)))),
+        ...slots.map((n) => {
+          const inner = [
+            h("span", { class: "record", "aria-hidden": "true" }),
+            h("span", { class: "playing-stamp stamp", "aria-hidden": "true" }, "Playing"),
+            h("span", { class: "sleeve-text", "aria-hidden": "true" }, h("span", { class: "lbl" }, "Track"), h("span", { class: "num" }, String(n + 1))),
+          ];
+          if (!host) return h("li", {}, h("span", { class: "slot", "aria-label": name(n) }, ...inner));
+          const b = h("button", { type: "button", "aria-label": `Play ${name(n)}` }, ...inner) as HTMLButtonElement;
+          b.addEventListener("click", () => playByHost(n));
+          return h("li", {}, b);
+        }),
       );
     });
     for (const [i, li] of [...$("slots").children].entries()) {
@@ -377,7 +423,11 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     show("vote-done", voter && locked);
     once("names", JSON.stringify([g.alive, voter]), () => {
       $("names").replaceChildren(
-        ...g.alive.filter((n) => n !== myName).map((n) => button(n, () => vote(n), { disabled: !voter, aria: `Vote for ${n}` })),
+        ...g.alive.filter((n) => n !== myName).map((n) => {
+          const b = button("", () => vote(n), { disabled: !voter, aria: `Vote for ${n}` });
+          b.append(avatar(n), h("span", {}, n));
+          return b;
+        }),
         button("Skip", () => vote("skip"), { secondary: true, disabled: !voter, aria: "Skip: vote for nobody" }),
       );
     });
@@ -397,7 +447,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     once("themes", JSON.stringify(g.themes ?? []), () => {
       $("themes-list").replaceChildren(
         ...(g.themes ?? []).map((t) =>
-          h("li", {}, h("strong", {}, `Round ${t.round}: `), "most of you had ", h("em", {}, t.majority), "; the mole had ", h("em", {}, t.mole), "."),
+          h("li", {}, h("span", { class: "t" }, h("strong", {}, `Round ${t.round}: `), "most of you had ", h("em", {}, t.majority), "; the mole had ", h("em", {}, t.mole), ".")),
         ),
       );
     });
@@ -408,8 +458,9 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
         : "Nobody was voted out.";
     once("reveal", JSON.stringify(r?.slots ?? []), () => {
       $("reveal-slots").replaceChildren(
-        ...(r?.slots ?? []).map((t) => {
-          const li = trackRow(t, h("span", { class: "owner" }, `Track ${t.slot + 1}: `, h("strong", {}, t.owner)));
+        ...(r?.slots ?? []).map((t, i) => {
+          const li = trackRow(t, h("span", { class: "owner" }, h("span", { class: "slot-no" }, `Track ${t.slot + 1}: `), h("strong", {}, t.owner)));
+          li.style.setProperty("--i", String(i));
           return li;
         }),
       );
@@ -429,9 +480,13 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
   function tick() {
     const g = state?.game;
     const el = $("countdown");
-    if (!state || !g || g.winner || g.deadline === null) return void (el.textContent = "");
+    if (!state || !g || g.winner || g.deadline === null) {
+      el.classList.remove("low");
+      return void (el.textContent = "");
+    }
     const left = Math.max(0, Math.ceil((g.deadline - (Date.now() + clockSkew)) / 1000));
     el.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+    el.classList.toggle("low", left < 10);
     // Announce once per phase, not every second.
     const key = `${g.round}:${g.phase}`;
     if (left <= 10 && left > 0 && announcedLow !== key && (g.phase === "pick" || g.phase === "vote")) {
@@ -472,7 +527,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
   // ---- picking, voting, hosting ----
 
   function pickRow(t: Found) {
-    return trackRow(t, button("Pick", () => pick(t.id, t), { aria: `Pick ${t.title} by ${t.artist}` }));
+    return trackRow(t, h("div", { class: "acts" }, button("Pick", () => pick(t.id, t), { aria: `Pick ${t.title} by ${t.artist}` })));
   }
 
   let picking = false;
@@ -656,11 +711,37 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
       if (g && next.status === "playing") announce(g.phase === "pick" ? `Round ${g.round}. Pick a song.` : `${phaseWords[g.phase]}.`);
       else if (g?.winner) announce(g.winner === "players" ? "Game over. The players caught every mole." : "Game over. The moles took over.");
       void refreshMe();
+      pendingEnter = true;
       if (g && (g.phase === "listen" || g.phase === "vote")) void refreshSlots();
     }
     render();
+    if (pendingEnter) {
+      pendingEnter = false;
+      enterPhase();
+    }
     syncAudio();
   }
+
+  // Phase change: slide the visible main cards in (transform and opacity only;
+  // CSS turns this off under reduced motion).
+  let pendingEnter = false;
+  function enterPhase() {
+    for (const el of document.querySelectorAll<HTMLElement>(".phase:not([hidden])")) {
+      el.classList.remove("enter");
+      void el.offsetWidth;
+      el.classList.add("enter");
+    }
+  }
+
+  $("copy-code").addEventListener("click", async () => {
+    const note = $("copy-msg");
+    try {
+      await navigator.clipboard.writeText(code);
+      note.textContent = "Code copied.";
+    } catch {
+      note.textContent = `Could not copy. The code is ${code}.`;
+    }
+  });
 
   // The page is signed in (the server redirects otherwise); make sure this
   // person is a member, then watch the table. EventSource reconnects by itself,

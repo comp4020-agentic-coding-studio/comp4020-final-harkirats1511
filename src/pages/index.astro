@@ -14,7 +14,7 @@ const tasteCount = me ? listTaste(me.id).length : 0;
   <p class="pitch">A party game for friends in one room. Everyone picks a song. One of you got a slightly different theme.</p>
   {me ? (
     <>
-      <p class="who"><span class={`avatar av-${avatarSlot(me.name)}`} aria-hidden="true">{avatarInitial(me.name)}</span><span>Signed in as <strong>{me.name}</strong>.</span></p>
+      <p class="who"><span class={`avatar av-${avatarSlot(me.name)}`} aria-hidden="true" data-initial={avatarInitial(me.name)}></span><span>Signed in as <strong>{me.name}</strong>.</span></p>
       <section class="card" aria-labelledby="create-h">
         <h2 id="create-h">Start a table</h2>
         <p class="hint">You get a code to share with the room.</p>
