@@ -244,7 +244,8 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     show("v-lobby", !inGame);
     // How to play: open until a game has been played here, then folded away.
     show("howto", !inGame || over);
-    if (!howtoSet) {
+    // Folded away once a game is on, and for anyone who arrives after one.
+    if (!howtoSet || playing) {
       howtoSet = true;
       ($("howto") as HTMLDetailsElement).open = !g;
     }
