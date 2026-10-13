@@ -175,3 +175,18 @@ export const votes = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.gameId, t.round, t.voterPersonId] })],
 );
+
+// A person's avatar: one value per part, each from the lists in avatar.ts.
+// No row means the default derived from their id.
+export const avatars = sqliteTable("avatars", {
+  personId: text("person_id")
+    .primaryKey()
+    .references(() => people.id, { onDelete: "cascade" }),
+  character: text("character").notNull(),
+  colour: text("colour").notNull(),
+  hat: text("hat").notNull(),
+  accessory: text("accessory").notNull(),
+  aid: text("aid").notNull(),
+  mood: text("mood").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
