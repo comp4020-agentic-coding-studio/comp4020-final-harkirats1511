@@ -2,7 +2,7 @@ import { randomInt } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { and, asc, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "./db.ts";
-import { gamePlayers, games, people, picks, tableMembers, tables } from "./schema.ts";
+import { gamePlayers, gameThemes, games, people, picks, tableMembers, tables } from "./schema.ts";
 
 // No I or O: they read as 1 and 0 when a code is shouted across a room.
 const LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ";
@@ -11,7 +11,7 @@ export const MIN_PLAYERS = 3;
 export const MAX_PLAYERS = 10;
 export const DEFAULT_PICK_SECONDS = 60;
 export const DEFAULT_VOTE_SECONDS = 45;
-export type TableOptions = { pickSeconds: number; voteSeconds: number; speaker: "host" | "every"; moles: number | null };
+export type TableOptions = { pickSeconds: number; voteSeconds: number; moles: number | null };
 
 export function normaliseCode(raw: unknown): string {
   return String(raw ?? "").trim().toUpperCase();
@@ -90,7 +90,7 @@ export function setStatus(code: string, status: string) {
 // What anyone holding the code may see, and all the event stream ever carries:
 // no ids, no PINs, nothing private to one player. Always read from the
 // database, so a reconnect or a restart restores it. Before the reveal it holds
-// nothing about roles, targets, picks or votes, so it cannot change when
+// nothing about roles, themes, picks or votes, so it cannot change when
 // someone picks or votes; only the phase moving on shows it.
 export type PublicGame = {
   round: number;
@@ -105,12 +105,13 @@ export type PublicGame = {
     slots: { slot: number; owner: string; title: string; artist: string; cover?: string }[];
   };
   winner?: string;
+  // Every round's pair, only once the game is over.
+  themes?: { round: number; majority: string; mole: string }[];
 };
 export type PublicTable = {
   code: string;
   status: string;
   host: string;
-  speaker: string;
   members: string[];
   game?: PublicGame;
 };
@@ -135,7 +136,15 @@ function publicGame(code: string): PublicGame | undefined {
     alive: inGame.filter((p) => p.ejected === null).map((p) => p.name),
     ghosts: inGame.filter((p) => p.ejected !== null).map((p) => p.name),
   };
-  if (g.winner) out.winner = g.winner;
+  if (g.winner) {
+    out.winner = g.winner;
+    out.themes = db
+      .select({ round: gameThemes.round, majority: gameThemes.majority, mole: gameThemes.mole })
+      .from(gameThemes)
+      .where(eq(gameThemes.gameId, g.id))
+      .orderBy(asc(gameThemes.round))
+      .all();
+  }
   if (g.phase === "reveal" || g.winner) {
     const ejected = inGame.find((p) => p.id === g.ejectedPersonId);
     const slots = db
@@ -170,7 +179,7 @@ function roleOf(gameId: string, personId: string): string | undefined {
 
 export function publicState(code: string): PublicTable | null {
   const t = db
-    .select({ code: tables.code, status: tables.status, host: people.name, speaker: tables.speaker })
+    .select({ code: tables.code, status: tables.status, host: people.name })
     .from(tables)
     .innerJoin(people, eq(people.id, tables.hostPersonId))
     .where(eq(tables.code, code))

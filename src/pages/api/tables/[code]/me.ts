@@ -3,7 +3,7 @@ import { json, personFromCookies } from "../../../../lib/auth.ts";
 import { myView } from "../../../../lib/game.ts";
 import { isMember, normaliseCode, tableExists } from "../../../../lib/tables.ts";
 
-// This person's private view of the game: only a mole has a target.
+// This person's private view: their own theme and whether they picked. Same shape for everyone.
 export const GET: APIRoute = ({ params, cookies }) => {
   const me = personFromCookies(cookies);
   if (!me) return json({ error: "Sign in first." }, 401);

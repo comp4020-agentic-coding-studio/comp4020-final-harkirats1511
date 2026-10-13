@@ -1,7 +1,8 @@
 import { randomInt, randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "./db.ts";
-import { gamePlayers, games, people, picks, tableMembers, tables, targets, tasteTracks, votes } from "./schema.ts";
+import { gamePlayers, gameThemes, games, people, picks, tableMembers, tables, votes } from "./schema.ts";
+import { THEMES } from "./themes.ts";
 import {
   currentGame, defaultMoles, MAX_PLAYERS, maxMoles, MIN_PLAYERS, notifyTable, tableOptions,
 } from "./tables.ts";
@@ -42,25 +43,19 @@ function winnerOf(d: Tx | typeof db, gameId: string): "players" | "moles" | null
   return moles >= alive.length - moles ? "moles" : null;
 }
 
-// Each alive mole gets a target among alive non-mole players, a different one
-// from last round when there is a choice. Not a ghost, not themselves, not a mole.
-function assignTargets(d: Tx, gameId: string, round: number, only?: string[]) {
-  const alive = inPlay(d, gameId).filter((p) => p.ejectedRound === null);
-  const candidates = alive.filter((p) => p.role !== "mole").map((p) => p.personId);
-  if (!candidates.length) return;
-  const last = new Map(
-    d.select().from(targets).where(and(eq(targets.gameId, gameId), eq(targets.round, round - 1))).all()
-      .map((t) => [t.molePersonId, t.targetPersonId]),
+// Draw this round's theme pair: one not yet used in this game (if the whole
+// list were somehow used up, any will do), and a coin flip for which side the
+// majority gets so a pair can't be learnt. Moles all share the odd side.
+function drawTheme(d: Tx, gameId: string, round: number) {
+  const used = new Set(
+    d.select({ m: gameThemes.majority, o: gameThemes.mole }).from(gameThemes).where(eq(gameThemes.gameId, gameId)).all()
+      .flatMap((r) => [r.m, r.o]),
   );
-  for (const mole of alive.filter((p) => p.role === "mole" && (!only || only.includes(p.personId)))) {
-    const fresh = candidates.filter((c) => c !== last.get(mole.personId));
-    const pool = fresh.length ? fresh : candidates;
-    const targetPersonId = pool[randomInt(pool.length)];
-    d.insert(targets)
-      .values({ gameId, round, molePersonId: mole.personId, targetPersonId })
-      .onConflictDoUpdate({ target: [targets.gameId, targets.round, targets.molePersonId], set: { targetPersonId } })
-      .run();
-  }
+  const fresh = THEMES.filter(([a, b]) => !used.has(a) && !used.has(b));
+  const pool = fresh.length ? fresh : THEMES;
+  const [x, y] = pool[randomInt(pool.length)];
+  const flip = randomInt(2) === 1;
+  d.insert(gameThemes).values({ gameId, round, majority: flip ? y : x, mole: flip ? x : y }).run();
 }
 
 // ---- starting ----
@@ -94,7 +89,7 @@ export function startGame(code: string): StartResult {
     for (const personId of members) {
       tx.insert(gamePlayers).values({ gameId: id, personId, role: moles.has(personId) ? "mole" : "player" }).run();
     }
-    assignTargets(tx, id, 1);
+    drawTheme(tx, id, 1);
     tx.update(tables).set({ status: "playing" }).where(eq(tables.code, code)).run();
     return { ok: true };
   });
@@ -162,7 +157,7 @@ function step(d: Tx, g: Game) {
       .set({ round: g.round + 1, phase: "pick", deadline: now + t.pickSeconds * 1000, ejectedPersonId: null, nowPlaying: null })
       .where(eq(games.id, g.id))
       .run();
-    assignTargets(d, g.id, g.round + 1);
+    drawTheme(d, g.id, g.round + 1);
   }
 }
 
@@ -362,14 +357,6 @@ export function leaveTable(code: string, personId: string): boolean {
     const g = currentGame(code);
     if (t.status === "playing" && g && !g.winner && playerRow(g, personId)) {
       tx.update(gamePlayers).set({ left: 1 }).where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.personId, personId))).run();
-      // A mole whose target just left needs a new one.
-      const orphaned = tx
-        .select({ mole: targets.molePersonId })
-        .from(targets)
-        .where(and(eq(targets.gameId, g.id), eq(targets.round, g.round), eq(targets.targetPersonId, personId)))
-        .all()
-        .map((r) => r.mole);
-      if (orphaned.length) assignTargets(tx, g.id, g.round, orphaned);
       settle(tx, code);
     }
     return true;
@@ -380,23 +367,19 @@ export function leaveTable(code: string, personId: string): boolean {
 
 // ---- what a player may see ----
 
-export function myView(code: string, personId: string): { role: string; target?: string; picked?: boolean } | null {
+// Everyone's view has the same shape and wording: their own theme and whether
+// they have picked. A mole's role reads "player"; only the theme text differs,
+// and nothing says which side is the odd one. Ghosts get the majority theme.
+export function myView(code: string, personId: string): { role: string; theme?: string; picked?: boolean } | null {
   const g = currentGame(code);
   if (!g) return { role: "spectator" };
   const me = playerRow(g, personId);
   if (!me) return { role: "spectator" };
-  // Private to this person: whether they're in this round's vote.
   const picked = pickedThisRound(db, g).has(personId);
-  if (me.ejectedRound !== null) return { role: "ghost", picked };
-  if (me.role !== "mole") return { role: "player", picked };
-  const t = db
-    .select({ id: targets.targetPersonId })
-    .from(targets)
-    .where(and(eq(targets.gameId, g.id), eq(targets.round, g.round), eq(targets.molePersonId, personId)))
-    .get();
-  if (!t) return { role: "mole", picked };
-  const name = db.select({ n: people.name }).from(people).where(eq(people.id, t.id)).get()?.n;
-  return name ? { role: "mole", target: name, picked } : { role: "mole", picked };
+  const t = db.select().from(gameThemes).where(and(eq(gameThemes.gameId, g.id), eq(gameThemes.round, g.round))).get();
+  const theme = t && (me.ejectedRound === null && me.role === "mole" ? t.mole : t.majority);
+  const role = me.ejectedRound !== null ? "ghost" : "player";
+  return theme ? { role, theme, picked } : { role, picked };
 }
 
 // The shuffled, anonymous slots while the room listens and votes: positions
@@ -424,43 +407,7 @@ export function slotTrackId(code: string, slot: number): number | Fail {
   return row ? row.id : fail(404, "No such slot.");
 }
 
-// ---- the mole's dossier and the speaker's now-playing ----
-
-const DOSSIER_PICKS = 10;
-
-// What a mole studies about this round's target: their taste file and what they
-// picked in earlier rounds and games here, most recent first. Only the current
-// round's pick is left out, since it is still a secret. Null for anyone but a
-// mole with a target. Names and tracks only: no ids, no PIN.
-export function dossierFor(code: string, personId: string) {
-  const g = currentGame(code);
-  if (!g || g.winner) return null;
-  const me = playerRow(g, personId);
-  if (!me || me.role !== "mole" || me.ejectedRound !== null) return null;
-  const t = db
-    .select({ id: targets.targetPersonId })
-    .from(targets)
-    .where(and(eq(targets.gameId, g.id), eq(targets.round, g.round), eq(targets.molePersonId, personId)))
-    .get();
-  if (!t) return null;
-  const name = db.select({ n: people.name }).from(people).where(eq(people.id, t.id)).get()?.n;
-  if (!name) return null;
-  const taste = db
-    .select({ title: tasteTracks.title, artist: tasteTracks.artist, cover: tasteTracks.cover })
-    .from(tasteTracks)
-    .where(eq(tasteTracks.personId, t.id))
-    .orderBy(asc(tasteTracks.addedAt), sql`rowid`)
-    .all()
-    .map((r) => ({ title: r.title, artist: r.artist, ...(r.cover ? { cover: r.cover } : {}) }));
-  const past = db
-    .select({ title: picks.title, artist: picks.artist, cover: picks.cover })
-    .from(picks)
-    .where(and(eq(picks.personId, t.id), or(ne(picks.gameId, g.id), ne(picks.round, g.round))))
-    .orderBy(desc(picks.pickedAt))
-    .limit(DOSSIER_PICKS)
-    .all();
-  return { name, taste, picks: past.map((r) => ({ title: r.title, artist: r.artist, ...(r.cover ? { cover: r.cover } : {}) })) };
-}
+// ---- the speaker's now-playing ----
 
 // The host says which anonymous slot is playing; every phone follows it.
 export function setNowPlaying(code: string, slot: number): { ok: true } | Fail {
