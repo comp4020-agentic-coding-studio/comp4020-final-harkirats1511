@@ -7,23 +7,23 @@ if (!me) return Astro.redirect("/?next=/taste");
 const initial = listTaste(me.id);
 ---
 <Base title="Your taste file · Mole">
-  <p class="hint"><a href="/">Back</a></p>
+  <a class="back-link" href="/"><i class="ph-bold ph-arrow-left" aria-hidden="true"></i>Back</a>
   <h1>Your taste file</h1>
   <p class="hint">Up to {TASTE_MAX} tracks you would actually play. A mole studies this to pass as you.</p>
 
   <section class="card" aria-labelledby="mine-h">
-    <h2 id="mine-h" style="margin-top:0">Your tracks <span class="counter" id="counter" aria-live="polite"></span></h2>
+    <div class="card-head"><h2 id="mine-h">Your tracks</h2><span class="counter stamp mono" id="counter" aria-live="polite"></span></div>
     <ul class="tracks" id="mine" aria-labelledby="mine-h"></ul>
     <p class="hint" id="empty" hidden>Nothing yet. Search below and add a few.</p>
     <audio id="player" controls hidden aria-label="Track preview"></audio>
   </section>
 
   <section class="card" aria-labelledby="find-h">
-    <h2 id="find-h" style="margin-top:0">Add a track</h2>
+    <h2 id="find-h">Add a track</h2>
     <form id="search" role="search">
       <label for="q">Search songs or artists</label>
       <input id="q" name="q" type="search" autocomplete="off" required />
-      <button type="submit">Search</button>
+      <button type="submit"><i class="ph-bold ph-magnifying-glass" aria-hidden="true"></i>Search</button>
     </form>
     <p class="hint" id="full" hidden>Your taste file is full. Remove a track to add another.</p>
     <p id="msg" class="error" role="alert"></p>
@@ -49,7 +49,18 @@ const initial = listTaste(me.id);
 
   function row(t, action) {
     const li = document.createElement("li");
-    const art = t.cover ? Object.assign(document.createElement("img"), { src: t.cover, alt: "", width: 48, height: 48, loading: "lazy" }) : Object.assign(document.createElement("div"), { className: "nocover" });
+    const art = document.createElement("div");
+    art.className = "sleeve-art";
+    if (t.cover) art.append(Object.assign(document.createElement("img"), { src: t.cover, alt: "", width: 56, height: 56, loading: "lazy" }));
+    else {
+      const nc = document.createElement("div");
+      nc.className = "nocover";
+      const ic = document.createElement("i");
+      ic.className = "ph-bold ph-music-notes";
+      ic.setAttribute("aria-hidden", "true");
+      nc.append(ic);
+      art.append(nc);
+    }
     const meta = document.createElement("div");
     meta.className = "meta";
     const title = document.createElement("strong");
@@ -58,9 +69,12 @@ const initial = listTaste(me.id);
     artist.textContent = t.artist;
     meta.append(title, artist);
     const play = Object.assign(document.createElement("button"), { type: "button", className: "secondary", textContent: "Play" });
+    const acts = document.createElement("div");
+    acts.className = "acts";
     play.setAttribute("aria-label", `Play preview of ${t.title} by ${t.artist}`);
     play.addEventListener("click", () => preview(t.id));
-    li.append(art, meta, play, action);
+    acts.append(play, action);
+    li.append(art, meta, acts);
     return li;
   }
 

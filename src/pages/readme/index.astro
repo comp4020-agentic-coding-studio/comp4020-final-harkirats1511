@@ -3,7 +3,7 @@ import Base from "../../layouts/Base.astro";
 import { renderReadme } from "../../lib/readme.ts";
 const html = renderReadme();
 ---
-<Base title="README" wide>
-  <p><a href="/">Back to the app</a></p>
-  <div class="prose" set:html={html} />
+<Base title="README" width="prose">
+  <a class="back-link" href="/"><i class="ph-bold ph-arrow-left" aria-hidden="true"></i>Back to the app</a>
+  <article class="prose" set:html={html} />
 </Base>
