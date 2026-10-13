@@ -10,57 +10,62 @@ const tasteCount = me ? listTaste(me.id).length : 0;
 ---
 <Base title="Mole">
   <h1>Mole</h1>
+  <p class="pitch">A party game for friends in one room. Everyone picks a song. One of you got a slightly different theme.</p>
   {me ? (
-    <p>Signed in as <strong>{me.name}</strong>.</p>
-    <section class="card" aria-labelledby="taste-h">
-      <h2 id="taste-h" style="margin-top:0">Your taste file</h2>
-      <p class="hint">{tasteCount} / 10 tracks.</p>
-      {tasteCount < 5 && <p class="nudge">A mole needs something to study. Add a few tracks you would actually play.</p>}
-      <p><a href="/taste">{tasteCount === 0 ? "Build your taste file" : "Edit your taste file"}</a></p>
-    </section>
-    <section class="card" aria-labelledby="create-h">
-      <h2 id="create-h">Start a table</h2>
-      <p class="hint">You get a code to share with the room.</p>
-      <details class="options">
-        <summary>Table options</summary>
-        <label for="pick-s">Time to pick a song</label>
-        <select id="pick-s">
-          <option value="30">30 seconds</option>
-          <option value="60" selected>60 seconds</option>
-          <option value="90">90 seconds</option>
-        </select>
-        <label for="vote-s">Time to vote</label>
-        <select id="vote-s">
-          <option value="30">30 seconds</option>
-          <option value="45" selected>45 seconds</option>
-          <option value="60">60 seconds</option>
-        </select>
-        <label for="moles">Moles</label>
-        <select id="moles" aria-describedby="moles-hint">
-          <option value="" selected>Auto (1 up to 5 players, 2 up to 10)</option>
-          <option value="1">1</option>
-          <option value="2">2</option>
-          <option value="3">3</option>
-          <option value="4">4</option>
-        </select>
-        <p class="hint" id="moles-hint">Moles must stay fewer than everyone else: 2 need 5 players, 3 need 7, 4 need 9. Start tells you if the table is too small.</p>
-      </details>
-      <button id="create" type="button">Create a table</button>
-    </section>
-    <section class="card" aria-labelledby="join-h">
-      <h2 id="join-h">Join a table</h2>
-      <form id="join-code" class="row">
-        <div>
+    <>
+      <p class="who"><span class="avatar av-0" id="me-avatar" aria-hidden="true">{me.name.trim().slice(0, 1).toUpperCase()}</span><span>Signed in as <strong>{me.name}</strong>.</span></p>
+      <section class="card" aria-labelledby="create-h">
+        <h2 id="create-h">Start a table</h2>
+        <p class="hint">You get a code to share with the room.</p>
+        <details class="options">
+          <summary>Table options</summary>
+          <label for="pick-s">Time to pick a song</label>
+          <select id="pick-s">
+            <option value="30">30 seconds</option>
+            <option value="60" selected>60 seconds</option>
+            <option value="90">90 seconds</option>
+          </select>
+          <label for="vote-s">Time to vote</label>
+          <select id="vote-s">
+            <option value="30">30 seconds</option>
+            <option value="45" selected>45 seconds</option>
+            <option value="60">60 seconds</option>
+          </select>
+          <label for="moles">Moles</label>
+          <select id="moles" aria-describedby="moles-hint">
+            <option value="" selected>Auto (1 up to 5 players, 2 up to 10)</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+          </select>
+          <p class="hint" id="moles-hint">Moles must stay fewer than everyone else: 2 need 5 players, 3 need 7, 4 need 9. Start tells you if the table is too small.</p>
+        </details>
+        <button id="create" type="button" class="full">Create a table</button>
+      </section>
+      <section class="card" aria-labelledby="join-h">
+        <h2 id="join-h">Join a table</h2>
+        <form id="join-code">
           <label for="code">Table code</label>
-          <input id="code" name="code" maxlength="4" autocomplete="off" autocapitalize="characters" required />
-        </div>
-        <button type="submit">Join</button>
-      </form>
-    </section>
-    <p id="msg" class="error" role="alert"></p>
+          <input id="code" name="code" class="mono-input" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" required />
+          <button type="submit">Join</button>
+        </form>
+      </section>
+      <section class="card" aria-labelledby="taste-h">
+        <h2 id="taste-h">Your taste file</h2>
+        <p class="hint">{tasteCount} / 10 tracks.</p>
+        {tasteCount < 5 && <p class="nudge">A mole needs something to study. Add a few tracks you would actually play.</p>}
+        <p><a href="/taste">{tasteCount === 0 ? "Build your taste file" : "Edit your taste file"}</a></p>
+      </section>
+      <p id="msg" class="error" role="alert"></p>
+    </>
   ) : (
-    <p>A party game for friends in one room. Pick a name and a PIN to get in.</p>
-    <form id="sign-in" class="card" data-next={safeNext}>
+    <form id="sign-in" class="card member-card" data-next={safeNext} aria-labelledby="member-h">
+      <div class="card-top">
+        <h2 id="member-h" style="margin:0">Membership card</h2>
+        <span class="stamp">Members only</span>
+      </div>
+      <div class="stripe" aria-hidden="true"></div>
       <label for="name">Name</label>
       <input id="name" name="name" maxlength="24" autocomplete="username" required />
       <label for="pin">PIN (4 to 8 digits)</label>
