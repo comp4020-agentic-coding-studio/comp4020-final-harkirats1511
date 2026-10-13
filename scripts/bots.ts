@@ -26,7 +26,7 @@ const BOTS = [
 type Track = { id: number; title: string; artist: string };
 type Game = { round: number; phase: string; deadline: number | null; alive: string[]; ghosts: string[]; winner?: string };
 type State = { status: string; host: string; members: string[]; game?: Game };
-type Me = { role: string; target?: string; picked?: boolean };
+type Me = { role: string; theme?: string; picked?: boolean };
 
 const args = process.argv.slice(2);
 let base = process.env.APP_URL ?? DEFAULT_URL;
@@ -137,27 +137,10 @@ class Bot {
     else if (g.phase === "reveal") log(this.name, `round ${g.round} reveal`);
   }
 
-  async chooseTrack(me: Me): Promise<Track | undefined> {
-    const own = () => pickOne(this.taste);
-    if (me.role !== "mole") return own();
-    const d = await this.call(`/api/tables/${code}/dossier`);
-    if (!d.ok) return own();
-    const taste = (d.data.taste ?? []) as { title: string; artist: string }[];
-    const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
-    const artists = [...new Set(taste.map((t) => t.artist))].sort(() => Math.random() - 0.5);
-    for (const artist of artists.slice(0, 3)) {
-      const hits = (await this.search(artist)).filter(
-        (t) => same(t.artist, artist) && !taste.some((x) => same(x.title, t.title) && same(x.artist, t.artist)),
-      );
-      const t = pickOne(hits);
-      if (t) { log(this.name, `mole studied ${d.data.name}: same artist as "${artist}"`); return t; }
-    }
-    // Fall back to one of the target's own tracks (the dossier has no ids: look it up).
-    for (const x of taste.sort(() => Math.random() - 0.5).slice(0, 3)) {
-      const t = (await this.search(`${x.title} ${x.artist}`)).find((h) => same(h.title, x.title) && same(h.artist, x.artist));
-      if (t) { log(this.name, `mole studied ${d.data.name}: copying one of their tracks`); return t; }
-    }
-    return own();
+  // Bots can't judge a theme, so they play from their own taste file at random
+  // (searching their genre word if the file is empty). The theme is only logged.
+  async chooseTrack(): Promise<Track | undefined> {
+    return pickOne(this.taste) ?? pickOne(await this.search(this.genre));
   }
 
   async pick(g: Game, mine: number) {
@@ -165,13 +148,12 @@ class Bot {
     if (!me) return;
     if (mine !== this.run) return;
     if (me.role === "spectator") { log(this.name, `round ${g.round}: spectating`); return; }
-    const what = me.role === "mole" ? `the MOLE, faking ${me.target ?? "?"}` : `a ${me.role.toUpperCase()}`;
-    log(this.name, `round ${g.round}: ${this.name} is ${what}`);
+    log(this.name, `round ${g.round}: theme "${me.theme ?? "?"}" (${me.role})`);
     if (me.picked) return;
     // Prepare the choice while "thinking"; the delay counts from round start.
     const wait = this.delay(3, 15, g.deadline);
     const t0 = Date.now();
-    const track = await this.chooseTrack(me);
+    const track = await this.chooseTrack();
     await sleep(Math.max(0, wait - (Date.now() - t0)));
     if (mine !== this.run || !track) return;
     const r = await this.call(`/api/tables/${code}/pick`, { trackId: track.id });
@@ -181,11 +163,11 @@ class Bot {
   async vote(g: Game, mine: number) {
     const me = (await this.call(`/api/tables/${code}/me`)).data as Me | null;
     if (!me || mine !== this.run) return;
-    if (me.role !== "player" && me.role !== "mole") return;
+    if (me.role !== "player") return;
     if (!me.picked) { log(this.name, `round ${g.round}: sits the vote out (no pick)`); return; }
     await sleep(this.delay(3, 12, g.deadline));
     if (mine !== this.run) return;
-    const others = g.alive.filter((n) => n !== this.name); // moles cannot tell who else is one
+    const others = g.alive.filter((n) => n !== this.name); // nobody can tell who the mole is
     const choice = others.length && Math.random() < 0.8 ? pickOne(others)! : "skip";
     const r = await this.call(`/api/tables/${code}/vote`, { name: choice });
     if (r.ok) log(this.name, `voted ${choice}`);
