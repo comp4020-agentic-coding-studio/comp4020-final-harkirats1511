@@ -25,7 +25,7 @@ const BOTS = [
 
 type Track = { id: number; title: string; artist: string };
 type Game = { round: number; phase: string; deadline: number | null; alive: string[]; ghosts: string[]; winner?: string };
-type State = { status: string; host: string; members: string[]; game?: Game };
+type State = { status: string; host: string; members: { name: string }[]; game?: Game };
 type Me = { role: string; theme?: string; picked?: boolean };
 
 const args = process.argv.slice(2);

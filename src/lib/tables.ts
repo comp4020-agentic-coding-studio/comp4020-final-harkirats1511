@@ -1,8 +1,9 @@
 import { randomInt } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { and, asc, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { type Avatar, defaultAvatar, PARTS } from "./avatar.ts";
 import { db } from "./db.ts";
-import { gamePlayers, gameThemes, games, people, picks, tableMembers, tables } from "./schema.ts";
+import { avatars, gamePlayers, gameThemes, games, people, picks, tableMembers, tables } from "./schema.ts";
 
 // No I or O: they read as 1 and 0 when a code is shouted across a room.
 const LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ";
@@ -112,7 +113,7 @@ export type PublicTable = {
   code: string;
   status: string;
   host: string;
-  members: string[];
+  members: { name: string; avatar: Avatar }[];
   game?: PublicGame;
 };
 
@@ -186,13 +187,17 @@ export function publicState(code: string): PublicTable | null {
     .get();
   if (!t) return null;
   const members = db
-    .select({ name: people.name })
+    .select({ id: people.id, name: people.name, a: avatars })
     .from(tableMembers)
     .innerJoin(people, eq(people.id, tableMembers.personId))
+    .leftJoin(avatars, eq(avatars.personId, people.id))
     .where(eq(tableMembers.tableCode, code))
     .orderBy(asc(tableMembers.joinedAt), asc(people.name))
     .all()
-    .map((m) => m.name);
+    .map((m) => ({
+      name: m.name,
+      avatar: m.a ? (Object.fromEntries(PARTS.map((p) => [p, m.a![p]])) as Avatar) : defaultAvatar(m.id),
+    }));
   const game = publicGame(code);
   return game ? { ...t, members, game } : { ...t, members };
 }
