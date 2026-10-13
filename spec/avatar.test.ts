@@ -4,13 +4,16 @@ import { baseUrl, session, uniqueName } from "./helpers";
 // Contract: each person has an avatar, a small set of choices from fixed lists,
 // shown to everyone at their table (2D badge now, 3D character later).
 //   GET  /api/avatar/options -> {[part]: string[]}  every allowed value per part
-//   GET  /api/avatar         -> this person's avatar {body, skin, colour, hair,
-//                               hat, accessory, face}; a default until they choose
+//   GET  /api/avatar         -> this person's avatar {character, colour, hat,
+//                               accessory, aid, mood}; a default until they choose
+// The parts follow what the 3D models can show: `character` picks one of the
+// CC0 Kenney Mini Characters (hair and skin come with it), `colour` tints the
+// outfit, `aid` is a mobility aid from the same pack, `mood` sets the idle pose.
 //   PUT  /api/avatar {...}   -> saves it; every part must be one of its options
 // Public table state lists members as {name, avatar}, so phones draw each other.
 
 type Avatar = Record<string, string>;
-const PARTS = ["body", "skin", "colour", "hair", "hat", "accessory", "face"];
+const PARTS = ["character", "colour", "hat", "accessory", "aid", "mood"];
 
 async function signedIn() {
   const s = session();

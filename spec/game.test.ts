@@ -32,7 +32,7 @@ type Game = {
   winner?: "players" | "moles";
   themes?: { round: number; majority: string; mole: string }[];
 };
-type State = { status: string; members: string[]; game?: Game };
+type State = { status: string; members: { name: string }[]; game?: Game };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
