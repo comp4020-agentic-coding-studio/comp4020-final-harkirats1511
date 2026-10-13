@@ -35,11 +35,6 @@ const tasteCount = me ? listTaste(me.id).length : 0;
           <option value="45" selected>45 seconds</option>
           <option value="60">60 seconds</option>
         </select>
-        <label for="speaker">Where the music plays</label>
-        <select id="speaker">
-          <option value="host" selected>This phone plays the music</option>
-          <option value="every">Every phone plays</option>
-        </select>
         <label for="moles">Moles</label>
         <select id="moles" aria-describedby="moles-hint">
           <option value="" selected>Auto (1 up to 5 players, 2 up to 10)</option>
@@ -101,7 +96,6 @@ const tasteCount = me ? listTaste(me.id).length : 0;
     const { res, data } = await post("/api/tables", {
       pickSeconds: Number(value("pick-s")),
       voteSeconds: Number(value("vote-s")),
-      speaker: value("speaker"),
       moles: value("moles") ? Number(value("moles")) : null,
     });
     if (!res.ok) return say(data.error ?? "Could not create a table.");

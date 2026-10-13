@@ -35,32 +35,37 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
       <span class="countdown" id="countdown" role="timer" aria-live="off"></span>
     </p>
 
+    <details class="card howto" id="howto" hidden>
+      <summary>How to play</summary>
+      <ol>
+        <li>Everyone gets a secret theme, like "a song for crying in the car".</li>
+        <li>One or two people get a slightly different theme, and they are not told. It might be you.</li>
+        <li>Pick a song that fits your theme.</li>
+        <li>Every song plays without a name on it. Listen, then talk it over.</li>
+        <li>Vote out whoever's song doesn't seem to fit.</li>
+        <li>The game ends when the moles are all out, or when they are as many as everyone else.</li>
+      </ol>
+    </details>
+
     <section class="card role" id="v-role" aria-labelledby="role-h" hidden>
       <div class="role-head">
-        <h2 id="role-h">Your role</h2>
+        <h2 id="role-h">Your theme</h2>
         <button id="role-toggle" type="button" class="secondary" aria-controls="role-body" aria-expanded="true">Hide</button>
       </div>
       <div id="role-body">
-        <p id="role-text"></p>
-        <div id="dossier" hidden>
-          <h3 id="dossier-h"></h3>
-          <ul class="tracks" id="dossier-taste" aria-labelledby="dossier-h"></ul>
-          <h3>What they picked before</h3>
-          <p class="hint" id="dossier-none" hidden>Nothing yet. You are guessing from the taste file alone.</p>
-          <ul class="tracks" id="dossier-picks"></ul>
-        </div>
+        <p class="theme" id="role-text"></p>
       </div>
-      <p class="hint" id="role-hidden" hidden>Your role is hidden. Show it when nobody is looking.</p>
+      <p class="hint" id="role-hidden" hidden>Your theme is hidden. Show it when nobody is looking.</p>
     </section>
 
     <section class="card" id="v-pick" aria-labelledby="pick-h" hidden>
       <h2 id="pick-h" style="margin-top:0">Pick a song</h2>
+      <p class="instr" id="pick-instr">Pick a song that fits your theme. Your pick is final once you tap it.</p>
       <p class="hint" id="pick-wait" hidden>You're watching this game. The room is picking songs.</p>
       <div id="pick-done" hidden>
         <p><strong>Your pick is in.</strong> It is final. Wait for the others.</p>
       </div>
       <div id="pick-ui" hidden>
-        <p class="hint">A pick is final once you tap it.</p>
         <h3>From your taste file</h3>
         <p class="hint" id="quick-empty" hidden>Your taste file is empty. Search for a song instead.</p>
         <ul class="tracks" id="quick" aria-label="Your taste file"></ul>
@@ -78,6 +83,11 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
 
     <section class="card" id="v-listen" aria-labelledby="listen-h" hidden>
       <h2 id="listen-h" style="margin-top:0">Listen</h2>
+      <p class="instr">Listen to every track, then talk it over: whose song sounds like it answered a slightly different theme? You might be the odd one out yourself.</p>
+      <div id="audio-choice" class="choice" hidden>
+        <label><input type="checkbox" id="own-audio" /> Play the tracks on this phone</label>
+        <p class="hint" id="audio-choice-note"></p>
+      </div>
       <p id="np" aria-live="polite"></p>
       <button id="unlock" type="button" hidden>Tap to let this phone play</button>
       <ol class="slots" id="slots" aria-label="Tracks"></ol>
@@ -88,6 +98,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
 
     <section class="card" id="v-vote" aria-labelledby="vote-h" hidden>
       <h2 id="vote-h" style="margin-top:0">Vote someone out</h2>
+      <p class="instr">Vote out whoever you think is the mole, or skip. You might be the mole without knowing it.</p>
       <p class="hint" id="vote-note"></p>
       <div id="vote-ui">
         <div class="names" id="names"></div>
@@ -100,9 +111,14 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
 
     <section class="card" id="v-reveal" aria-labelledby="reveal-h" hidden>
       <h2 id="reveal-h" style="margin-top:0">Reveal</h2>
+      <p class="instr" id="reveal-instr"></p>
       <p id="eject"></p>
       <ul class="tracks reveal" id="reveal-slots" aria-label="Who picked what"></ul>
       <p id="winner" class="winner" hidden></p>
+      <div id="themes-end" hidden>
+        <h3>The themes</h3>
+        <ul class="pairs" id="themes-list"></ul>
+      </div>
       <button id="next" type="button" hidden>Next round</button>
       <button id="again" type="button" hidden>Play again</button>
       <p class="hint" id="reveal-wait" hidden></p>
@@ -136,10 +152,10 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     ghosts: string[];
     reveal?: { ejected: string | null; wasMole: boolean; slots: RevealSlot[] };
     winner?: "players" | "moles";
+    themes?: { round: number; majority: string; mole: string }[];
   };
-  type State = { status: string; host: string; speaker: "host" | "every"; members: string[]; game?: Game };
-  type Me = { role: "player" | "mole" | "ghost" | "spectator"; target?: string; picked?: boolean };
-  type Dossier = { name: string; taste: Track[]; picks: Track[] };
+  type State = { status: string; host: string; members: string[]; game?: Game };
+  type Me = { role: "player" | "ghost" | "spectator"; theme?: string; picked?: boolean };
 
   const app = document.getElementById("app")!;
   const code = app.dataset.code!;
@@ -180,24 +196,27 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     sigs.set(key, sig);
     draw();
   }
-  // What this phone has already done this round. Only a convenience for a
-  // reload; the server is the one that refuses a second pick or vote.
-  const done = (kind: string, round: number, set?: boolean) => {
-    const key = `mole:${code}:${kind}:${round}`;
-    try {
-      if (set) sessionStorage.setItem(key, "1");
-      return sessionStorage.getItem(key) === "1";
-    } catch {
-      return !!set;
-    }
+  // Whether this phone's person has voted this round. In memory only: the server
+  // says whether a pick was made (/me), and for votes it is the source of truth
+  // through its 409 "Your vote is final". It is cleared whenever a new round or a
+  // new game begins (onState), so a second game can't inherit it.
+  let votedRound: number | null = null;
+
+  // Where this person hears tracks. Per person, per browser; a convenience, so
+  // every access is guarded and the default ("host") works without it.
+  const AUDIO_KEY = "mole:audio";
+  const readAudioChoice = (): "host" | "mine" => {
+    try { return localStorage.getItem(AUDIO_KEY) === "mine" ? "mine" : "host"; } catch { return "host"; }
   };
+  const writeAudioChoice = (c: "host" | "mine") => { try { localStorage.setItem(AUDIO_KEY, c); } catch { /* not saved */ } };
+  let audioChoice: "host" | "mine" = readAudioChoice();
 
   let state: State | null = null;
   let me: Me | null = null;
-  let dossier: Dossier | null = null;
   let slots: number[] = [];
   let taste: Found[] | null = null;
   let roleShown = true;
+  let howtoSet = false;
   let lastKey = "";
   let announcedLow = "";
   let clockSkew = 0;
@@ -205,8 +224,8 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
 
   const announce = (t: string) => { $("announce").textContent = t; };
   const isHost = () => state?.host === myName;
-  // Phones that make sound: the host's by default, all of them when the table said so.
-  const speakerHere = () => !!state && (state.speaker === "every" || isHost());
+  // Phones that make sound: the host's always, anyone's who chose their own phone.
+  const speakerHere = () => !!state && (isHost() || audioChoice === "mine");
 
   // ---- rendering ----
 
@@ -223,6 +242,12 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     show("status", playing && !over);
     $("status-label").textContent = phase ? phaseWords[phase] : "";
     show("v-lobby", !inGame);
+    // How to play: open until a game has been played here, then folded away.
+    show("howto", !inGame || over);
+    if (!howtoSet) {
+      howtoSet = true;
+      ($("howto") as HTMLDetailsElement).open = !g;
+    }
     renderMembers();
     renderLobby();
     renderRole(playing && phase !== "reveal" && !over);
@@ -271,30 +296,15 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
   function renderRole(on: boolean) {
     show("v-role", on && !!me);
     if (!on || !me) return;
-    const secret = me.role === "player" || me.role === "mole";
-    show("role-toggle", secret);
-    const open = !secret || roleShown;
+    const hasTheme = !!me.theme;
+    show("role-toggle", hasTheme);
+    const open = !hasTheme || roleShown;
     show("role-body", open);
     show("role-hidden", !open);
     $("role-toggle").textContent = open ? "Hide" : "Show";
     $("role-toggle").setAttribute("aria-expanded", String(open));
-    const text = $("role-text");
-    text.replaceChildren();
-    if (me.role === "player") text.append("You're a player. Pick a song you'd actually play.");
-    else if (me.role === "mole") text.append("You're the mole. This round you're faking ", h("strong", {}, me.target ?? "someone"), ". Pick what they'd pick.");
-    else if (me.role === "ghost") text.append("You were voted out. You still pick, but you can't vote.");
-    else text.append("You're watching this game.");
-    const d = me.role === "mole" ? dossier : null;
-    show("dossier", !!d && open);
-    if (d) {
-      once("dossier", JSON.stringify(d), () => {
-        $("dossier-h").textContent = `What ${d.name} plays`;
-        $("dossier-taste").replaceChildren(...d.taste.map((t) => trackRow(t)));
-        $("dossier-picks").replaceChildren(...d.picks.map((t) => trackRow(t)));
-        show("dossier-none", d.picks.length === 0);
-        if (!d.taste.length) $("dossier-taste").replaceChildren(h("li", {}, "Their taste file is empty."));
-      });
-    }
+    $("role-text").textContent = me.theme ?? "You're watching this game.";
+    $("role-h").textContent = hasTheme ? "Your theme" : "Watching";
   }
 
   function renderPick(on: boolean) {
@@ -302,7 +312,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     if (!on || !me) return;
     const g = state!.game!;
     const watching = me.role === "spectator";
-    const locked = done("pick", g.round);
+    const locked = me.picked === true;
     show("pick-wait", watching);
     show("pick-done", !watching && locked);
     show("pick-ui", !watching && !locked);
@@ -340,15 +350,24 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     }
     show("to-vote", host && g.phase === "listen");
     show("unlock", speakerHere() && !host && !audioUnlocked);
+    show("audio-choice", true);
+    const own = $<HTMLInputElement>("own-audio");
+    own.checked = audioChoice === "mine" || host;
+    own.disabled = host;
+    $("audio-choice-note").textContent = host
+      ? "Your phone always plays the tracks."
+      : audioChoice === "mine"
+        ? "This phone plays each track as it is picked."
+        : `Listening to ${state!.host}'s phone.`;
   }
 
   function renderVote(on: boolean) {
     show("v-vote", on && !!me);
     if (!on || !me) return;
     const g = state!.game!;
-    const inRound = me.role === "player" || me.role === "mole";
+    const inRound = me.role === "player";
     const voter = inRound && me.picked !== false;
-    const locked = done("vote", g.round);
+    const locked = votedRound === g.round;
     $("vote-note").textContent = voter
       ? "Talk it over, then vote for who you think is the mole, or skip. Your vote is final."
       : inRound ? "You didn't pick this round, so you can't vote in it. You can still listen and talk."
@@ -369,7 +388,18 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     const g = state!.game!;
     const r = g.reveal;
     const host = isHost();
-    $("reveal-h").textContent = g.winner ? "Final reveal" : "Reveal";
+    $("reveal-h").textContent = g.winner ? "Game over" : "Reveal";
+    $("reveal-instr").textContent = g.winner
+      ? "The game is over. Here is who picked what, and the themes each round."
+      : "Here is who picked what. The themes stay secret until the game ends.";
+    show("themes-end", !!g.winner && !!g.themes?.length);
+    once("themes", JSON.stringify(g.themes ?? []), () => {
+      $("themes-list").replaceChildren(
+        ...(g.themes ?? []).map((t) =>
+          h("li", {}, h("strong", {}, `Round ${t.round}: `), "most of you had ", h("em", {}, t.majority), "; the mole had ", h("em", {}, t.mole), "."),
+        ),
+      );
+    });
     $("eject").textContent = !r
       ? ""
       : r.ejected
@@ -419,16 +449,6 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     if (!res?.ok || n !== meSeq) return;
     me = (await res.json()) as Me;
     render();
-    if (me.role === "mole" && state?.game && !state.game.winner) refreshDossier();
-  }
-
-  let dossierSeq = 0;
-  async function refreshDossier() {
-    const n = ++dossierSeq;
-    const res = await fetch(`/api/tables/${code}/dossier`).catch(() => null);
-    if (n !== dossierSeq) return;
-    dossier = res?.ok ? ((await res.json()) as Dossier) : null;
-    render();
   }
 
   let slotsSeq = 0;
@@ -465,7 +485,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     picking = false;
     // Already picked (say, on another tab) is the same lock as just picking.
     if (res.ok || (res.status === 409 && /already picked/i.test(data.error ?? ""))) {
-      done("pick", round, true);
+      if (me && state.game.round === round) me.picked = true;
       announce(`Your pick is in.`);
       return render();
     }
@@ -494,7 +514,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     const { res, data } = await api("/api/tables/" + code + "/vote", { name: choice });
     voting = false;
     if (res.ok || (res.status === 409 && /final/i.test(data.error ?? ""))) {
-      done("vote", round, true);
+      votedRound = round;
       announce("Your vote is in.");
       return render();
     }
@@ -515,6 +535,16 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
       $(msgId).textContent = res.ok ? "" : (data.error ?? "Could not move on.");
     });
   }
+
+  $("own-audio").addEventListener("change", () => {
+    if (isHost()) return render();
+    audioChoice = $<HTMLInputElement>("own-audio").checked ? "mine" : "host";
+    writeAudioChoice(audioChoice);
+    if (audioChoice === "host") stopAudio();
+    $("audio-msg").textContent = "";
+    render();
+    syncAudio();
+  });
 
   $("role-toggle").addEventListener("click", () => {
     roleShown = !roleShown;
@@ -572,7 +602,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     else render();
   });
 
-  // Speaker phones follow game.nowPlaying; everyone else stays silent.
+  // Phones that play their own copy follow game.nowPlaying; the rest stay silent.
   function syncAudio() {
     const g = state?.game;
     const live = state?.status === "playing" && g && (g.phase === "listen" || g.phase === "vote");
@@ -620,7 +650,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
       if (g?.phase === "pick") slots = [];
       if (newRound) {
         me = null;
-        dossier = null;
+        votedRound = null;
       }
       if (g && next.status === "playing") announce(g.phase === "pick" ? `Round ${g.round}. Pick a song.` : `${phaseWords[g.phase]}.`);
       else if (g?.winner) announce(g.winner === "players" ? "Game over. The players caught every mole." : "Game over. The moles took over.");
