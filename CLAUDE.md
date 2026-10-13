@@ -37,6 +37,9 @@ pick, and the room works out who is faking. They are decisions, not defaults.
   count. A phase ends early once everyone eligible has submitted.
 - A vote is final once cast. The most-voted is ejected; a tie ejects nobody, and
   "skip" counts as an option.
+- Only someone who picked this round can vote in it. Missing the pick means
+  sitting the round out: you can listen and talk, but not vote, and the vote
+  doesn't wait for you.
 - Someone reconnecting mid-round keeps their role and gets whatever pick time is
   left; once the pick deadline has passed they watch that round. Someone who joins
   a table mid-game spectates until the next game.

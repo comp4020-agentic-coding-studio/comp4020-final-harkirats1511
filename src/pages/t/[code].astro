@@ -138,7 +138,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     winner?: "players" | "moles";
   };
   type State = { status: string; host: string; speaker: "host" | "every"; members: string[]; game?: Game };
-  type Me = { role: "player" | "mole" | "ghost" | "spectator"; target?: string };
+  type Me = { role: "player" | "mole" | "ghost" | "spectator"; target?: string; picked?: boolean };
   type Dossier = { name: string; taste: Track[]; picks: Track[] };
 
   const app = document.getElementById("app")!;
@@ -346,11 +346,13 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     show("v-vote", on && !!me);
     if (!on || !me) return;
     const g = state!.game!;
-    const voter = me.role === "player" || me.role === "mole";
+    const inRound = me.role === "player" || me.role === "mole";
+    const voter = inRound && me.picked !== false;
     const locked = done("vote", g.round);
-    $("vote-note").textContent = !voter
-      ? me.role === "ghost" ? "You were voted out, so you can't vote. You can still listen and talk." : "You're watching this game, so you can't vote."
-      : "Talk it over, then vote for who you think is the mole, or skip. Your vote is final.";
+    $("vote-note").textContent = voter
+      ? "Talk it over, then vote for who you think is the mole, or skip. Your vote is final."
+      : inRound ? "You didn't pick this round, so you can't vote in it. You can still listen and talk."
+      : me.role === "ghost" ? "You were voted out, so you can't vote. You can still listen and talk." : "You're watching this game, so you can't vote.";
     show("vote-ui", !locked);
     show("vote-done", voter && locked);
     once("names", JSON.stringify([g.alive, voter]), () => {

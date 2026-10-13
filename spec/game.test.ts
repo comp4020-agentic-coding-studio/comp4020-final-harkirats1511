@@ -234,3 +234,18 @@ it("carries on when someone leaves if the game still works, and ends when the mo
   const end = await waitFor(g.code, (s) => s.status === "finished");
   expect(end.game!.winner).toBe("players");
 });
+
+it("doesn't let someone who missed the pick vote, and doesn't wait for them either", async () => {
+  const g = await started(4, { pickSeconds: 4, voteSeconds: 60 });
+  const [missed, ...pickers] = g.players;
+  await pickAll(g.code, pickers);
+  await toVote(g);
+
+  expect((await me(missed, g.code)) as { picked?: boolean }).toMatchObject({ picked: false });
+  const res = await missed.s.call(`/api/tables/${g.code}/vote`, { body: { name: "skip" } });
+  expect(res.status).toBe(403);
+
+  // Everyone who can vote has: the vote ends long before its 60s deadline.
+  for (const p of pickers) await p.s.call(`/api/tables/${g.code}/vote`, { body: { name: "skip" } });
+  await waitFor(g.code, (s) => s.game?.phase === "reveal", 3000);
+});

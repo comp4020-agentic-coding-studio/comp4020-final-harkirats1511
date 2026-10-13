@@ -167,15 +167,21 @@ function step(d: Tx, g: Game) {
 }
 
 // Everyone eligible has submitted: pick counts ghosts, vote counts only the alive.
+function pickedThisRound(d: Tx | typeof db, g: Game): Set<string> {
+  return new Set(d.select({ p: picks.personId }).from(picks).where(and(eq(picks.gameId, g.id), eq(picks.round, g.round))).all().map((r) => r.p));
+}
+
 function complete(d: Tx, g: Game): boolean {
   const here = inPlay(d, g.id);
   if (g.phase === "pick") {
-    const done = new Set(d.select({ p: picks.personId }).from(picks).where(and(eq(picks.gameId, g.id), eq(picks.round, g.round))).all().map((r) => r.p));
+    const done = pickedThisRound(d, g);
     return here.every((p) => done.has(p.personId));
   }
   if (g.phase === "vote") {
+    // Only those who picked can vote, so nobody waits on someone who missed it.
+    const picked = pickedThisRound(d, g);
     const done = new Set(d.select({ p: votes.voterPersonId }).from(votes).where(and(eq(votes.gameId, g.id), eq(votes.round, g.round))).all().map((r) => r.p));
-    return here.filter((p) => p.ejectedRound === null).every((p) => done.has(p.personId));
+    return here.filter((p) => p.ejectedRound === null && picked.has(p.personId)).every((p) => done.has(p.personId));
   }
   return false;
 }
@@ -303,6 +309,7 @@ export function castVote(code: string, personId: string, choice: string): { ok: 
     const me = playerRow(game, personId);
     if (!me) return fail(403, "You are watching this game.");
     if (me.ejectedRound !== null) return fail(403, "Ghosts can't vote.");
+    if (!pickedThisRound(tx, game).has(personId)) return fail(403, "You didn't pick this round, so you can't vote in it.");
     if (game.phase !== "vote" || (game.deadline !== null && Date.now() >= game.deadline)) {
       return fail(409, "Voting is not open.");
     }
@@ -373,21 +380,23 @@ export function leaveTable(code: string, personId: string): boolean {
 
 // ---- what a player may see ----
 
-export function myView(code: string, personId: string): { role: string; target?: string } | null {
+export function myView(code: string, personId: string): { role: string; target?: string; picked?: boolean } | null {
   const g = currentGame(code);
   if (!g) return { role: "spectator" };
   const me = playerRow(g, personId);
   if (!me) return { role: "spectator" };
-  if (me.ejectedRound !== null) return { role: "ghost" };
-  if (me.role !== "mole") return { role: "player" };
+  // Private to this person: whether they're in this round's vote.
+  const picked = pickedThisRound(db, g).has(personId);
+  if (me.ejectedRound !== null) return { role: "ghost", picked };
+  if (me.role !== "mole") return { role: "player", picked };
   const t = db
     .select({ id: targets.targetPersonId })
     .from(targets)
     .where(and(eq(targets.gameId, g.id), eq(targets.round, g.round), eq(targets.molePersonId, personId)))
     .get();
-  if (!t) return { role: "mole" };
+  if (!t) return { role: "mole", picked };
   const name = db.select({ n: people.name }).from(people).where(eq(people.id, t.id)).get()?.n;
-  return name ? { role: "mole", target: name } : { role: "mole" };
+  return name ? { role: "mole", target: name, picked } : { role: "mole", picked };
 }
 
 // The shuffled, anonymous slots while the room listens and votes: positions
