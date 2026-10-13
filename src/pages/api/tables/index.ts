@@ -24,12 +24,10 @@ export const POST: APIRoute = async ({ cookies, request }) => {
   if (pickSeconds === null || voteSeconds === null) {
     return json({ error: "pickSeconds and voteSeconds are whole numbers of seconds." }, 400);
   }
-  const speaker = body.speaker ?? "host";
-  if (speaker !== "host" && speaker !== "every") return json({ error: 'speaker is "host" or "every".' }, 400);
   // The cap is for the biggest table; start checks it again against who is actually there.
   const moles = body.moles ?? null;
   if (moles !== null && (typeof moles !== "number" || !Number.isInteger(moles) || moles < 1 || moles > maxMoles(MAX_PLAYERS))) {
     return json({ error: `moles is a whole number from 1 to ${maxMoles(MAX_PLAYERS)}.` }, 400);
   }
-  return json({ code: createTable(me.id, { pickSeconds, voteSeconds, speaker, moles }) }, 201);
+  return json({ code: createTable(me.id, { pickSeconds, voteSeconds, moles }) }, 201);
 };

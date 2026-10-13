@@ -50,6 +50,13 @@
       "when": 1791901357036,
       "tag": "0006_daily_obadiah_stane",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1791901377209,
+      "tag": "0007_fluffy_shatterstar",
+      "breakpoints": true
     }
   ]
 }

@@ -40,7 +40,8 @@ export const tables = sqliteTable("tables", {
   // "open" (lobby) -> "playing" -> "finished"; a finished table can start again.
   status: text("status").notNull().default("open"),
   // Options chosen when the table is made. Seconds; moles null means the default
-  // for the player count; speaker is "host" or "every".
+  // for the player count. speaker is unused since audio became a per-person
+  // choice in the browser; the column stays so no data is dropped.
   pickSeconds: integer("pick_seconds").notNull().default(60),
   voteSeconds: integer("vote_seconds").notNull().default(45),
   speaker: text("speaker").notNull().default("host"),
@@ -124,20 +125,6 @@ export const gamePlayers = sqliteTable(
   (t) => [primaryKey({ columns: [t.gameId, t.personId] })],
 );
 
-// Each mole's target for a round.
-export const targets = sqliteTable(
-  "targets",
-  {
-    gameId: text("game_id")
-      .notNull()
-      .references(() => games.id, { onDelete: "cascade" }),
-    round: integer("round").notNull(),
-    molePersonId: text("mole_person_id").notNull(),
-    targetPersonId: text("target_person_id").notNull(),
-  },
-  (t) => [primaryKey({ columns: [t.gameId, t.round, t.molePersonId] })],
-);
-
 // The theme pair drawn for a round: most of the table gets `majority`, the
 // mole(s) get `mole`. Never sent to anyone until the game is over, except that
 // each person's own side reaches only their own /me.
@@ -167,7 +154,7 @@ export const picks = sqliteTable(
     trackId: integer("track_id").notNull(),
     title: text("title").notNull(),
     artist: text("artist").notNull(),
-    // Kept with the title for the reveal and for a mole's dossier.
+    // Kept with the title for the reveal.
     cover: text("cover"),
     slot: integer("slot"),
     pickedAt: integer("picked_at").notNull(),
