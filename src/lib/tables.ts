@@ -1,6 +1,6 @@
 import { randomInt } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { and, asc, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { type Avatar, defaultAvatar, PARTS } from "./avatar.ts";
 import { db } from "./db.ts";
 import { avatars, gamePlayers, gameThemes, games, people, picks, tableMembers, tables } from "./schema.ts";
@@ -220,4 +220,74 @@ export function notifyTable(code: string) {
 export function watchTable(code: string, fn: () => void): () => void {
   bus.on(code, fn);
   return () => bus.off(code, fn);
+}
+
+// ---- history ----
+
+export type HistoryGame = {
+  code: string;
+  finishedAt: number;
+  winner: string;
+  players: string[];
+  rounds: { round: number; majority: string; mole: string }[];
+  mine: { round: number; theme: string; wasMole: boolean; title: string; artist: string }[];
+};
+
+// Finished games this person was still in when they ended, newest first, at
+// most `limit`. Everything but `mine` is what the game-over screen shows the
+// whole table; `mine` is only this person's own theme and pick per round. A
+// game they left before the end is left out (they weren't at the table for the
+// reveal), as is any game still running. Four indexed queries however many
+// games and rounds there are.
+export function historyFor(personId: string, limit = 20): HistoryGame[] {
+  const finished = sql<number>`coalesce(${games.finishedAt}, ${games.startedAt})`;
+  const mineGames = db
+    .select({ id: games.id, code: games.tableCode, winner: games.winner, finishedAt: finished, role: gamePlayers.role, ejected: gamePlayers.ejectedRound })
+    .from(gamePlayers)
+    .innerJoin(games, eq(games.id, gamePlayers.gameId))
+    .where(and(eq(gamePlayers.personId, personId), eq(gamePlayers.left, 0), isNotNull(games.winner)))
+    .orderBy(desc(finished), sql`games.rowid desc`)
+    .limit(limit)
+    .all();
+  if (!mineGames.length) return [];
+  const ids = mineGames.map((g) => g.id);
+  const names = db
+    .select({ gameId: gamePlayers.gameId, name: people.name })
+    .from(gamePlayers)
+    .innerJoin(people, eq(people.id, gamePlayers.personId))
+    .where(and(inArray(gamePlayers.gameId, ids), eq(gamePlayers.left, 0)))
+    .orderBy(asc(people.name))
+    .all();
+  const themes = db
+    .select()
+    .from(gameThemes)
+    .where(inArray(gameThemes.gameId, ids))
+    .orderBy(asc(gameThemes.round))
+    .all();
+  const myPicks = db
+    .select({ gameId: picks.gameId, round: picks.round, title: picks.title, artist: picks.artist })
+    .from(picks)
+    .where(and(inArray(picks.gameId, ids), eq(picks.personId, personId)))
+    .all();
+  return mineGames.map((g) => {
+    const rounds = themes.filter((t) => t.gameId === g.id).map((t) => ({ round: t.round, majority: t.majority, mole: t.mole }));
+    const wasMole = g.role === "mole";
+    return {
+      code: g.code,
+      finishedAt: g.finishedAt,
+      winner: g.winner!,
+      players: names.filter((n) => n.gameId === g.id).map((n) => n.name),
+      rounds,
+      // Their own side of the pair: the odd one while a mole and still in, else the majority's.
+      mine: myPicks
+        .filter((p) => p.gameId === g.id)
+        .sort((a, b) => a.round - b.round)
+        .flatMap((p) => {
+          const r = rounds.find((x) => x.round === p.round);
+          if (!r) return [];
+          const odd = wasMole && (g.ejected === null || p.round <= g.ejected);
+          return [{ round: p.round, theme: odd ? r.mole : r.majority, wasMole, title: p.title, artist: p.artist }];
+        }),
+    };
+  });
 }
