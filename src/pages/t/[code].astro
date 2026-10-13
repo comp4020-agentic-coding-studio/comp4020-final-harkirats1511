@@ -416,7 +416,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     const voter = inRound && me.picked !== false;
     const locked = votedRound === g.round;
     $("vote-note").textContent = voter
-      ? "Talk it over, then vote for who you think is the mole, or skip. Your vote is final."
+      ? "Your vote is final once you tap it."
       : inRound ? "You didn't pick this round, so you can't vote in it. You can still listen and talk."
       : me.role === "ghost" ? "You were voted out, so you can't vote. You can still listen and talk." : "You're watching this game, so you can't vote.";
     show("vote-ui", !locked);
