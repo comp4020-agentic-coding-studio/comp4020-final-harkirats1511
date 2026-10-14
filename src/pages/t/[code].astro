@@ -12,6 +12,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
 <Base title={`Table ${code}`} width="table">
   <div id="app" data-code={code} data-me={me.name} data-min={MIN_PLAYERS}>
     <p class="sr-only" id="announce" role="status" aria-live="polite"></p>
+    <p class="conn" id="conn" role="status" aria-live="polite" hidden></p>
 
     <div class="bar">
       <button id="leave" type="button" class="secondary sm"><i class="ph-bold ph-sign-out" aria-hidden="true"></i>Leave table</button>
@@ -297,6 +298,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     renderVote(playing && phase === "vote");
     renderReveal(inGame && (phase === "reveal" || over));
     tick();
+    syncActions();
   }
 
   // A name's badge from the members list; someone who left gets a default.
@@ -329,6 +331,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     const start = $<HTMLButtonElement>("start");
     show("start", isHost());
     start.textContent = s.game ? "Play again" : "Start game";
+    delete start.dataset.conn;
     start.disabled = n < minPlayers;
     $("start-note").textContent = isHost()
       ? n < minPlayers
@@ -482,6 +485,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     win.textContent = g.winner === "players" ? "The players caught every mole." : g.winner === "moles" ? "The moles took over." : "";
     show("next", host && !g.winner);
     show("again", host && !!g.winner);
+    delete $("again").dataset.conn;
     $<HTMLButtonElement>("again").disabled = state!.members.length < minPlayers;
     show("reveal-wait", !host);
     $("reveal-wait").textContent = g.winner ? "Waiting for the host to play again." : "Waiting for the host to start the next round.";
@@ -534,6 +538,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     taste = res.ok && Array.isArray(data) ? data : [];
     $("quick-empty").hidden = taste.length > 0;
     $("quick").replaceChildren(...taste.map((t) => pickRow(t)));
+    syncActions();
   }
 
   // ---- picking, voting, hosting ----
@@ -571,6 +576,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     }
     $("search-status").textContent = data.length ? `${data.length} results` : "No results.";
     $("results").replaceChildren(...data.map((t) => pickRow(t)));
+    syncActions();
   });
 
   let voting = false;
@@ -845,19 +851,106 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     }
   });
 
+  // ---- connection: the stream, the banner, and the actions that would fail ----
+  // The stream is read with fetch rather than EventSource so that the server's
+  // heartbeat comment (every ~15 s), which EventSource hides, counts as proof
+  // that it is alive. Nothing for 35 s means it has stalled: close and reopen.
+  const STALL_MS = 35_000;
+  const RETRY_MS = 2_000;
+  let connected = false;
+  const conn = $("conn");
+  // Anything that would fail while we can't reach the server. Buttons we turn off
+  // are marked, so turning back on never touches one that was off for another reason.
+  const ACTIONS = "#start, #again, #next, #to-vote, #slots button, #quick button, #results button, #names button, #search button";
+  function syncActions() {
+    const down = !connected || !navigator.onLine;
+    for (const b of document.querySelectorAll<HTMLButtonElement>(ACTIONS)) {
+      if (down && !b.disabled) { b.disabled = true; b.dataset.conn = "1"; }
+      else if (!down && b.dataset.conn) { b.disabled = false; delete b.dataset.conn; }
+    }
+  }
+  function showConn() {
+    const offline = !navigator.onLine;
+    const down = offline || !connected;
+    conn.hidden = !down;
+    app.classList.toggle("is-down", down);
+    conn.textContent = offline
+      ? "You're offline. Picking, voting and playing are paused until you are back."
+      : "Reconnecting... Picking, voting and playing are paused until you are back.";
+    syncActions();
+  }
+  window.addEventListener("offline", showConn);
+
+  let streamCtl: AbortController | null = null;
+  let lastHeard = Date.now();
+  let everOpened = false;
+  function dropStream() { streamCtl?.abort(); }
+  window.addEventListener("online", () => { showConn(); dropStream(); });
+
+  function handleFrame(frame: string) {
+    let event = "message";
+    const data: string[] = [];
+    for (const line of frame.split("\n")) {
+      if (line.startsWith("event:")) event = line.slice(6).trim();
+      else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+    }
+    if (event === "state" && data.length) onState(JSON.parse(data.join("\n")) as State);
+  }
+
+  async function followOnce() {
+    const ctl = new AbortController();
+    streamCtl = ctl;
+    lastHeard = Date.now();
+    const res = await fetch(`/api/tables/${code}/events`, { signal: ctl.signal, headers: { accept: "text/event-stream" }, cache: "no-store" });
+    if (!res.ok || !res.body) throw new Error(`stream ${res.status}`);
+    const reopened = everOpened;
+    everOpened = true;
+    connected = true;
+    lastHeard = Date.now();
+    showConn();
+    // Back after a gap: ask again who we are and which tracks there are.
+    if (reopened) { void refreshMe(); void refreshSlots(); }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      lastHeard = Date.now();
+      buf += dec.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+      let i: number;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        handleFrame(buf.slice(0, i));
+        buf = buf.slice(i + 2);
+      }
+    }
+  }
+
+  async function follow() {
+    for (;;) {
+      try { await followOnce(); } catch { /* aborted, refused or dropped: fall through and retry */ }
+      connected = false;
+      showConn();
+      await new Promise((r) => setTimeout(r, navigator.onLine ? RETRY_MS : 500));
+    }
+  }
+  // A stream that says nothing, not even a heartbeat, is dead: close it, say so, reopen.
+  setInterval(() => {
+    if (Date.now() - lastHeard > STALL_MS) {
+      connected = false;
+      showConn();
+      dropStream();
+      lastHeard = Date.now();
+    }
+  }, 5_000);
+
   // The page is signed in (the server redirects otherwise); make sure this
-  // person is a member, then watch the table. EventSource reconnects by itself,
-  // and on every reopening we ask again who we are, to land in the right view.
+  // person is a member, then watch the table. On every reopening we ask again
+  // who we are, to land in the right view.
   api(`/api/tables/${code}/join`, {}).finally(async () => {
     const first = await fetch(`/api/tables/${code}`).catch(() => null);
     const date = first?.headers.get("date");
     if (date) clockSkew = Date.parse(date) - Date.now() + 500;
-    const es = new EventSource(`/api/tables/${code}/events`);
-    es.addEventListener("state", (e) => onState(JSON.parse((e as MessageEvent).data) as State));
-    let opened = false;
-    es.addEventListener("open", () => {
-      if (opened) void refreshMe();
-      opened = true;
-    });
+    void follow();
   });
 </script>
