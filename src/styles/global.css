@@ -434,3 +434,23 @@ fieldset.part legend { font: 400 var(--step-1)/1.2 var(--font-display); padding:
 @media (prefers-reduced-motion: reduce) { .chip label { transition: none; } }
 .editor-btns { flex-wrap: wrap; }
 .editor-btns > button { flex: 1 1 9rem; white-space: nowrap; }
+
+/* 3D table scene (decoration; src/scene/). Fixed height so the game controls stay reachable. */
+#scene-slot { margin: 0 0 1.25rem; }
+.scene-stage { position: relative; width: 100%; height: clamp(220px, 34vh, 360px); border: 2px solid var(--ink); box-shadow: var(--shadow-card); background: var(--paper-2); overflow: hidden; }
+.scene-stage[hidden] { display: none; }
+.scene-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; opacity: 0; transition: opacity 0.3s; }
+.scene-stage.ready .scene-canvas { opacity: 1; }
+.scene-skel { position: absolute; inset: 0; background: repeating-linear-gradient(135deg, var(--paper-2) 0 14px, var(--paper) 14px 28px); }
+.scene-stage.ready .scene-skel { display: none; }
+.scene-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.scene-label {
+  position: absolute; left: 0; top: 0; max-width: 7.5rem; padding: 0.05rem 0.4rem; background: var(--card); color: var(--ink);
+  border: 1.5px solid var(--ink); font: 700 0.75rem/1.25 var(--font-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  will-change: transform; visibility: hidden;
+}
+.scene-label b { margin-left: 0.35rem; padding: 0 0.25rem; background: var(--accent); color: var(--accent-ink); font: 400 0.625rem/1.3 var(--font-display); letter-spacing: 0.02em; }
+.scene-label.ghost { opacity: 0.6; border-style: dashed; }
+.scene-toggle { margin-top: 0.6rem; }
+@media (prefers-reduced-motion: reduce) { .scene-canvas { transition: none; } }
+@media (min-width: 52rem) { .scene-stage { height: 360px; } }

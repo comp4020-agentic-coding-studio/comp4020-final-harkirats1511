@@ -27,8 +27,13 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
 
     <div class="table-grid">
       <div class="game-col">
-        <!-- 3D scene slot: a later phase mounts its canvas here. Keep it first in the game column. -->
-        <div id="scene-slot" hidden></div>
+        <!-- 3D scene: decoration only, loaded after the page is usable and only where WebGL 2
+             works and motion is welcome. Everything in it is also in the 2D page below. -->
+        <section id="scene-slot" aria-label="3D table view" hidden>
+          <div class="scene-stage" id="scene-stage"><div class="scene-skel" id="scene-skel" aria-hidden="true"></div></div>
+          <p class="sr-only" id="scene-desc"></p>
+          <button id="scene-toggle" type="button" class="secondary sm scene-toggle" aria-pressed="true">3D scene: on</button>
+        </section>
 
         <h1 id="title">Table</h1>
         <div id="lobby-code" class="ticket-wrap">
@@ -186,6 +191,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
   type State = { status: string; host: string; members: { name: string; avatar: Avatar }[]; game?: Game };
   type Me = { role: "player" | "ghost" | "spectator"; theme?: string; picked?: boolean };
 
+  import type { TableScene } from "../../scene/table-scene.ts";
   const app = document.getElementById("app")!;
   const code = app.dataset.code!;
   const myName = app.dataset.me!;
@@ -695,6 +701,94 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     if ((e as KeyboardEvent).key === "Escape") $("leave-no").click();
   });
 
+  // ---- the 3D scene (decoration; the page above is complete without it) ----
+  // Loaded once, after the first state has rendered, and only where it can run:
+  // WebGL 2 present and no request for reduced motion. The engine is a separate
+  // chunk that nothing else imports. Any failure removes the scene quietly.
+  const SCENE_KEY = "mole:scene";
+  const readScene = (): boolean => { try { return localStorage.getItem(SCENE_KEY) !== "off"; } catch { return true; } };
+  const writeScene = (on: boolean) => { try { localStorage.setItem(SCENE_KEY, on ? "on" : "off"); } catch { /* not saved */ } };
+  let sceneWanted = readScene();
+  let scene: TableScene | null = null;
+  let sceneLoading = false;
+  let sceneDead = false;
+  let sceneStarted = false;
+  let sceneVisible = true;
+  const slot = $("scene-slot");
+  const stage = $("scene-stage");
+  const toggle = $<HTMLButtonElement>("scene-toggle");
+
+  const canRunScene = () => {
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return false;
+    try {
+      const c = document.createElement("canvas");
+      const gl = c.getContext("webgl2");
+      if (!gl) return false;
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+      return true;
+    } catch { return false; }
+  };
+  const describeScene = () => {
+    const n = state?.members.length ?? 0;
+    $("scene-desc").textContent = `Decorative 3D view: ${n} ${n === 1 ? "person" : "people"} sitting round a table with a record player. The same information is in the lists below.`;
+  };
+  const syncToggle = () => {
+    toggle.textContent = `3D scene: ${sceneWanted ? "on" : "off"}`;
+    toggle.setAttribute("aria-pressed", String(sceneWanted));
+    stage.hidden = !sceneWanted;
+  };
+  const dropScene = (fatal: boolean) => {
+    scene?.destroy();
+    scene = null;
+    sceneLoading = false;
+    stage.querySelector(".scene-skel")?.removeAttribute("hidden");
+    if (fatal) {
+      sceneDead = true;
+      slot.hidden = true;
+    }
+  };
+  const syncPause = () => scene?.setPaused(document.hidden || !sceneVisible || !sceneWanted);
+  async function loadScene() {
+    if (scene || sceneLoading || sceneDead || !sceneWanted) return;
+    sceneLoading = true;
+    stage.classList.remove("ready");
+    try {
+      const { startTableScene } = await import("../../scene/table-scene.ts");
+      const s = await startTableScene(stage, () => stage.classList.add("ready"));
+      if (!sceneWanted || sceneDead) { s.destroy(); sceneLoading = false; return; }
+      scene = s;
+      sceneLoading = false;
+      if (state) scene.update(state as never);
+      syncPause();
+    } catch {
+      dropScene(true);
+    }
+  }
+  function sceneTick() {
+    if (!state) return;
+    if (!sceneStarted) {
+      sceneStarted = true;
+      if (!canRunScene()) { sceneDead = true; return; }
+      slot.hidden = false;
+      syncToggle();
+      toggle.addEventListener("click", () => {
+        sceneWanted = !sceneWanted;
+        writeScene(sceneWanted);
+        syncToggle();
+        if (sceneWanted) void loadScene();
+        else dropScene(false);
+      });
+      new IntersectionObserver((e) => { sceneVisible = e[e.length - 1].isIntersecting; syncPause(); }).observe(slot);
+      document.addEventListener("visibilitychange", syncPause);
+      // after the page is usable: let the first paint and idle time go first
+      const go = () => void loadScene();
+      if ("requestIdleCallback" in window) requestIdleCallback(go, { timeout: 1500 });
+      else setTimeout(go, 400);
+    }
+    describeScene();
+    scene?.update(state as never);
+  }
+
   // ---- following the table ----
 
   function onState(next: State) {
@@ -726,6 +820,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
       enterPhase();
     }
     syncAudio();
+    sceneTick();
   }
 
   // Phase change: slide the visible main cards in (transform and opacity only;
