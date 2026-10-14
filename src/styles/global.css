@@ -437,7 +437,7 @@ fieldset.part legend { font: 400 var(--step-1)/1.2 var(--font-display); padding:
 
 /* 3D table scene (decoration; src/scene/). Fixed height so the game controls stay reachable. */
 #scene-slot { margin: 0 0 1.25rem; }
-.scene-stage { position: relative; width: 100%; height: clamp(220px, 34vh, 360px); border: 2px solid var(--ink); box-shadow: var(--shadow-card); background: var(--paper-2); overflow: hidden; }
+.scene-stage { position: relative; width: 100%; height: clamp(200px, 32vh, 300px); border: 2px solid var(--ink); box-shadow: var(--shadow-card); background: var(--paper-2); overflow: hidden; }
 .scene-stage[hidden] { display: none; }
 .scene-canvas { position: absolute; left: 0; top: 0; display: block; opacity: 0; transition: opacity 0.3s; }
 .scene-stage.ready .scene-canvas { opacity: 1; }
@@ -445,7 +445,7 @@ fieldset.part legend { font: 400 var(--step-1)/1.2 var(--font-display); padding:
 .scene-stage.ready .scene-skel { display: none; }
 .scene-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .scene-label {
-  position: absolute; left: 0; top: 0; max-width: 7.5rem; padding: 0.05rem 0.4rem; background: var(--card); color: var(--ink);
+  position: absolute; left: 0; top: 0; max-width: 9rem; padding: 0.05rem 0.4rem; background: var(--card); color: var(--ink);
   border: 1.5px solid var(--ink); font: 700 0.75rem/1.25 var(--font-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   will-change: transform; visibility: hidden;
 }
@@ -453,6 +453,24 @@ fieldset.part legend { font: 400 var(--step-1)/1.2 var(--font-display); padding:
 .scene-label.ghost { opacity: 0.6; border-style: dashed; }
 .scene-toggle { margin-top: 0.6rem; }
 @media (prefers-reduced-motion: reduce) { .scene-canvas { transition: none; } }
+.scene-labels[data-density="2"] .scene-label { font-size: 0.6875rem; padding: 0 0.3rem; max-width: 7rem; }
+.scene-labels[data-density="3"] .scene-label { font-size: 0.625rem; padding: 0 0.25rem; max-width: 6rem; }
+.scene-labels[data-density="3"] .scene-label b { display: none; }
+.scene-stamp {
+  position: absolute; left: 0; top: 0; z-index: 2; font-family: var(--font-display); text-transform: uppercase; line-height: 1; white-space: nowrap;
+  font-size: 1.5rem; padding: 0.3rem 0.6rem; border: 3px solid var(--accent-text); color: var(--accent-text); background: var(--card);
+  box-shadow: 3px 3px 0 var(--ink); outline: 1.5px solid var(--accent-text); outline-offset: -6px; will-change: transform;
+}
+.scene-stamp[hidden] { display: none; }
+.scene-stamp.mole { background: var(--accent); color: var(--accent-ink); border-color: var(--ink); outline-color: var(--accent-ink); }
+/* On phones the scene is shorter, and during the pick phase it sits below the timer and the theme card. */
+@media (max-width: 51.99rem) {
+  .game-col { display: flex; flex-direction: column; }
+  .game-col > #scene-slot { order: 0; margin-bottom: 0.75rem; }
+  .game-col > #scene-slot .scene-stage { height: clamp(160px, 26vh, 240px); }
+  .game-col[data-phase="pick"] > h1, .game-col[data-phase="pick"] > .status, .game-col[data-phase="pick"] > #v-role { order: -1; }
+  .game-col[data-phase="pick"] > #scene-slot { margin-top: 0.5rem; }
+}
 @media (min-width: 52rem) { .scene-stage { height: 360px; } }
 
 /* 3D portrait drawn over the badge on /me (src/scene/portraits.ts). */

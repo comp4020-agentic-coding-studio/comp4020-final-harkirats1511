@@ -820,6 +820,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
       enterPhase();
     }
     syncAudio();
+    document.querySelector<HTMLElement>(".game-col")!.dataset.phase = next.status === "playing" ? (g?.phase ?? "") : "";
     sceneTick();
   }
 
