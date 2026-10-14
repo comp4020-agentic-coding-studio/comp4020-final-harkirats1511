@@ -227,7 +227,7 @@ details.options select { margin-bottom: 0.9rem; }
 
 /* Avatar badge: drawn by src/ui/avatar.ts. Size it with --s. */
 .avatar { --s: 2.5rem; position: relative; flex: none; display: inline-block; width: var(--s); height: var(--s); }
-.avatar .av-disc { display: block; width: 100%; height: 100%; border-radius: 50%; border: 2px solid var(--ink); overflow: hidden; background: var(--paper-2); }
+.avatar .av-disc { display: block; width: 100%; height: 100%; border-radius: 50%; border: 2px solid var(--ink); overflow: hidden; }
 .avatar svg { display: block; }
 .avatar .av-aid {
   position: absolute; right: -12%; bottom: -8%; width: 46%; height: 46%; border-radius: 50%;
@@ -362,7 +362,7 @@ ul.tracks.reveal > li { padding: 0.9rem 0; animation: deal 450ms var(--ease) bac
 .eject { font-weight: 700; font-size: var(--step-1); margin: 0 0 1rem; }
 
 /* Game over tracklist */
-ol.pairs { list-style: none; padding: 0; margin: 0 0 1.25rem; counter-reset: side; border: 2px solid var(--ink); background: var(--paper-2); }
+ol.pairs { list-style: none; padding: 0; margin: 0 0 1.25rem; counter-reset: side; border: 2px solid var(--ink); }
 ol.pairs li { counter-increment: side; display: grid; grid-template-columns: 2.5rem minmax(0, 1fr); gap: 0.5rem; padding: 0.75rem; border-bottom: 2px dashed var(--ink-2); overflow-wrap: anywhere; }
 ol.pairs li:last-child { border-bottom: 0; }
 ol.pairs li::before { content: counter(side, decimal-leading-zero); font: 800 var(--step-0)/1.5 var(--font-mono); color: var(--accent-text); }
@@ -381,10 +381,10 @@ ol.pairs em { font-style: normal; font-weight: 800; }
 .prose code { font-family: var(--font-mono); font-size: 0.9em; background: var(--paper-2); padding: 0.1em 0.3em; border: 1px solid var(--ink-2); overflow-wrap: anywhere; }
 .prose pre { overflow-x: auto; background: var(--card); padding: 0.9rem; border: 2px solid var(--ink); box-shadow: var(--shadow-card); margin: 0 0 1.5rem; }
 .prose pre code { background: none; border: 0; padding: 0; overflow-wrap: normal; }
-.prose blockquote { margin: 0 0 1.25rem; padding: 0.25rem 1rem; border-left: 6px solid var(--accent); background: var(--paper-2); }
+.prose blockquote { margin: 0 0 1.25rem; padding: 0.25rem 1rem; border-left: 6px solid var(--accent); }
 .prose table { border-collapse: collapse; display: block; overflow-x: auto; margin: 0 0 1.25rem; }
 .prose td, .prose th { border: 2px solid var(--ink); padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; }
-.prose th { background: var(--paper-2); }
+.prose th { }
 .prose hr { border: 0; border-top: 3px solid var(--ink); margin: 2rem 0; }
 
 /* Membership card (sign in) */
@@ -439,7 +439,7 @@ fieldset.part legend { font: 400 var(--step-1)/1.2 var(--font-display); padding:
 #scene-slot { margin: 0 0 1.25rem; }
 .scene-stage { position: relative; width: 100%; height: clamp(220px, 34vh, 360px); border: 2px solid var(--ink); box-shadow: var(--shadow-card); background: var(--paper-2); overflow: hidden; }
 .scene-stage[hidden] { display: none; }
-.scene-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; opacity: 0; transition: opacity 0.3s; }
+.scene-canvas { position: absolute; left: 0; top: 0; display: block; opacity: 0; transition: opacity 0.3s; }
 .scene-stage.ready .scene-canvas { opacity: 1; }
 .scene-skel { position: absolute; inset: 0; background: repeating-linear-gradient(135deg, var(--paper-2) 0 14px, var(--paper) 14px 28px); }
 .scene-stage.ready .scene-skel { display: none; }
@@ -454,3 +454,7 @@ fieldset.part legend { font: 400 var(--step-1)/1.2 var(--font-display); padding:
 .scene-toggle { margin-top: 0.6rem; }
 @media (prefers-reduced-motion: reduce) { .scene-canvas { transition: none; } }
 @media (min-width: 52rem) { .scene-stage { height: 360px; } }
+
+/* 3D portrait drawn over the badge on /me (src/scene/portraits.ts). */
+.av-disc { position: relative; }
+.av-3d { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }

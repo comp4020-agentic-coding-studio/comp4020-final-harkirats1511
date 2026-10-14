@@ -28,11 +28,11 @@ export type Engine = {
   destroy(): void;
 };
 
-export async function createEngine(canvas: HTMLCanvasElement, opts: { antialias?: boolean; maxPixelRatio?: number } = {}): Promise<Engine> {
+export async function createEngine(canvas: HTMLCanvasElement, opts: { antialias?: boolean; alpha?: boolean; maxPixelRatio?: number } = {}): Promise<Engine> {
   const device = await createGraphicsDevice(canvas, {
     deviceTypes: [DEVICETYPE_WEBGL2],
     antialias: opts.antialias ?? true,
-    alpha: false,
+    alpha: opts.alpha ?? false,
   });
   device.maxPixelRatio = opts.maxPixelRatio ?? Math.min(window.devicePixelRatio || 1, 2);
 

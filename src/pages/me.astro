@@ -46,7 +46,7 @@ const current = getAvatar(me.id);
 </Base>
 <script>
   import { avatar } from "../ui/avatar.ts";
-  import { PARTS, type Avatar, type Part } from "../lib/avatar.ts";
+  import { COLOURS, PARTS, type Avatar, type Part } from "../lib/avatar.ts";
 
   const root = document.getElementById("editor")!;
   const options = JSON.parse(root.dataset.options!) as Record<Part, string[]>;
@@ -61,6 +61,57 @@ const current = getAvatar(me.id);
 
   let saved = JSON.stringify(read());
 
+  // 3D portraits replace the drawn badge in the preview and the character
+  // chips, when the device can run WebGL 2, motion is welcome and the 3D scene
+  // is not switched off. Anything else (or any failure) keeps the drawn badge.
+  let portraits: import("../scene/portraits.ts").Portraits | null = null;
+  let portraitsState: "idle" | "loading" | "dead" = "idle";
+  let seq = 0;
+  const wants3d = () => {
+    try { if (localStorage.getItem("mole:scene") === "off") return false; } catch { /* default on */ }
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return false;
+    try { return !!document.createElement("canvas").getContext("webgl2"); } catch { return false; }
+  };
+  function putPortrait(host: Element, c: HTMLCanvasElement) {
+    const disc = host.querySelector(".av-disc");
+    if (!disc) return;
+    disc.querySelector(".av-3d")?.remove();
+    c.className = "av-3d";
+    c.style.background = COLOURS[currentColour] ?? "";
+    c.setAttribute("aria-hidden", "true");
+    disc.append(c);
+  }
+  let currentColour = "";
+  async function paint3d(a: Avatar, mine: number) {
+    currentColour = a.colour;
+    if (portraitsState === "dead") return;
+    if (!portraits) {
+      if (portraitsState === "loading") return;
+      portraitsState = "loading";
+      if (!wants3d()) { portraitsState = "dead"; return; }
+      try {
+        portraits = await (await import("../scene/portraits.ts")).createPortraits();
+        portraitsState = "idle";
+      } catch { portraitsState = "dead"; return; }
+    }
+    try {
+      const big = await portraits.render(a);
+      if (mine === seq) { const el = preview.querySelector(".avatar"); if (el) putPortrait(el, big); }
+      for (const el of document.querySelectorAll<HTMLElement>(".chip-badge")) {
+        if (mine !== seq) return;
+        const c = await portraits.render({ ...a, character: el.dataset.char! }, { bare: true });
+        if (mine !== seq) return;
+        const av = el.querySelector(".avatar");
+        if (av) putPortrait(av, c);
+      }
+    } catch {
+      portraitsState = "dead";
+      portraits?.destroy();
+      portraits = null;
+      for (const c of document.querySelectorAll(".av-3d")) c.remove();
+    }
+  }
+
   function draw() {
     const a = read();
     const big = avatar(me, a);
@@ -70,6 +121,7 @@ const current = getAvatar(me.id);
     for (const el of document.querySelectorAll<HTMLElement>(".chip-badge")) {
       el.replaceChildren(avatar(me, { ...a, character: el.dataset.char!, hat: "none", accessory: "none", aid: "none", mood: "chill" }));
     }
+    void paint3d(a, ++seq);
   }
 
   function say(text: string, kind: "ok" | "bad" | "") {
