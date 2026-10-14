@@ -33,8 +33,8 @@ export type TableScene = {
 
 const MAX_SEATS = 10;
 const SEAT_R = 1.45;
-const GHOST_R = 2.25;
-const ARC = 125; // degrees either side of straight back
+const GHOST_R = 1.9;
+const ARC = 104; // degrees either side of straight back
 // Fill order: spread out first, so three or four people don't clump.
 const FILL = [2, 7, 4, 5, 3, 6, 1, 8, 0, 9];
 const TABLE_TOP = 0.47;
@@ -111,9 +111,9 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
   const stage = new Entity("stage");
   root.addChild(stage);
   // floor: a big flat disc and two walls forming a corner behind and left
-  const floor = kit.prim("cylinder", mats.floor, [0, -0.025, 0], [9, 0.05, 9], [0, 0, 0], stage);
-  kit.prim("box", mats.wall, [0, 2.0, -4.2], [10, 4.4, 0.2], [0, 0, 0], stage);
-  kit.prim("box", mats.wall2, [-4.6, 2.0, -0.4], [0.2, 4.4, 9], [0, 0, 0], stage);
+  const floor = kit.prim("cylinder", mats.floor, [0, -0.025, 0], [16, 0.05, 16], [0, 0, 0], stage);
+  kit.prim("box", mats.wall, [0, 2.2, -4.4], [16, 5, 0.2], [0, 0, 0], stage);
+  kit.prim("box", mats.wall2, [-5.2, 2.2, 0], [0.2, 5, 14], [0, 0, 0], stage);
   void floor;
   // a rug: ink ring on the floor under the table
   const ink = kit.flat("#16161a");
@@ -168,9 +168,9 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
   app.scene.ambientLight = new Color().fromString(pal.ambient);
 
   const cam = new Entity("camera");
-  cam.addComponent("camera", { fov: 46, horizontalFov: true, nearClip: 0.5, farClip: 30, clearColor: new Color().fromString(pal.paper) });
-  const camTarget = new Vec3(0, 0.42, -0.1);
-  cam.setLocalPosition(2.1, 3.1, 4.7);
+  cam.addComponent("camera", { fov: 52, horizontalFov: true, nearClip: 0.5, farClip: 30, clearColor: new Color().fromString(pal.paper) });
+  const camTarget = new Vec3(0, 0.55, -0.4);
+  cam.setLocalPosition(1.0, 2.5, 3.6);
   cam.lookAt(camTarget);
   root.addChild(cam);
 
@@ -300,7 +300,7 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
     const phase = g?.phase;
     spin = next.status === "playing" && !g?.winner && (phase === "listen" || phase === "vote") && g?.nowPlaying != null;
     nod = spin && phase === "listen";
-    reveal = g?.reveal && phase === "reveal" && !g.winner ? { name: g.reveal.ejected, wasMole: g.reveal.wasMole } : null;
+    reveal = g?.reveal && phase === "reveal" ? { name: g.reveal.ejected, wasMole: g.reveal.wasMole } : null;
     over = g?.winner ?? null;
     for (const p of people.values()) {
       const tag = p.label;
@@ -317,9 +317,12 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
   // What this person does right now, from public state only.
   function clipFor(p: Person): string {
     const g = state?.game;
-    if (!g || state?.status !== "playing") {
-      if (over && !p.ghost) return over === "players" ? "emote-yes" : "emote-no";
-      return "idle";
+    if (!g) return "idle";
+    // the ejected person's fate is public once the reveal is
+    if (reveal?.name === p.name && g.phase === "reveal") return reveal.wasMole ? "die" : "emote-no";
+    if (over) {
+      if (p.ghost && reveal?.name !== p.name) return "idle";
+      return over === "players" ? "emote-yes" : "emote-no";
     }
     if (p.ghost) return "idle";
     switch (g.phase) {
@@ -327,7 +330,6 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
         return "interact-right";
       case "reveal":
         if (!reveal || reveal.name === null) return "idle";
-        if (p.name === reveal.name) return reveal.wasMole ? "die" : "emote-no";
         return reveal.wasMole ? "emote-yes" : "emote-no";
       default:
         return "idle";
@@ -380,7 +382,7 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
         continue;
       }
       const wp = ch.head.getPosition();
-      const sp = cam.camera!.worldToScreen(new Vec3(wp.x, wp.y + 0.62, wp.z));
+      const sp = cam.camera!.worldToScreen(new Vec3(wp.x, wp.y + 0.55 + (p.seat % 2) * 0.28, wp.z));
       const inView = sp.z > 0;
       p.label.style.visibility = inView ? "visible" : "hidden";
       p.label.style.transform = `translate(-50%, -100%) translate(${sp.x.toFixed(1)}px, ${sp.y.toFixed(1)}px)`;
@@ -390,7 +392,12 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
   // Sizing: the canvas fills the slot; resolution follows its CSS size.
   const fit = () => {
     const r = slot.getBoundingClientRect();
-    if (r.width > 0 && r.height > 0) engine.app.resizeCanvas(r.width, r.height);
+    if (r.width > 0 && r.height > 0) {
+      canvas.style.width = `${r.width}px`;
+      canvas.style.height = `${r.height}px`;
+      app.graphicsDevice.resizeCanvas(r.width, r.height);
+      app.graphicsDevice.updateClientRect();
+    }
   };
   const ro = new ResizeObserver(fit);
   ro.observe(slot);
