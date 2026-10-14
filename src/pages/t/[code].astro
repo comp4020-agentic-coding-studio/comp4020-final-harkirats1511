@@ -105,6 +105,10 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
             <p class="hint" id="audio-choice-note"></p>
           </div>
           <p id="np" aria-live="polite"></p>
+          <div id="auto" class="auto" hidden>
+            <p class="auto-line"><span class="stamp">Auto</span> Playing every track in turn</p>
+            <div class="auto-bar" id="auto-bar" role="img"></div>
+          </div>
           <button id="unlock" type="button" class="full" hidden>Tap to let this phone play</button>
           <ol class="slots" id="slots" aria-label="Tracks"></ol>
           <p class="hint" id="audio-msg" role="status"></p>
@@ -139,6 +143,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
           <button id="next" type="button" class="full" hidden>Next round</button>
           <button id="again" type="button" class="full" hidden>Play again</button>
           <p class="hint" id="reveal-wait" hidden></p>
+          <p id="see-games" hidden><a href="/history">See all your games</a></p>
           <p id="reveal-msg" class="error" role="alert"></p>
         </section>
       </div>
@@ -180,6 +185,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
   type RevealSlot = Track & { slot: number; owner: string };
   type Game = {
     round: number;
+    autoplay?: boolean;
     phase: "pick" | "listen" | "vote" | "reveal";
     deadline: number | null;
     nowPlaying: number | null;
@@ -410,6 +416,18 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
       if (active) li.setAttribute("aria-current", "true");
       else li.removeAttribute("aria-current");
     }
+    const auto = g.autoplay === true && g.phase === "listen" && slots.length > 0;
+    show("auto", auto);
+    if (auto) {
+      const at = np === null ? 0 : Math.max(0, slots.indexOf(np)) + 1;
+      $("auto-bar").setAttribute("aria-label", `Track ${at} of ${slots.length}`);
+      once("auto-bar", `${slots.length}|${at}`, () => {
+        $("auto-bar").replaceChildren(
+          ...slots.map((_, i) => h("span", { class: i + 1 < at ? "done" : i + 1 === at ? "on" : "" })),
+          h("span", { class: "auto-n" }, `${at} of ${slots.length}`),
+        );
+      });
+    }
     show("to-vote", host && g.phase === "listen");
     show("unlock", speakerHere() && !host && !audioUnlocked);
     show("audio-choice", true);
@@ -487,6 +505,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     show("again", host && !!g.winner);
     delete $("again").dataset.conn;
     $<HTMLButtonElement>("again").disabled = state!.members.length < minPlayers;
+    show("see-games", !!g.winner);
     show("reveal-wait", !host);
     $("reveal-wait").textContent = g.winner ? "Waiting for the host to play again." : "Waiting for the host to start the next round.";
   }

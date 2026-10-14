@@ -1,0 +1,61 @@
+---
+import Base from "../layouts/Base.astro";
+import { personFromCookies } from "../lib/auth.ts";
+import { historyFor } from "../lib/tables.ts";
+const me = personFromCookies(Astro.cookies);
+if (!me) return Astro.redirect("/?next=/history");
+const games = historyFor(me.id);
+---
+<Base title="Your past games · Mole">
+  <a class="back-link" href="/"><i class="ph-bold ph-arrow-left" aria-hidden="true"></i>Back</a>
+  <h1>Your past games</h1>
+  {games.length === 0 ? (
+    <section class="card empty-card">
+      <p><strong>No finished games yet.</strong> Start a table and play one.</p>
+      <p><a href="/">Start a table</a></p>
+    </section>
+  ) : (
+    <>
+      <p class="hint">Newest first. The mole's theme is shown for every round, because the games are over.</p>
+      {games.map((g) => (
+        <section class="card hist-game" aria-label={`Game ${g.code}`}>
+          <div class="hist-head">
+            <div>
+              <p class="hist-code">{g.code}</p>
+              <p class="hist-meta"><time datetime={new Date(g.finishedAt).toISOString()} data-ts={g.finishedAt}>{new Date(g.finishedAt).toISOString().slice(0, 10)}</time></p>
+            </div>
+            <span class={`stamp ${g.winner === "moles" ? "moles" : "win"}`}>{g.winner === "moles" ? "Moles won" : "Players won"}</span>
+          </div>
+          <p class="hist-players"><strong>Players:</strong> {g.players.join(", ")}</p>
+          <ol class="hist-rounds">
+            {g.rounds.map((r) => {
+              const m = g.mine.find((x) => x.round === r.round);
+              return (
+                <li>
+                  <p>Most of you had <em>{r.majority}</em>. The mole had <em>{r.mole}</em>.</p>
+                  {m ? (
+                    <>
+                      <p class="mine">
+                        <span>Your theme: <em>{m.theme}</em></span>
+                        {m.wasMole && m.theme === r.mole && <span class="stamp moles">You were the mole</span>}
+                      </p>
+                      <p class="pick">Your pick: <strong>{m.title}</strong>, {m.artist}</p>
+                    </>
+                  ) : (
+                    <p class="pick">You did not pick this round.</p>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      ))}
+    </>
+  )}
+</Base>
+<script>
+  // Dates in the reader's own time zone.
+  for (const t of document.querySelectorAll<HTMLTimeElement>("time[data-ts]")) {
+    t.textContent = new Date(Number(t.dataset.ts)).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  }
+</script>

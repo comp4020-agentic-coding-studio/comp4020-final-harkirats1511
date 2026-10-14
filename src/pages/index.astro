@@ -19,6 +19,18 @@ const tasteCount = me ? listTaste(me.id).length : 0;
       <section class="card" aria-labelledby="create-h">
         <h2 id="create-h">Start a table</h2>
         <p class="hint">You get a code to share with the room.</p>
+        <div class="check">
+          <input type="checkbox" id="autoplay" checked aria-describedby="autoplay-hint" />
+          <label for="autoplay">Play the tracks automatically</label>
+        </div>
+        <p class="hint" id="autoplay-hint">Each track plays for <span id="autoplay-n">30</span> seconds, then voting opens. The host can still pick a track.</p>
+        <div id="slot-wrap">
+          <label for="slot-s">Seconds per track</label>
+          <select id="slot-s">
+            <option value="15">15 seconds</option>
+            <option value="30" selected>30 seconds</option>
+          </select>
+        </div>
         <details class="options">
           <summary>Table options</summary>
           <label for="pick-s">Time to pick a song</label>
@@ -58,6 +70,11 @@ const tasteCount = me ? listTaste(me.id).length : 0;
         <p class="hint">{tasteCount} / 10 tracks.</p>
         {tasteCount < 5 && <p class="nudge">A mole needs something to study. Add a few tracks you would actually play.</p>}
         <p><a href="/taste">{tasteCount === 0 ? "Build your taste file" : "Edit your taste file"}</a></p>
+      </section>
+      <section class="card" aria-labelledby="hist-h">
+        <h2 id="hist-h">Your past games</h2>
+        <p class="hint">Themes, picks and who won.</p>
+        <p><a href="/history">Your past games</a></p>
       </section>
       <section class="card" aria-labelledby="char-h">
         <h2 id="char-h">Your character</h2>
@@ -106,12 +123,24 @@ const tasteCount = me ? listTaste(me.id).length : 0;
     location.href = form.dataset.next || "/";
   });
 
+  const auto = document.getElementById("autoplay") as HTMLInputElement;
+  const slotSel = document.getElementById("slot-s") as HTMLSelectElement;
+  const syncAuto = () => {
+    document.getElementById("slot-wrap")!.hidden = !auto.checked;
+    document.getElementById("autoplay-n")!.textContent = slotSel.value;
+  };
+  auto?.addEventListener("change", syncAuto);
+  slotSel?.addEventListener("change", syncAuto);
+  if (auto) syncAuto();
+
   document.getElementById("create")?.addEventListener("click", async () => {
     const value = (id: string) => (document.getElementById(id) as HTMLSelectElement).value;
     const { res, data } = await post("/api/tables", {
       pickSeconds: Number(value("pick-s")),
       voteSeconds: Number(value("vote-s")),
       moles: value("moles") ? Number(value("moles")) : null,
+      autoplay: auto.checked,
+      slotSeconds: Number(value("slot-s")),
     });
     if (!res.ok) return say(data.error ?? "Could not create a table.");
     location.href = `/t/${data.code}`;
