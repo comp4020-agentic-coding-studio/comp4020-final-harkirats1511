@@ -2,6 +2,7 @@ import { randomInt, randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "./db.ts";
 import { gamePlayers, gameThemes, games, people, picks, tableMembers, tables, votes } from "./schema.ts";
+import { log, personTag, tableScope } from "./log.ts";
 import { THEMES } from "./themes.ts";
 import {
   currentGame, defaultMoles, MAX_PLAYERS, maxMoles, MIN_PLAYERS, notifyTable, tableOptions,
@@ -62,7 +63,7 @@ function drawTheme(d: Tx, gameId: string, round: number) {
 
 export type StartResult = { ok: true } | Fail;
 
-export function startGame(code: string): StartResult {
+export function startGame(code: string, by?: string): StartResult {
   const result = db.transaction((tx): StartResult => {
     const t = tableOptions(code);
     if (!t) return fail(404, "No such table.");
@@ -91,6 +92,8 @@ export function startGame(code: string): StartResult {
     }
     drawTheme(tx, id, 1);
     tx.update(tables).set({ status: "playing" }).where(eq(tables.code, code)).run();
+    // Player count only: roles and themes stay secret until the game ends.
+    log(tableScope(code), `${by ? `${by} ` : ""}started the game · ${members.length} players · round 1`);
     return { ok: true };
   });
   if (result.ok) changed(code);
@@ -116,6 +119,30 @@ function finish(d: Tx, g: Game, winner: "players" | "moles") {
   assignSlots(d, g);
   d.update(games).set({ winner, phase: "reveal", deadline: null, finishedAt: Date.now() }).where(eq(games.id, g.id)).run();
   d.update(tables).set({ status: "finished" }).where(eq(tables.code, g.tableCode)).run();
+  // The game-over screen shows the winner and every round's themes to everyone.
+  const themes = d.select().from(gameThemes).where(eq(gameThemes.gameId, g.id)).orderBy(asc(gameThemes.round)).all();
+  log(
+    tableScope(g.tableCode),
+    `game finished · winner: ${winner} · ${themes.map((t) => `round ${t.round}: majority "${t.majority}" vs mole "${t.mole}"`).join(" | ")}`,
+  );
+}
+
+// What the reveal screen shows everyone: who was ejected (and whether they were
+// a mole) and which person owned which track number. Titles are left out.
+function logReveal(d: Tx, g: Game, out: string | null) {
+  const scope = tableScope(g.tableCode);
+  const who = out ? personTag(out) : null;
+  const role = out
+    ? d.select({ r: gamePlayers.role }).from(gamePlayers).where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.personId, out))).get()?.r
+    : undefined;
+  log(scope, who ? `reveal · ejected ${who}, ${role === "mole" ? "was a mole" : "was not a mole"} · round ${g.round}` : `reveal · nobody ejected · round ${g.round}`);
+  const owners = d
+    .select({ slot: picks.slot, owner: picks.personId })
+    .from(picks)
+    .where(and(eq(picks.gameId, g.id), eq(picks.round, g.round)))
+    .orderBy(asc(picks.slot))
+    .all();
+  if (owners.length) log(scope, `reveal · owners: ${owners.map((o) => `track ${(o.slot ?? 0) + 1} was ${personTag(o.owner)}`).join(", ")}`);
 }
 
 function resolveVote(d: Tx, g: Game) {
@@ -133,6 +160,7 @@ function resolveVote(d: Tx, g: Game) {
     d.update(gamePlayers).set({ ejectedRound: g.round }).where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.personId, out))).run();
   }
   d.update(games).set({ phase: "reveal", deadline: null, ejectedPersonId: out }).where(eq(games.id, g.id)).run();
+  logReveal(d, g, out);
   const winner = winnerOf(d, g.id);
   if (winner) finish(d, { ...g, ejectedPersonId: out }, winner);
 }
@@ -141,19 +169,26 @@ function pickCount(d: Tx, g: Game): number {
   return d.select({ n: sql<number>`count(*)` }).from(picks).where(and(eq(picks.gameId, g.id), eq(picks.round, g.round))).get()?.n ?? 0;
 }
 
-function toVote(d: Tx, g: Game) {
+function logPhase(g: Game, to: string, cause: string, extra = "") {
+  log(tableScope(g.tableCode), `phase ${g.phase} → ${to} (${cause}) · round ${g.round}${extra}`);
+}
+
+function toVote(d: Tx, g: Game, cause: string) {
+  logPhase(g, "vote", cause);
   const t = tableOptions(g.tableCode)!;
   d.update(games).set({ phase: "vote", deadline: Date.now() + t.voteSeconds * 1000 }).where(eq(games.id, g.id)).run();
 }
 
 // Leave the phase the game is in for the next one. The caller has checked the
 // round and phase.
-function step(d: Tx, g: Game) {
+function step(d: Tx, g: Game, cause: string) {
   const t = tableOptions(g.tableCode)!;
   const now = Date.now();
   if (g.phase === "pick") {
     const slots = assignSlots(d, g);
+    logPhase(g, "listen", cause, ` · ${slots} track${slots === 1 ? "" : "s"}`);
     if (t.autoplay && slots > 0) {
+      log(tableScope(g.tableCode), `autoplay · track 1 of ${slots} playing · round ${g.round}`);
       // The server plays slot 0 now; the deadline is the next autoplay step.
       d.update(games)
         .set({ phase: "listen", nowPlaying: 0, deadline: now + t.slotSeconds * 1000 })
@@ -172,12 +207,15 @@ function step(d: Tx, g: Game) {
     const next = (g.nowPlaying ?? -1) + 1;
     if (t.autoplay && next < slots) {
       d.update(games).set({ nowPlaying: next, deadline: now + t.slotSeconds * 1000 }).where(eq(games.id, g.id)).run();
+      log(tableScope(g.tableCode), `autoplay · track ${next + 1} of ${slots} playing · round ${g.round}`);
     } else {
-      toVote(d, g);
+      toVote(d, g, cause);
     }
   } else if (g.phase === "vote") {
+    logPhase(g, "reveal", cause);
     resolveVote(d, g);
   } else if (g.phase === "reveal") {
+    logPhase(g, "pick", cause, ` (next round ${g.round + 1})`);
     d.update(games)
       .set({ round: g.round + 1, phase: "pick", deadline: now + t.pickSeconds * 1000, ejectedPersonId: null, nowPlaying: null })
       .where(eq(games.id, g.id))
@@ -207,12 +245,12 @@ function complete(d: Tx, g: Game): boolean {
 }
 
 // After anything that could finish the phase early or end the game.
-function settle(d: Tx, code: string) {
+function settle(d: Tx, code: string, why: string) {
   const g = currentGame(code);
   if (!g || g.winner) return;
   const winner = winnerOf(d, g.id);
   if (winner) return finish(d, g, winner);
-  if (complete(d, g)) step(d, g);
+  if (complete(d, g)) step(d, g, why);
 }
 
 // A change landed: tell every open session and re-arm the table's timer.
@@ -245,7 +283,7 @@ function fire(code: string, round: number, phase: string) {
     const g = currentGame(code);
     if (!g || g.winner || g.round !== round || g.phase !== phase || g.deadline === null) return false;
     if (g.deadline > Date.now()) return false;
-    step(tx, g);
+    step(tx, g, "timer");
     return true;
   });
   if (moved) changed(code);
@@ -257,6 +295,7 @@ function fire(code: string, round: number, phase: string) {
 // deadline from now rather than cascading through several at once.
 export function resumeGames() {
   const running = db.select({ code: tables.code }).from(tables).where(eq(tables.status, "playing")).all();
+  log("server", `started · resuming ${running.length} running game${running.length === 1 ? "" : "s"}`);
   for (const { code } of running) schedule(code);
 }
 
@@ -271,15 +310,15 @@ export function playerRow(game: Game, personId: string) {
 }
 
 // The host moves listening on to voting, or a reveal on to the next round.
-export function advance(code: string): { ok: true } | Fail {
+export function advance(code: string, by = "the host"): { ok: true } | Fail {
   const g = currentGame(code);
   if (!g || g.winner) return fail(409, "No game is running.");
   if (g.phase !== "listen" && g.phase !== "reveal") return fail(409, `Nothing to advance during ${g.phase}.`);
   const moved = db.transaction((tx) => {
     const now = currentGame(code);
     if (!now || now.winner || now.round !== g.round || now.phase !== g.phase) return false;
-    if (now.phase === "listen") toVote(tx, now);
-    else step(tx, now);
+    if (now.phase === "listen") toVote(tx, now, `by ${by}`);
+    else step(tx, now, `by ${by}`);
     return true;
   });
   if (!moved) return fail(409, "The game has already moved on.");
@@ -308,6 +347,7 @@ export function checkPick(code: string, personId: string): { ok: true; game: Gam
 export function recordPick(
   code: string, personId: string, track: { id: number; title: string; artist: string; cover?: string | null },
 ): { ok: true } | Fail {
+  let round = 0;
   const res = db.transaction((tx): { ok: true } | Fail => {
     const checked = checkPick(code, personId);
     if (!checked.ok) return checked;
@@ -315,7 +355,9 @@ export function recordPick(
     tx.insert(picks)
       .values({ gameId: game.id, round: game.round, personId, trackId: track.id, title: track.title, artist: track.artist, cover: track.cover ?? null, pickedAt: Date.now() })
       .run();
-    settle(tx, code);
+    round = game.round;
+    log(tableScope(code), `${personTag(personId)} picked a track · round ${round}`);
+    settle(tx, code, "everyone picked");
     return { ok: true };
   });
   if (res.ok) changed(code);
@@ -354,7 +396,9 @@ export function castVote(code: string, personId: string, choice: string): { ok: 
       target = named.id;
     }
     tx.insert(votes).values({ gameId: game.id, round: game.round, voterPersonId: personId, choice: target }).run();
-    settle(tx, code);
+    // Who voted, never for whom.
+    log(tableScope(code), `${personTag(personId)} voted · round ${game.round}`);
+    settle(tx, code, "everyone voted");
     return { ok: true };
   });
   if (res.ok) changed(code);
@@ -370,6 +414,7 @@ export function leaveTable(code: string, personId: string): boolean {
       .where(and(eq(tableMembers.tableCode, code), eq(tableMembers.personId, personId)))
       .run();
     if (!gone.changes) return false;
+    log(tableScope(code), `${personTag(personId)} left the table`);
     const t = tableOptions(code)!;
     if (t.hostPersonId === personId) {
       const next = tx
@@ -378,12 +423,16 @@ export function leaveTable(code: string, personId: string): boolean {
         .where(eq(tableMembers.tableCode, code))
         .orderBy(asc(tableMembers.joinedAt), sql`rowid`)
         .get();
-      if (next) tx.update(tables).set({ hostPersonId: next.id }).where(eq(tables.code, code)).run();
+      if (next) {
+        tx.update(tables).set({ hostPersonId: next.id }).where(eq(tables.code, code)).run();
+        log(tableScope(code), `host passed to ${personTag(next.id)}`);
+      }
     }
     const g = currentGame(code);
     if (t.status === "playing" && g && !g.winner && playerRow(g, personId)) {
+      log(tableScope(code), `${personTag(personId)} left the game too · round ${g.round}`);
       tx.update(gamePlayers).set({ left: 1 }).where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.personId, personId))).run();
-      settle(tx, code);
+      settle(tx, code, "a player left");
     }
     return true;
   });
@@ -436,7 +485,7 @@ export function slotTrackId(code: string, slot: number): number | Fail {
 // ---- the speaker's now-playing ----
 
 // The host says which anonymous slot is playing; every phone follows it.
-export function setNowPlaying(code: string, slot: number): { ok: true } | Fail {
+export function setNowPlaying(code: string, slot: number, by?: string): { ok: true } | Fail {
   const res = db.transaction((tx): { ok: true } | Fail => {
     const g = currentGame(code);
     if (!g || g.winner || (g.phase !== "listen" && g.phase !== "vote")) return fail(409, "Nothing to play right now.");
@@ -454,6 +503,8 @@ export function setNowPlaying(code: string, slot: number): { ok: true } | Fail {
       .set(resume ? { nowPlaying: slot, deadline: Date.now() + t.slotSeconds * 1000 } : { nowPlaying: slot })
       .where(eq(games.id, g.id))
       .run();
+    // The slot number is public: it names no one.
+    log(tableScope(code), `${by ? `${by} ` : ""}played track ${slot + 1} · round ${g.round}`);
     return { ok: true };
   });
   if (res.ok) changed(code);
