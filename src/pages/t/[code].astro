@@ -16,6 +16,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
 
     <div class="bar">
       <button id="leave" type="button" class="secondary sm">Leave table</button>
+      <a id="to-shop" class="btn ghost sm" href="/shop">Back to the shop floor (keeps your seat)</a>
       <span class="hint" id="leave-note"></span>
       <span class="where mono">Booth {code}</span>
     </div>
@@ -27,7 +28,16 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
       </div>
     </div>
 
-    <div class="table-grid">
+    <section id="removed" class="card removed" aria-labelledby="removed-h" role="alert" hidden>
+      <h2 id="removed-h">The host removed you from this table</h2>
+      <p>You can't sit here again, but the shop is still open.</p>
+      <div class="row">
+        <a class="btn" href="/shop">Back to the shop</a>
+        <a class="btn ghost" href="/">Home</a>
+      </div>
+    </section>
+
+    <div class="table-grid" id="table-grid">
       <div class="game-col">
         <!-- 3D scene: decoration only, loaded after the page is usable and only where WebGL 2
              works and motion is welcome. Everything in it is also in the 2D page below. -->
@@ -39,7 +49,10 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
 
         <h1 id="title">Table</h1>
         <div id="lobby-code" class="ticket-wrap">
-          <p class="hint" id="code-label">Share this code with the room</p>
+          <div class="code-line">
+            <p class="hint" id="code-label">Share this code with the room</p>
+            <span class="vis-tag mono" id="vis-tag" data-private={String(state.private)}>{state.private ? "Private" : "Open to anyone"}</span>
+          </div>
           <div class="ticket" aria-labelledby="code-label" id="table-code">{code}</div>
           <button id="copy-code" type="button" class="secondary sm">Copy code</button>
           <p class="hint" id="copy-msg" role="status"></p>
@@ -50,6 +63,18 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
         </p>
 
         <div id="v-lobby">
+          <fieldset class="who-sits" id="vis-host" hidden>
+            <legend>Who can sit down?</legend>
+            <div class="check">
+              <input type="radio" name="vis" id="vis-public" value="public" />
+              <label for="vis-public">Anyone in the shop</label>
+            </div>
+            <div class="check">
+              <input type="radio" name="vis" id="vis-private" value="private" />
+              <label for="vis-private">Only people with the code</label>
+            </div>
+            <p class="hint" id="vis-msg" role="status"></p>
+          </fieldset>
           <p class="hint"><a href="/me">Change your character</a></p>
           <button id="start" type="button" class="full" disabled hidden>Start game</button>
           <p class="hint" id="start-note" aria-live="polite"></p>
@@ -176,6 +201,30 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
           </ul>
         </section>
 
+        <div id="remove-confirm" class="card" role="alertdialog" aria-labelledby="remove-q" hidden>
+          <p id="remove-q"></p>
+          <div class="row btns">
+            <button id="remove-yes" type="button">Yes, remove</button>
+            <button id="remove-no" type="button" class="secondary">Keep them</button>
+          </div>
+        </div>
+        <p id="remove-msg" class="error" role="alert"></p>
+
+        <details class="card report" id="report" aria-labelledby="report-h">
+          <summary id="report-h">Report this table</summary>
+          <form id="report-form">
+            <label for="report-reason">What is the problem?</label>
+            <select id="report-reason" name="reason">
+              <option value="rude names">Rude names</option>
+              <option value="spam">Spam</option>
+              <option value="trolling the game">Trolling the game</option>
+              <option value="something else">Something else</option>
+            </select>
+            <button type="submit" class="secondary">Send report</button>
+          </form>
+          <p class="hint" id="report-msg" role="status"></p>
+        </details>
+
         <details class="card howto" id="howto" hidden>
           <summary>How to play</summary>
           <ol>
@@ -209,7 +258,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     winner?: "players" | "moles";
     themes?: { round: number; majority: string; mole: string }[];
   };
-  type State = { status: string; host: string; members: { name: string; avatar: Avatar }[]; game?: Game };
+  type State = { status: string; private: boolean; host: string; members: { name: string; avatar: Avatar }[]; game?: Game };
   type Me = { role: "player" | "ghost" | "spectator"; theme?: string; picked?: boolean };
 
   import type { TableScene } from "../../scene/table-scene.ts";
@@ -311,6 +360,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     show("status", playing && !over);
     $("status-label").textContent = phase ? phaseWords[phase] : "";
     show("v-lobby", !inGame);
+    show("to-shop", !inGame || over);
     // How to play: open until a game has been played here, then folded away.
     show("howto", !inGame || over);
     // Folded away once a game is on, and for anyone who arrives after one.
@@ -338,7 +388,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     const s = state!;
     const g = s.game;
     const inGame = s.status === "playing" && !!g;
-    once("members", JSON.stringify([s.members, s.host, inGame, g?.alive, g?.ghosts]), () => {
+    once("members", JSON.stringify([s.members, s.host, inGame, g?.alive, g?.ghosts, isHost()]), () => {
       $("members").replaceChildren(
         ...s.members.map(({ name }) => {
           const stamps = h("span", { class: "stamps" });
@@ -346,7 +396,13 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
           if (name === s.host) stamp("Host", "host");
           if (inGame && g!.ghosts.includes(name)) stamp("Out", "out");
           else if (inGame && !g!.alive.includes(name)) stamp("Watching", "watching");
-          return h("li", {}, face(name), h("span", { class: "name" }, name), stamps);
+          const li = h("li", {}, face(name), h("span", { class: "name" }, name), stamps);
+          if (isHost() && name !== myName) {
+            const rm = button("Remove", () => askRemove(name, rm), { secondary: true, aria: `Remove ${name} from the table` });
+            rm.classList.add("sm", "rm");
+            li.append(rm);
+          }
+          return li;
         }),
       );
       $("count").textContent = String(s.members.length);
@@ -355,6 +411,13 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
 
   function renderLobby() {
     const s = state!;
+    const tag = $("vis-tag");
+    tag.textContent = s.private ? "Private" : "Open to anyone";
+    tag.dataset.private = String(s.private);
+    tag.classList.toggle("private", s.private);
+    show("vis-host", isHost());
+    $<HTMLInputElement>("vis-public").checked = !s.private;
+    $<HTMLInputElement>("vis-private").checked = s.private;
     const n = s.members.length;
     const start = $<HTMLButtonElement>("start");
     show("start", isHost());
@@ -756,9 +819,11 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
 
   // ---- leaving ----
 
+  let leaving = false;
   async function leave() {
+    leaving = true;
     await api(`/api/tables/${code}/leave`, {});
-    location.href = "/";
+    location.href = "/shop";
   }
   $("leave").addEventListener("click", () => {
     if (state?.status !== "playing") return void leave();
@@ -772,6 +837,63 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
   $("leave-yes").addEventListener("click", () => void leave());
   $("leave-confirm").addEventListener("keydown", (e) => {
     if ((e as KeyboardEvent).key === "Escape") $("leave-no").click();
+  });
+
+  // ---- visibility, removing, reporting (decision 0005) ----
+
+  for (const id of ["vis-public", "vis-private"]) {
+    $(id).addEventListener("change", async () => {
+      const wantPrivate = $<HTMLInputElement>("vis-private").checked;
+      const msg = $("vis-msg");
+      msg.textContent = "";
+      const { res, data } = await api(`/api/tables/${code}/visibility`, { private: wantPrivate });
+      if (!res.ok) {
+        msg.textContent = res.status === 409 ? "You can't change this during a game." : (data.error ?? "Could not change that.");
+        return render();
+      }
+      msg.textContent = wantPrivate ? "Now private: only people with the code can sit down." : "Now open: anyone in the shop can sit down.";
+      onState(data as unknown as State);
+    });
+  }
+
+  let removeFocus: HTMLElement | null = null;
+  let removing = "";
+  function askRemove(name: string, from: HTMLElement) {
+    removing = name;
+    removeFocus = from;
+    $("remove-q").replaceChildren(h("strong", {}, `Remove ${name}?`), " They leave the table and can't sit here again.");
+    show("remove-confirm", true);
+    $("remove-yes").focus();
+  }
+  function closeRemove() {
+    show("remove-confirm", false);
+    // The members list may have been redrawn: fall back to its first Remove button.
+    const back = removeFocus && removeFocus.isConnected ? removeFocus : document.querySelector<HTMLElement>("#members .rm");
+    back?.focus();
+    removeFocus = null;
+  }
+  $("remove-no").addEventListener("click", closeRemove);
+  $("remove-yes").addEventListener("click", async () => {
+    const name = removing;
+    const msg = $("remove-msg");
+    msg.textContent = "";
+    const { res, data } = await api(`/api/tables/${code}/remove`, { name });
+    closeRemove();
+    if (!res.ok) return void (msg.textContent = data.error ?? `Could not remove ${name}.`);
+    announce(`${name} was removed from the table.`);
+    onState(data as unknown as State);
+  });
+  $("remove-confirm").addEventListener("keydown", (e) => {
+    if ((e as KeyboardEvent).key === "Escape") $("remove-no").click();
+  });
+
+  $("report-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const msg = $("report-msg");
+    const { res, data } = await api(`/api/tables/${code}/report`, { reason: $<HTMLSelectElement>("report-reason").value });
+    msg.textContent = res.ok ? "Reported, thanks."
+      : res.status === 409 ? "Already reported."
+      : (data.error ?? "Could not send that report.");
   });
 
   // ---- the 3D scene (decoration; the page above is complete without it) ----
@@ -864,7 +986,29 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
 
   // ---- following the table ----
 
+  // The host took this person out: say so, drop the game UI and stop listening.
+  function showRemoved() {
+    removed = true;
+    stopAudio();
+    streamCtl?.abort();
+    scene?.destroy();
+    scene = null;
+    sceneDead = true;
+    for (const id of ["table-grid", "scene-slot", "leave", "to-shop", "leave-confirm", "remove-confirm", "status"]) show(id, false);
+    show("removed", true);
+    show("conn", false);
+    announce("The host removed you from this table.");
+    $("removed-h").tabIndex = -1;
+    $("removed-h").focus();
+  }
+
+  let removed = false;
+  let wasMember = false;
+  let refusedJoin = false;
   function onState(next: State) {
+    if (removed) return;
+    if (next.members.some((m) => m.name === myName)) wasMember = true;
+    else if (!leaving && (wasMember || refusedJoin)) return void showRemoved();
     const prev = state;
     state = next;
     const g = next.game;
@@ -937,6 +1081,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     }
   }
   function showConn() {
+    if (removed) return;
     const offline = !navigator.onLine;
     const down = offline || !connected;
     conn.hidden = !down;
@@ -999,8 +1144,9 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
   }
 
   async function follow() {
-    for (;;) {
+    while (!removed) {
       try { await followOnce(); } catch { /* aborted, refused or dropped: fall through and retry */ }
+      if (removed) return;
       connected = false;
       showConn();
       await new Promise((r) => setTimeout(r, navigator.onLine ? RETRY_MS : 500));
@@ -1019,7 +1165,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
   // The page is signed in (the server redirects otherwise); make sure this
   // person is a member, then watch the table. On every reopening we ask again
   // who we are, to land in the right view.
-  api(`/api/tables/${code}/join`, {}).finally(async () => {
+  api(`/api/tables/${code}/join`, {}).then(({ res }) => { refusedJoin = res.status === 403; }).finally(async () => {
     const first = await fetch(`/api/tables/${code}`).catch(() => null);
     const date = first?.headers.get("date");
     if (date) clockSkew = Date.parse(date) - Date.now() + 500;

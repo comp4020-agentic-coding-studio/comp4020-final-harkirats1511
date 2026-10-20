@@ -152,7 +152,7 @@ input, select {
 }
 select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 1.25rem) 55%, calc(100% - 0.9rem) 55%; background-size: 0.4rem 0.4rem; background-repeat: no-repeat; padding-right: 2.5rem; }
 input:focus-visible, select:focus-visible { outline: 3px solid var(--lamp); outline-offset: 2px; }
-input[type="checkbox"] { width: 1.5rem; height: 1.5rem; min-height: 0; margin: 0; flex: none; accent-color: var(--lamp); }
+input[type="checkbox"], input[type="radio"] { width: 1.5rem; height: 1.5rem; min-height: 0; margin: 0; flex: none; accent-color: var(--lamp); }
 .mono-input { font-family: var(--cat); font-weight: 600; font-size: var(--step-3); text-transform: uppercase; letter-spacing: 0.25em; text-align: center; }
 /* Paper forms: a line to write on. */
 .paper label { color: var(--ink-2); font-weight: 600; }
@@ -573,3 +573,23 @@ fieldset.part .chips { clear: both; }
 .empty-card { text-align: left; }
 .liner .stamp-big { color: var(--ink); border-color: var(--ink); outline-color: var(--ink); }
 .liner .stamp-big.moles { color: var(--neon-ink); border-color: var(--neon-ink); outline-color: var(--neon-ink); }
+
+/* Booth visibility, removal and reports (decision 0005) */
+fieldset.who-sits { margin: 0 0 1rem; min-width: 0; border: 0; padding: 0; }
+fieldset.who-sits legend { font: 600 0.75rem/1.2 var(--cat); letter-spacing: 0.1em; text-transform: uppercase; color: var(--lamp); padding: 0; margin-bottom: 0.4rem; }
+fieldset.who-sits .hint { margin-top: 0.25rem; }
+.vis-tag { display: inline-block; margin: 0 0 0.5rem 0.5rem; padding: 0.15rem 0.6rem; border-radius: 999px; font: 600 0.75rem/1.4 var(--cat); letter-spacing: 0.08em; text-transform: uppercase; color: var(--lamp); box-shadow: inset 0 0 0 1.5px var(--lamp); }
+.vis-tag.private { color: var(--muted); box-shadow: inset 0 0 0 1.5px var(--line); }
+.code-line { display: flex; align-items: baseline; flex-wrap: wrap; }
+.code-line .hint { margin-bottom: 0.4rem; }
+#vis-host { margin: 0 0 1rem; }
+ul.members .rm { margin-left: 0.25rem; }
+#remove-confirm { margin-top: 0.75rem; }
+details.report { margin: 0 0 1.25rem; padding: 0 1.1rem; }
+details.report[open] { padding-bottom: 1rem; }
+details.report summary { font-weight: 800; min-height: 44px; display: flex; align-items: center; cursor: pointer; }
+details.report select { margin-bottom: 0.75rem; }
+.removed h2 { margin-top: 0; }
+.removed .row { gap: 0.75rem; flex-wrap: wrap; }
+.bar { flex-wrap: wrap; }
+input[type="radio"] { border-radius: 50%; }

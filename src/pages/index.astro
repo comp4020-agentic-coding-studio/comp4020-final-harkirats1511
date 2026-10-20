@@ -25,6 +25,18 @@ const tasteCount = me ? listTaste(me.id).length : 0;
       <section class="card" aria-labelledby="create-h">
         <h2 id="create-h">Start a table</h2>
         <p class="hint">You get a code to share with the room.</p>
+        <fieldset class="who-sits">
+          <legend>Who can sit down?</legend>
+          <div class="check">
+            <input type="radio" name="visibility" id="vis-public" value="public" checked aria-describedby="vis-hint" />
+            <label for="vis-public">Anyone in the shop</label>
+          </div>
+          <div class="check">
+            <input type="radio" name="visibility" id="vis-private" value="private" aria-describedby="vis-hint" />
+            <label for="vis-private">Only people with the code</label>
+          </div>
+          <p class="hint" id="vis-hint">A public booth is lit up on the shop floor, so anyone walking by can take a seat. A private booth only shows who hosts it.</p>
+        </fieldset>
         <div class="check">
           <input type="checkbox" id="autoplay" checked aria-describedby="autoplay-hint" />
           <label for="autoplay">Play the tracks automatically</label>
@@ -151,6 +163,7 @@ const tasteCount = me ? listTaste(me.id).length : 0;
       moles: value("moles") ? Number(value("moles")) : null,
       autoplay: auto.checked,
       slotSeconds: Number(value("slot-s")),
+      private: (document.getElementById("vis-private") as HTMLInputElement).checked,
     });
     if (!res.ok) return say(data.error ?? "Could not create a table.");
     location.href = `/t/${data.code}`;
