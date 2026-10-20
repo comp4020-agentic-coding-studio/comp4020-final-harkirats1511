@@ -1,7 +1,7 @@
 // The 2D avatar badge: a round, drawn character shown wherever a name appears.
 // Built from createElement / createElementNS only, never markup strings.
-// Fixed colours (not theme tokens) so a person looks the same in light and
-// dark; the ring around it uses --ink and so follows the theme. Sized by the
+// Fixed colours (not tokens) so a person looks the same everywhere; the ring
+// around it comes from global.css. Sized by the
 // --s custom property (default 2.5rem), see .avatar in global.css.
 import { type Avatar, COLOURS, defaultAvatar, OPTIONS } from "../lib/avatar.ts";
 
@@ -171,9 +171,15 @@ export function avatar(name: string, a?: Avatar): HTMLElement {
   if (look.aid === "wheelchair" || look.aid === "power-chair") {
     const chip = document.createElement("span");
     chip.className = "av-aid";
-    const i = document.createElement("i");
-    i.className = `ph-bold ${look.aid === "power-chair" ? "ph-wheelchair-motion" : "ph-wheelchair"}`;
-    chip.append(i);
+    // A small drawn wheelchair (a wheel, a seat and a back), power chairs with a motor block.
+    const line = { fill: "none", stroke: "currentColor", "stroke-width": 3.4, "stroke-linecap": "round", "stroke-linejoin": "round" };
+    chip.append(
+      s("svg", { viewBox: "0 0 24 24", width: "100%", height: "100%", focusable: "false" },
+        s("circle", { cx: 11, cy: 15, r: 5.5, ...line }),
+        s("path", { d: "M8 4 V12 H16 L19 18", ...line }),
+        ...(look.aid === "power-chair" ? [s("rect", { x: 9, y: 13.5, width: 4, height: 3, fill: "currentColor" })] : []),
+      ),
+    );
     el.append(chip);
   }
   return el;
