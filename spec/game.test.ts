@@ -346,7 +346,11 @@ it("lets a ghost pick from their crate, and only from it", async () => {
   const g = await started(5, { pickSeconds: 30, voteSeconds: 30 });
   await pickAll(g.code, g.players);
   await toVote(g);
-  const target = g.players[1];
+  // Vote out someone holding the majority theme: ejecting the only mole would
+  // end the game in round 1 and there'd be no round to pick in as a ghost.
+  const themes = await Promise.all(g.players.map(async (p) => (await me(p, g.code)).theme));
+  const count = (t?: string) => themes.filter((x) => x === t).length;
+  const target = g.players.find((_, i) => count(themes[i]) > 1)!;
   for (const p of g.players) await p.s.call(`/api/tables/${g.code}/vote`, { body: { name: target.name } });
   await waitFor(g.code, (s) => s.game?.phase === "reveal");
   await g.host.s.call(`/api/tables/${g.code}/advance`, { body: {} });
