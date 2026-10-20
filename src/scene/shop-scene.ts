@@ -304,7 +304,10 @@ export async function startShopScene(slot: HTMLElement, hooks: ShopHooks, onFirs
   let walkTo: { x: number; z: number } | null = null;
   let near: Target = null;
   let seating: { spot: number; stool: { x: number; z: number; yaw: number }; done: (ok: boolean) => void } | null = null;
-  const textual = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+  // Typing somewhere: a text box or a list. A slider or a checkbox isn't typing.
+  const textual = (t: EventTarget | null) =>
+    t instanceof HTMLElement &&
+    (t.isContentEditable || /^(TEXTAREA|SELECT)$/.test(t.tagName) || (t instanceof HTMLInputElement && !/^(range|checkbox|radio|button|submit)$/.test(t.type)));
   const pressable = (t: EventTarget | null) => t instanceof HTMLElement && /^(BUTTON|A|SUMMARY)$/.test(t.tagName);
   const onKey = (e: KeyboardEvent) => {
     if (e.ctrlKey || e.metaKey || e.altKey || textual(e.target)) return;

@@ -95,14 +95,10 @@ const list = booths();
   const vol = $<HTMLInputElement>("sound-vol");
   vol.value = String(Math.round(radio.state().volume * 100));
   sfx.setEnabled(radio.state().on);
-  const hudSound: { btn: HTMLButtonElement | null } = { btn: null };
   const paintSound = () => {
     const s = radio.state();
-    for (const b of [soundBtn, hudSound.btn]) {
-      if (!b) continue;
-      b.textContent = `Sound: ${s.on ? "on" : "off"}`;
-      b.setAttribute("aria-pressed", String(s.on));
-    }
+    soundBtn.textContent = `Sound: ${s.on ? "on" : "off"}`;
+    soundBtn.setAttribute("aria-pressed", String(s.on));
     sfx.setEnabled(s.on);
     const name = s.stationName;
     $("radio-now").textContent = name ? `Now on the radio: ${name}.${s.on ? "" : " (Sound is off.)"}` : "The jukebox picks the station for the whole shop, once a minute.";
@@ -204,13 +200,7 @@ const list = booths();
     });
     new IntersectionObserver((e) => { sceneVisible = e[e.length - 1].isIntersecting; syncPause(); }).observe(stage);
     document.addEventListener("visibilitychange", syncPause);
-    // the 3D HUD's own copy of the sound toggle, and the booth-list toggle
-    hudSound.btn = document.createElement("button");
-    hudSound.btn.type = "button";
-    hudSound.btn.className = "shop-btn ghost sm";
-    hudSound.btn.addEventListener("click", () => soundBtn.click());
-    $("shop-hud").querySelector(".shop-hud-btns")!.prepend(hudSound.btn);
-    paintSound();
+    // the booth-list toggle (sound stays in the bar above, one copy only)
     const listBtn = $<HTMLButtonElement>("hud-list");
     const sync = () => listBtn.setAttribute("aria-expanded", String(details.open));
     details.addEventListener("toggle", sync);
@@ -298,7 +288,9 @@ const list = booths();
     say(`Sitting at ${code}…`);
     const b = boothByCode(code);
     if (scene && b && b.spot >= 0) {
-      const ok = await scene.sitAt(b.spot);
+      // Watch yourself sit down, but never wait more than a few seconds for it
+      // (a slow phone walks slowly): the game is on the table page.
+      const ok = await Promise.race([scene.sitAt(b.spot), new Promise<boolean>((r) => setTimeout(() => r(false), 3500))]);
       setTimeout(() => go(code), ok ? 900 : 0);
     } else go(code);
     return true;
@@ -347,7 +339,9 @@ const list = booths();
     msg.textContent = `Sitting at ${code}…`;
     const b = boothByCode(code);
     if (scene && b && b.spot >= 0) {
-      const ok = await scene.sitAt(b.spot);
+      // Watch yourself sit down, but never wait more than a few seconds for it
+      // (a slow phone walks slowly): the game is on the table page.
+      const ok = await Promise.race([scene.sitAt(b.spot), new Promise<boolean>((r) => setTimeout(() => r(false), 3500))]);
       setTimeout(() => go(code), ok ? 900 : 0);
     } else go(code);
   });
@@ -530,7 +524,10 @@ const list = booths();
   .shop-vol { display: flex; align-items: center; gap: 0.5rem; margin: 0; font-size: 0.8rem; }
   .shop-vol input { min-height: 0; width: 7rem; padding: 0; accent-color: var(--s-lamp); border: 0; background: none; }
 
-  .shop-stage { position: relative; height: min(76svh, 46rem); min-height: 420px; overflow: hidden; background: var(--s-wall); border-block: 1px solid var(--s-rule); touch-action: none; }
+  /* With the 3D on, the HUD shows the counts, so the bar keeps only its buttons. */
+  .shop:has(.shop-stage:not([hidden])) .shop-count { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .shop:has(.shop-stage:not([hidden])) .shop-bar { justify-content: flex-end; }
+  .shop-stage { position: relative; height: calc(100svh - 8.5rem); max-height: 52rem; min-height: 420px; overflow: hidden; background: var(--s-wall); border-block: 1px solid var(--s-rule); touch-action: none; }
   .shop-stage[hidden] { display: none; }
   .shop-canvas { position: absolute; left: 0; top: 0; display: block; touch-action: none; }
   .shop-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
