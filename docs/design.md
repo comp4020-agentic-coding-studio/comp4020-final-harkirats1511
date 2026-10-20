@@ -1,113 +1,82 @@
-# Design system: record-shop zine
+# Design system: a record shop after hours
 
-Chosen direction (student's pick, 14 Oct): a record-shop zine. The game should
-feel like a flyer stapled to a gig noticeboard: bold cut-out type, newsprint,
-one loud ink colour, things that look pasted on. Phone-first, played with
-friends in one room.
+Chosen direction (the student's pick, replacing the earlier zine): the app is a
+record shop at night. The home page is the shopfront under a neon sign, tables
+are listening booths, your theme is a handwritten staff-pick card, tracks are
+white-label records, and the reveal is the liner notes on a back cover. The
+approved reference is `docs/design/record-shop.html` (and `shop-floor-3d.html`
+for the later 3D shop). One theme, dark by design, native CSS, no framework.
 
-Design read: a phone-first party game for a friend group, in a handmade
-print/zine language, built with native CSS on Astro (no framework).
-Dials: variance 7, motion 4, density 4.
+## Tokens (`src/styles/global.css`)
 
-## Tokens (CSS custom properties on `:root`)
+- `--wall` #1B1420 page, `--wall-2` #261C2C panels, `--wall-3` #34283C disabled and
+  sunk, `--rule` #4A3B4E hairlines, `--line` #85728C control borders.
+- `--lamp` #F4B860 the accent: primary buttons, focus ring, highlights, timers
+  (10.2:1 on the wall). Text on a lamp fill is `--ink` #1B1420.
+- `--neon` #FF4F8B only the sign, and the mole (the stamp, the 3D mole stamp).
+  `--neon-ink` #A81C55 is the same idea on paper (5.8:1 on `--sleeve`).
+- `--sleeve` #EFE7D7 paper: the membership card, the staff pick, liner notes,
+  past games, the table-code ticket. `--ink-2` #5B4E4A secondary text on paper (6.5:1).
+- `--text` #F3EADB, `--muted` #B9A9B8 (7.3:1 on `--wall-2`), `--wood` #7A5333,
+  `--bad` #FF9A8B and `--ok` #9AD9A8 for refusals and saved states.
+- `color-scheme: dark`; there is no light mode and no theme switch. Every
+  text pair is at least 4.5:1; check any new pair.
 
-Light ("newsprint"), the default:
-- `--paper` #F2EFE6 (page), `--paper-2` #E6E1D3 (sunk panels), `--card` #FBFAF6
-- `--ink` #16161A (text, borders, hard shadows), `--ink-2` #45434A (secondary)
-- `--accent` #F0477E (riso pink fill: primary buttons, the theme card, highlights)
-- `--accent-ink` #16161A (text on an accent fill: 5.08:1)
-- `--accent-text` #C21F57 (pink used AS text on paper/card: 5.04:1. Never put
-  `--accent` itself on paper as text; it is 3.6:1)
-- `--accent-2` #1A5FCC (riso blue, 5.14:1 on paper: used ONLY as the second print layer in
-  overprint/misregistration effects and the "playing now" state, never a
-  second button colour)
-- `--ok` #17703F (5.33:1), `--bad` #C2272D (5.04:1) (for real state only: errors, the mole reveal)
+## Type (self-hosted through Fontsource, no Google Fonts)
 
-Dark ("night print"): under `prefers-color-scheme: dark` and
-`[data-theme="dark"]`, with `:root:not([data-theme="light"])` guarding the media
-query:
-- `--paper` #17161B, `--paper-2` #201F26, `--card` #24232B
-- `--ink` #F2EFE6, `--ink-2` #B9B5AA, `--accent` #FF5C8A, `--accent-ink` #17161B,
-  `--accent-text` #FF5C8A (6.13:1 on paper)
-- `--accent-2` #5B9BFF, `--ok` #4CC38A, `--bad` #FF6B6B (check both on paper)
-Body always sets an explicit `background: var(--paper)` and `color: var(--ink)`.
-
-Every text/background pair must pass WCAG AA (4.5:1 body, 3:1 for 18px+ bold).
-The light-mode values above were measured; the first draft's pink (#E8336D)
-failed with ink (4.40:1) and was replaced. Check any new pair, don't assume.
-
-## Type
-
-- Display: **Archivo Black** (`@fontsource/archivo-black`), uppercase allowed
-  only for short labels and headings, tight tracking (`-0.01em`), leading 1.0-1.1.
-- Body/UI: **Archivo** variable (`@fontsource-variable/archivo`), including its
-  condensed width axis for stamps and tags.
-- Numbers, codes, timers: **JetBrains Mono** variable.
-- Self-hosted via the Fontsource packages, `font-display: swap`. No Inter, no
-  serif, no Google Fonts link.
-- Scale (rem): 0.875 / 1 / 1.125 / 1.375 / 1.75 / 2.5 / 3.5. Table code and the
-  theme text use the top steps.
-
-## Shape and depth
-
-- Corners: **sharp** (radius 0) everywhere, except avatars (circle) and the
-  sticker motif (circle). No other radii.
-- Borders: 2px solid `var(--ink)` on cards, inputs, buttons.
-- Shadows: hard offset, no blur, ink-coloured: `4px 4px 0 var(--ink)` on cards,
-  `3px 3px 0` on buttons. Pressed: translate(3px, 3px) and shadow 0 (a physical
-  push). Never a soft blurred shadow.
-- Texture: one fixed, `pointer-events: none` grain overlay (an inline SVG
-  feTurbulence as a CSS background on `body::before`, ~6% opacity, mix-blend
-  multiply in light, screen in dark). Never on scrolling elements.
-- Cut-out details: slight rotation (-1.5deg to 2deg) on a FEW elements only
-  (the theme card, stamps, the table code), never on body text or forms.
-  Tape strips (a translucent rectangle at a card's top edge) on the theme card
-  only.
+- **Bungee**: the sign and logo only (the O is a record), plus the big stamp.
+- **Bricolage Grotesque** (variable): all UI text and headings.
+- **IBM Plex Mono**: catalogue numbers and codes (`BOOTH KGZW`, `A1`), timers,
+  small mono-caps labels (phase names, `h3`).
+- **Caveat**: handwriting only: the staff-pick theme and the pressing notes.
 
 ## Components
 
-- **Button (primary)**: accent fill, accent-ink text, 2px ink border, hard
-  shadow, Archivo Black, min height 48px, full-width on phones in forms. 
-  **Secondary**: card fill, ink text. **Disabled**: paper-2 fill, ink-2 text,
-  no shadow, not-allowed cursor, plus visible text explaining why when it
-  matters.
-- **Card**: card fill, 2px ink border, 4px hard shadow, 16-20px padding.
-- **Stamp**: condensed uppercase Archivo, ink border, slight rotation, used for
-  states: HOST, OUT, WATCHING, PICKED, MOLE, CAUGHT.
-- **Ticket**: the table code, set in JetBrains Mono at display size inside a
-  perforated-edge ticket shape (CSS mask or dashed border), rotated slightly.
-- **Theme card**: the hero of every round. Accent background, huge display text,
-  tape strip, a "Hide" toggle that flips it face-down (a paper-2 back with a
-  repeating "MOLE" pattern), honoring reduced motion.
-- **Track slot**: a vinyl-sleeve square (card with a circle "record" peeking
-  out), big number. Playing state: the record spins (CSS rotate, disabled under
-  reduced motion) and the sleeve gets the accent-2 overprint.
-- **Inputs**: label above, 2px ink border, card fill, 48px height, focus ring
-  3px accent with offset. No placeholder-as-label.
-- **Timer**: JetBrains Mono, large, ink; under 10 s it turns accent.
-- Icons: Phosphor (`@phosphor-icons/web`, one weight: bold). No emoji. No
-  hand-drawn SVG icons.
+- **Panel (`.card`)**: wall-2, 14px radius, 1.5px inset rule. Paper things add
+  `.paper` (sleeve fill, ink text, a soft lift).
+- **Button**: lamp pill, ink text, 48px high. Secondary: ghost with a 1.5px line.
+  On paper: ink pill. Disabled: wall-3 with muted text.
+- **Inputs**: dark well with a line border; on paper just a line to write on.
+- **Membership card**: the sign-in form, paper, tilted 1deg, perforated stripe.
+- **Hours card**: dashed mono box under the sign (static copy; no new queries).
+- **Staff pick**: your theme on a sleeve card with tape, handwritten, tilted;
+  Hide flips it to a wood back that is the same for everyone.
+- **Your crate**: the pick panel is a wooden crate; tracks are rows with a
+  record peeking from the cover.
+- **Needle drop** (listen): sleeve, plinth, platter, record, tonearm in CSS.
+  A slot that starts playing replays the drop; the label shows only side and
+  track (A1, A2, B1...) derived from the slot number, never a title, artist,
+  owner or cover. Slots are sleeves (A1, B2...) the host can press.
+- **Liner notes**: reveal and game over are a paper back cover: tracklist with
+  owners, a MOLE stamp when the ejected person was a mole, and at game end the
+  themes as handwritten pressing notes. Past games reuse it as record-shelf cards.
+- **Stamp**: mono caps, 2px border, rotated a few degrees: HOST, OUT, WATCHING,
+  AUTO, MOLE. Colour is never the only signal; each carries words.
+- **Ticket**: the table code on a sleeve with punched notches, in mono.
+- **Avatar**: the drawn badge with a wall ring; mobility aids are a small drawn
+  mark, not an icon font.
 
-## Motion (intensity 4)
+## Motion
 
-Only motivated motion: phase changes slide/flip the main card in (feedback that
-the round moved on), the reveal deals the track sleeves out one by one
-(storytelling), button press push (feedback), the playing record spins (state).
-CSS transitions/animations on transform and opacity only,
-`cubic-bezier(0.16, 1, 0.3, 1)`, 200-450ms. Everything collapses to instant under
-`prefers-reduced-motion: reduce`.
+Only motivated motion: the needle drop and spinning record (state), phase panels
+sliding in, reveal sleeves dealt out, press scale on buttons. Transform and
+opacity only. Under `prefers-reduced-motion` everything stops: the record just
+sits on the platter with the arm down.
 
-## Copy rules
+## Do / don't
 
-- No em dashes or en dashes anywhere visible. Use full stops, commas, colons.
-- Plain, warm, short. One instruction per screen, at the top.
-- No AI filler ("elevate", "seamless"), no fake numbers.
+- Do use paper for things that are paper, the wall for everything else, lamp for
+  action. Do set codes, counts and timers in mono, themes and notes in Caveat.
+- Don't use neon for anything but the sign and the mole. Don't use emoji or an
+  icon font. Don't add gradients on surfaces (the wall glow and wood grain are
+  the only ones), drop shadows other than the paper lift, or card-in-card stacks.
+- Don't show a theme other than your own, a role, a title or owner before the
+  reveal, or who has picked or voted; the look never changes what is shown.
+- No em or en dashes in visible copy. Plain, warm, short.
 
 ## Layout
 
-- Phone first (375px), single column, 16px gutters, no horizontal scroll ever.
-- Desktop (1024px+): the table page becomes two columns: main game column
-  (max ~640px) plus a side column for players and how-to-play; other pages stay
-  centred with max-width ~720px. The 3D scene (a later phase) will sit at the top
-  of the main column.
-- Tap targets at least 44px.
+Phone first (390px), 16px gutters, no horizontal scroll. Home becomes sign on the
+left and forms on the right from 52rem; the table page is two columns from
+1024px with the 3D scene (a decoration) at the top of the game column.
+Tap targets are at least 44px; focus is a 3px lamp ring (ink on paper).
