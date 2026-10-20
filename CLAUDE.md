@@ -56,6 +56,34 @@ works out whose pick doesn't quite fit. They are decisions, not defaults.
   host's. The host's phone always plays. The choice is per person, saved, and can
   be changed during a game.
 
+## Logging
+
+The server logs who did what, so the deployed app can be read from
+`flyctl logs` alone: which person, at which table, did which action, and
+whether it was refused. It is how we (and the agent) find out what a live app
+did when something goes wrong, so it stays after any crit.
+
+- One line per meaningful action, written to stdout: sign-in (new name or
+  returning), table created/joined/left, game started, pick made, vote cast,
+  phase moved on (by whom, or by the timer), track played, game finished, and
+  every refused attempt with the reason (wrong PIN, not the host, ghost voting,
+  late pick, not signed in where it matters).
+- Each line names the person by their display name and short id, and the table
+  by its code, so two people with similar names are still told apart.
+- **Never logged before it is public, because the logs may be read aloud or on
+  a screen during a game:** a theme, who is a mole, a track's title, which
+  track is whose, or who someone voted for. The action itself is fine to log
+  ("Ana picked a track", "Ben voted"): that is who did what, and it reveals
+  nothing a round's outcome depends on. The reveal line may name who owned which
+  track and who was ejected, because the reveal screen shows that to everyone.
+  Themes are logged only when the game ends, as the game-over screen shows them.
+  Who voted for whom is never logged, since no screen ever shows it.
+- Never logged at all: PINs, PIN hashes, session tokens, cookies.
+- The same lines are kept in a small in-memory ring (the last few hundred) that
+  `GET /api/logs` returns to whoever presents the admin token in
+  `LOG_TOKEN` (an env var set as a Fly secret, never committed). Without a valid
+  token it answers 404, so nobody learns it exists.
+
 ## The 3D table scene
 
 - It is decoration on top of the game, never the game. Every action, every piece
