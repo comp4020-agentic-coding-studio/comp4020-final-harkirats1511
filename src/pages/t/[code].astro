@@ -262,6 +262,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
   type Me = { role: "player" | "ghost" | "spectator"; theme?: string; picked?: boolean };
 
   import type { TableScene } from "../../scene/table-scene.ts";
+  import { createSfx } from "../../audio/sfx.ts";
   const app = document.getElementById("app")!;
   const code = app.dataset.code!;
   const myName = app.dataset.me!;
@@ -530,6 +531,14 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
   // owner or cover. A slot that starts playing replays the drop; arriving to one
   // already playing finds the record on the platter. CSS skips the motion under
   // reduced motion and leaves the record resting.
+  // The needle's thud and crackle, synthesised (decision 0006). Off when the
+  // shop's Sound switch is off; silent until the first tap, as browsers require.
+  const sfx = createSfx();
+  try { sfx.setEnabled(localStorage.getItem("mole:radio") !== "off"); } catch { /* no storage: on */ }
+  const unlockSfx = () => { sfx.unlock(); removeEventListener("pointerdown", unlockSfx, true); removeEventListener("keydown", unlockSfx, true); };
+  addEventListener("pointerdown", unlockSfx, true);
+  addEventListener("keydown", unlockSfx, true);
+
   function dropNeedle(label: string | null, key: string) {
     const stage = $("stage");
     $("stage-label").textContent = label ?? "A1";
@@ -545,6 +554,8 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     stage.classList.add("on");
     void stage.offsetWidth;
     stage.classList.add("go");
+    // In time with the needle touching down in the CSS drop (instantly when still).
+    setTimeout(() => sfx.needle(), matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 2400);
   }
 
   function renderVote(on: boolean) {
