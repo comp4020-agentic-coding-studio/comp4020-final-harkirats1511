@@ -529,7 +529,7 @@ const list = booths();
   .shop:has(.shop-stage:not([hidden])) .shop-bar { justify-content: flex-end; }
   .shop-stage { position: relative; height: calc(100svh - 8.5rem); max-height: 52rem; min-height: 420px; overflow: hidden; background: var(--s-wall); border-block: 1px solid var(--s-rule); touch-action: none; }
   .shop-stage[hidden] { display: none; }
-  .shop-canvas { position: absolute; left: 0; top: 0; display: block; touch-action: none; }
+  .shop-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
   .shop-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
   .shop-labels > * { position: absolute; left: 0; top: 0; will-change: transform; }
   .shop-labels .name { font: 600 12px var(--s-ui); white-space: nowrap; color: var(--s-sleeve); text-shadow: 0 1px 2px #000, 0 0 6px rgba(0,0,0,.8); }
@@ -596,4 +596,16 @@ const list = booths();
   .shop-people li { background: var(--s-panel); border: 1px solid var(--s-rule); border-radius: 999px; padding: 0.25rem 0.8rem; font-size: 0.9rem; }
   .shop-stations { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.6rem 0 0.3rem; }
   @media (prefers-reduced-motion: reduce) { .shop-sheet, .shop-loading { transition: none; } }
+  /* A phone: the bar fits one line (the slider's label stays for screen readers),
+     the floor fills what's left of the screen, and the HUD title sits small
+     enough not to cover the room's own neon sign. */
+  @media (max-width: 560px) {
+    .shop-bar { flex-wrap: nowrap; padding: 0.4rem 0.75rem; gap: 0.4rem; }
+    .shop-vol span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    .shop-vol input { width: 5.5rem; }
+    .shop-stage { height: calc(100svh - 7rem); min-height: 380px; }
+    .shop-brand b { font-size: 16px; }
+    .shop-brand small { font-size: 10px; }
+    .shop-hud-btns { top: 52px; }
+  }
 </style>

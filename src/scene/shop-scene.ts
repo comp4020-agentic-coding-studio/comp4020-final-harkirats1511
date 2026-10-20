@@ -572,7 +572,9 @@ export async function startShopScene(slot: HTMLElement, hooks: ShopHooks, onFirs
     const back = (seated ? 4.4 : 6.6) * (portrait ? 1.2 : 1), up = (seated ? 3.6 : 5.6) * (portrait ? 1.25 : 1);
     const k = 1 - Math.exp(-dt * 4);
     camPos.lerp(camPos, tmp.set(tx, up, tz + back), k);
-    camLook.lerp(camLook, tmp.set(tx, 0.6, tz - (seated ? 0.2 : 0.6)), k);
+    // On an upright phone, look further ahead so the room fills the tall screen
+    // rather than the street behind you.
+    camLook.lerp(camLook, tmp.set(tx, 0.6, tz - (seated ? 0.2 : portrait ? 2.2 : 0.6)), k);
     camE.setPosition(camPos);
     camE.lookAt(camLook);
 
@@ -606,13 +608,15 @@ export async function startShopScene(slot: HTMLElement, hooks: ShopHooks, onFirs
     return best;
   };
 
-  // Sizing: the canvas fills the slot; resolution follows its CSS size.
+  // Sizing: CSS stretches the canvas over the slot and the drawing buffer
+  // follows. The canvas never sets its own size, so it can't grow the slot it
+  // is measured from (that loop made the page grow forever on phones).
+  canvas.style.width = canvas.style.height = "100%";
   const fit = () => {
     const r = slot.getBoundingClientRect();
     if (r.width > 0 && r.height > 0) {
-      canvas.style.width = `${r.width}px`;
-      canvas.style.height = `${r.height}px`;
-      app.graphicsDevice.resizeCanvas(r.width, r.height);
+      app.graphicsDevice.resizeCanvas(Math.round(r.width), Math.round(r.height));
+      canvas.style.width = canvas.style.height = "100%";
       app.graphicsDevice.updateClientRect();
     }
   };
