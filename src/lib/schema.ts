@@ -49,6 +49,8 @@ export const tables = sqliteTable("tables", {
   // Autoplay: the server plays the round's slots in order, slotSeconds each.
   autoplay: integer("autoplay", { mode: "boolean" }).notNull().default(false),
   slotSeconds: integer("slot_seconds").notNull().default(30),
+  // A private booth is left out of the shop's code listing; joining needs the code.
+  private: integer("private", { mode: "boolean" }).notNull().default(false),
   createdAt: integer("created_at").notNull(),
 });
 
@@ -62,6 +64,37 @@ export const tableMembers = sqliteTable(
       .notNull()
       .references(() => people.id),
     joinedAt: integer("joined_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.tableCode, t.personId] })],
+);
+
+// Who the host removed from a table: they can't join it again.
+export const tableRemovals = sqliteTable(
+  "table_removals",
+  {
+    tableCode: text("table_code")
+      .notNull()
+      .references(() => tables.code, { onDelete: "cascade" }),
+    personId: text("person_id")
+      .notNull()
+      .references(() => people.id),
+    at: integer("at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.tableCode, t.personId] })],
+);
+
+// A report of a table, one per person per table. It only feeds the log.
+export const tableReports = sqliteTable(
+  "table_reports",
+  {
+    tableCode: text("table_code")
+      .notNull()
+      .references(() => tables.code, { onDelete: "cascade" }),
+    personId: text("person_id")
+      .notNull()
+      .references(() => people.id),
+    reason: text("reason").notNull(),
+    at: integer("at").notNull(),
   },
   (t) => [primaryKey({ columns: [t.tableCode, t.personId] })],
 );

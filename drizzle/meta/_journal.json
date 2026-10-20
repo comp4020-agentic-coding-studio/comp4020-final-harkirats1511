@@ -71,6 +71,13 @@
       "when": 1791933749083,
       "tag": "0009_military_ghost_rider",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1792504932677,
+      "tag": "0010_massive_kylun",
+      "breakpoints": true
     }
   ]
 }
