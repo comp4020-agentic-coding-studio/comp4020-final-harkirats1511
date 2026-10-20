@@ -56,8 +56,22 @@ function broadcast(text: string, except?: Here) {
 
 let frame: NodeJS.Timeout | null = null;
 let boothsTimer: NodeJS.Timeout | null = null;
+let boothsAge: NodeJS.Timeout | null = null;
 let lastBooths = "";
 let unwatch: (() => void)[] = [];
+
+// Debounced: re-reads the booth list and sends it only if it changed.
+function boothsChanged() {
+  if (boothsTimer) return;
+  boothsTimer = setTimeout(() => {
+    boothsTimer = null;
+    const list = JSON.stringify(booths());
+    if (list === lastBooths) return;
+    lastBooths = list;
+    broadcast(`event: booths\ndata: ${list}\n\n`);
+  }, BOOTHS_MS);
+  boothsTimer.unref();
+}
 
 function startWatching() {
   frame = setInterval(() => {
@@ -68,19 +82,11 @@ function startWatching() {
     broadcast(sse("moves", { people }));
   }, FRAME_MS);
   frame.unref();
+  boothsAge = setInterval(boothsChanged, 15_000);
+  boothsAge.unref();
   lastBooths = JSON.stringify(booths());
   unwatch = [
-    watchAnyTable(() => {
-      if (boothsTimer) return;
-      boothsTimer = setTimeout(() => {
-        boothsTimer = null;
-        const list = JSON.stringify(booths());
-        if (list === lastBooths) return;
-        lastBooths = list;
-        broadcast(`event: booths\ndata: ${list}\n\n`);
-      }, BOOTHS_MS);
-      boothsTimer.unref();
-    }),
+    watchAnyTable(boothsChanged),
     watchRadio((r) => broadcast(sse("radio", r))),
   ];
 }
@@ -88,7 +94,8 @@ function startWatching() {
 function stopWatching() {
   if (frame) clearInterval(frame);
   if (boothsTimer) clearTimeout(boothsTimer);
-  frame = boothsTimer = null;
+  if (boothsAge) clearInterval(boothsAge);
+  frame = boothsTimer = boothsAge = null;
   for (const off of unwatch) off();
   unwatch = [];
 }
@@ -104,7 +111,8 @@ export function enter(me: Person, send: (text: string) => void): { leave: () => 
   if (!p) {
     const back = lastSpot.get(me.id);
     lastSpot.delete(me.id);
-    const at = back && back.until > Date.now() ? back : { ...DOOR, yaw: 180 };
+    // Spread out round the door so people walking in don't stand inside each other.
+    const at = back && back.until > Date.now() ? back : { x: round2(DOOR.x + (Math.random() - 0.5) * 2.4), z: round2(DOOR.z - Math.random() * 0.6), yaw: 180 };
     p = {
       id: me.id, name: me.name, avatar: getAvatar(me.id), x: at.x, z: at.z, yaw: at.yaw,
       streams: new Set(), lastAt: Date.now(), recent: [], emoteAt: 0, moved: false,

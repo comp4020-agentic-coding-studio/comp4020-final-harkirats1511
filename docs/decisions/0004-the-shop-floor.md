@@ -54,7 +54,11 @@ reflex game: nobody loses because a wave arrived 150 ms late.
   page, so it can't.
 - **Booths stand in fixed spots.** The server gives each live table a spot in
   the shop, so everyone sees the same booth in the same place. Tables beyond the
-  spots the room has are still listed in the 2D booth list.
+  spots the room has are still listed in the 2D booth list. A table is a booth
+  while someone has its page open, or for two minutes after it's made; a lobby
+  everyone walked away from leaves the shop instead of standing there empty.
+- **People walk in spread out** round the door, so two arrivals don't stand
+  inside each other.
 - **3D stays decoration.** Every action in the shop (see open booths, take a
   seat, knock with a code, report) is also a button in the 2D list, which is
   what keyboards, screen readers and slow phones use.

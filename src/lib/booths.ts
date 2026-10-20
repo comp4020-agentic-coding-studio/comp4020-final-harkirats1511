@@ -1,11 +1,15 @@
 import { asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "./db.ts";
-import { currentGame, isRemoved, MAX_PLAYERS } from "./tables.ts";
+import { currentGame, isRemoved, MAX_PLAYERS, tableWatchers } from "./tables.ts";
 import { people, tableMembers, tables } from "./schema.ts";
 
 // Booths are the shop's view of tables: only what publicState already shows
 // (status, host, how many, round), and the code only for a public booth.
 export const SPOTS = 6;
+// A table nobody has open is a lobby someone walked away from. It stays a booth
+// for this long after it's made (so its host has time to open it), then only
+// while someone has its page open, so the shop doesn't fill with empty booths.
+const FRESH_MS = 2 * 60_000;
 export type Booth = {
   spot: number;
   private: boolean;
@@ -28,6 +32,7 @@ function rows(): Row[] {
       host: people.name,
       private: tables.private,
       status: tables.status,
+      createdAt: tables.createdAt,
       seated: sql<number>`(select count(*) from ${tableMembers} where ${tableMembers.tableCode} = ${tables.code})`,
     })
     .from(tables)
@@ -35,7 +40,7 @@ function rows(): Row[] {
     .where(inArray(tables.status, ["open", "playing"]))
     .orderBy(asc(tables.createdAt), sql`${tables}.rowid`)
     .all()
-    .filter((t) => t.seated > 0);
+    .filter((t) => t.seated > 0 && (tableWatchers(t.code) > 0 || Date.now() - t.createdAt < FRESH_MS));
   const live = new Set(found.map((t) => t.code));
   for (const code of spots.keys()) if (!live.has(code)) spots.delete(code);
   const taken = new Set(spots.values());

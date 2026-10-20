@@ -3,11 +3,9 @@ import Base from "../layouts/Base.astro";
 import { personFromCookies } from "../lib/auth.ts";
 import { booths } from "../lib/booths.ts";
 import { boothList } from "../scene/shop-list.ts";
-// Signed out goes to the front door. (The home page only forwards /t/CODE,
-// /taste and /me after sign-in today, so you land on "/" until /shop is added
-// to its safeNext list.)
+// Signed out goes to the front door, which brings you back here after sign-in.
 const me = personFromCookies(Astro.cookies);
-if (!me) return Astro.redirect("/");
+if (!me) return Astro.redirect("/?next=/shop");
 // The first paint of the 2D list is server-rendered from the same public Booth
 // fields the stream carries: a private booth has no code in it.
 const list = booths();
@@ -498,9 +496,9 @@ const list = booths();
   .shop {
     --s-wall: #1b1420; --s-panel: #261c2c; --s-raise: #34283c; --s-rule: #4a3b4e; --s-line: #85728c;
     --s-lamp: #f4b860; --s-neon: #ff4f8b; --s-sleeve: #efe7d7; --s-ink: #1b1420; --s-muted: #b9a9b8; --s-bad: #ff9a8b;
-    --s-ui: "Bricolage Grotesque Variable", "Bricolage Grotesque", "Archivo Variable", system-ui, sans-serif;
+    --s-ui: "Bricolage Grotesque Variable", "Bricolage Grotesque", system-ui, sans-serif;
     --s-mono: "IBM Plex Mono", "JetBrains Mono Variable", ui-monospace, monospace;
-    --s-sign: Bungee, "Archivo Black", "Arial Black", Impact, sans-serif;
+    --s-sign: Bungee, "Arial Black", Impact, sans-serif;
     position: relative; left: 50%; width: 100vw; margin: 0 0 -3rem -50vw; padding: 0 0 3rem;
     background: var(--s-wall); color: var(--s-sleeve); font-family: var(--s-ui); min-height: 70vh;
   }

@@ -33,7 +33,11 @@ it("puts you at the door on connect and 409s a move when you aren't in", async (
   const snap = await stream.next((e) => e.event === "snapshot");
   const data = snap!.data as Snapshot;
   expect(data.you).toBe(a.name);
-  expect(data.people.find((p) => p.name === a.name)).toMatchObject({ x: 0.6, z: 4.2 });
+  // somewhere just inside the door (people are spread out so they don't overlap)
+  const at = data.people.find((p) => p.name === a.name)!;
+  expect(Math.abs(at.x - 0.6)).toBeLessThanOrEqual(1.2);
+  expect(at.z).toBeGreaterThanOrEqual(3.6);
+  expect(at.z).toBeLessThanOrEqual(4.2);
   stream.close();
 });
 
@@ -91,7 +95,8 @@ it("clamps a move to the room and caps how far it goes", async () => {
   expect((await a.s.call("/api/shop/move", { body: { x: 500, z: -500, yaw: 450 } })).status).toBe(204);
   const m = await watch.next((e) => e.event === "moves" && e.data.people.some((p: { name: string }) => p.name === a.name));
   const p = m!.data.people.find((q: { name: string }) => q.name === a.name);
-  expect(Math.hypot(p.x - 0.6, p.z - 4.2)).toBeLessThan(1.5);
+  // within one step of where they walked in (the door, give or take the spread)
+  expect(Math.hypot(p.x - 0.6, p.z - 4.2)).toBeLessThan(1.5 + 1.35);
   expect(p.x).toBeLessThanOrEqual(8);
   expect(p.z).toBeGreaterThanOrEqual(-5.5);
   expect(p.yaw).toBe(90);

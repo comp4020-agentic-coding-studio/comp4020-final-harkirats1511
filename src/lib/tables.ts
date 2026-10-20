@@ -276,10 +276,18 @@ export function watchAnyTable(fn: () => void): () => void {
   return () => anyTable.delete(fn);
 }
 
+// Someone opening or closing a table page changes whether it is a live booth.
 export function watchTable(code: string, fn: () => void): () => void {
   bus.on(code, fn);
-  return () => bus.off(code, fn);
+  for (const f of anyTable) f();
+  return () => {
+    bus.off(code, fn);
+    for (const f of anyTable) f();
+  };
 }
+
+// How many open table pages (streams) are following this table right now.
+export const tableWatchers = (code: string) => bus.listenerCount(code);
 
 // ---- history ----
 

@@ -98,7 +98,7 @@ export async function startShopScene(slot: HTMLElement, hooks: ShopHooks, onFirs
   slot.insertBefore(labels, canvas.nextSibling);
 
   // The sign is painted on a canvas, so its fonts must be loaded first.
-  await Promise.all([document.fonts.load("180px Bungee"), document.fonts.load('180px "Archivo Black"')]).catch(() => {});
+  await document.fonts.load("180px Bungee").catch(() => {});
   const engine = await createEngine(canvas);
   const { app } = engine;
   const kit = new Kit(engine);

@@ -182,7 +182,7 @@ export function buildRoom(kit: Kit, world: Entity): Room {
     g.fillStyle = "#140e18";
     g.fillRect(0, 0, cv.width, cv.height);
     g.textBaseline = "alphabetic";
-    const FACE = 'Bungee, "Archivo Black", "Arial Black", Impact, sans-serif';
+    const FACE = 'Bungee, "Arial Black", Impact, sans-serif';
     g.font = `180px ${FACE}`;
     const glow = (col: string, blur: number) => { g.shadowColor = col; g.shadowBlur = blur; };
     const wM = g.measureText("M").width, wLE = g.measureText("LE").width, rO = 70;

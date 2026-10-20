@@ -5,7 +5,7 @@ import { listTaste } from "../lib/taste.ts";
 import { getAvatar } from "../lib/avatars.ts";
 const me = personFromCookies(Astro.cookies);
 const next = Astro.url.searchParams.get("next") ?? "";
-const safeNext = /^(\/t\/[A-Za-z]{4}|\/taste|\/me)$/.test(next) ? next : "";
+const safeNext = /^(\/t\/[A-Za-z]{4}|\/taste|\/me|\/shop)$/.test(next) ? next : "";
 if (me && safeNext) return Astro.redirect(safeNext);
 const mine = me ? getAvatar(me.id) : null;
 const tasteCount = me ? listTaste(me.id).length : 0;
