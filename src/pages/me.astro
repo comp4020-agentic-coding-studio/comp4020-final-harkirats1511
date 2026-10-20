@@ -64,65 +64,118 @@ const current = getAvatar(me.id);
 
   // 3D portraits replace the drawn badge in the preview and the character
   // chips, when the device can run WebGL 2, motion is welcome and the 3D scene
-  // is not switched off. Anything else (or any failure) keeps the drawn badge.
-  let portraits: import("../scene/portraits.ts").Portraits | null = null;
-  let portraitsState: "idle" | "loading" | "dead" = "idle";
-  let seq = 0;
+  // is not switched off. Once a 3D canvas is showing it is only ever replaced
+  // by a newer 3D canvas, never by the drawn badge; only repeated failures or a
+  // lost WebGL context give up and fall back to the drawn badge.
+  type Portraits = import("../scene/portraits.ts").Portraits;
+  let portraits: Portraits | null = null;
+  let dead = false;
+  let fails = 0;
+  let latest: Avatar = read();
+  let version = 0; // bumped on every change; renders for older looks are dropped
+  let running = false;
+  const chipCache = new Map<string, HTMLCanvasElement>(); // character|colour
   const wants3d = () => {
     try { if (localStorage.getItem("mole:scene") === "off") return false; } catch { /* default on */ }
     if (matchMedia("(prefers-reduced-motion: reduce)").matches) return false;
     try { return !!document.createElement("canvas").getContext("webgl2"); } catch { return false; }
   };
-  function putPortrait(host: Element, c: HTMLCanvasElement) {
-    const disc = host.querySelector(".av-disc");
+  function putPortrait(host: Element | null, c: HTMLCanvasElement, colour: string) {
+    const disc = host?.querySelector(".av-disc");
     if (!disc) return;
     disc.querySelector(".av-3d")?.remove();
     c.className = "av-3d";
-    c.style.background = COLOURS[currentColour] ?? "";
+    c.style.background = COLOURS[colour] ?? "";
     c.setAttribute("aria-hidden", "true");
     disc.append(c);
   }
-  let currentColour = "";
-  async function paint3d(a: Avatar, mine: number) {
-    currentColour = a.colour;
-    if (portraitsState === "dead") return;
-    if (!portraits) {
-      if (portraitsState === "loading") return;
-      portraitsState = "loading";
-      if (!wants3d()) { portraitsState = "dead"; return; }
-      try {
-        portraits = await (await import("../scene/portraits.ts")).createPortraits();
-        portraitsState = "idle";
-      } catch { portraitsState = "dead"; return; }
-    }
+  const chipKey = (character: string, colour: string) => `${character}|${colour}`;
+  const chips = () => [...document.querySelectorAll<HTMLElement>(".chip-badge")];
+  const has3d = () => !!document.querySelector(".av-3d");
+
+  function giveUp() {
+    dead = true;
+    portraits?.destroy();
+    portraits = null;
+    chipCache.clear();
+    draw2d(read());
+  }
+
+  async function ensurePortraits(): Promise<boolean> {
+    if (portraits) return true;
+    if (!wants3d()) { dead = true; return false; }
     try {
-      const big = await portraits.render(a);
-      if (mine === seq) { const el = preview.querySelector(".avatar"); if (el) putPortrait(el, big); }
-      for (const el of document.querySelectorAll<HTMLElement>(".chip-badge")) {
-        if (mine !== seq) return;
-        const c = await portraits.render({ ...a, character: el.dataset.char! }, { bare: true });
-        if (mine !== seq) return;
-        const av = el.querySelector(".avatar");
-        if (av) putPortrait(av, c);
-      }
+      const made = await (await import("../scene/portraits.ts")).createPortraits({
+        onContextLost: () => { fails = 99; giveUp(); },
+      });
+      if (dead) { made.destroy(); return false; }
+      portraits = made;
+      return true;
     } catch {
-      portraitsState = "dead";
-      portraits?.destroy();
-      portraits = null;
-      for (const c of document.querySelectorAll(".av-3d")) c.remove();
+      dead = true;
+      return false;
+    }
+  }
+
+  // Renders only the newest look: while a render is in flight further changes
+  // just update `latest`, and the loop picks that up next.
+  async function paint3d() {
+    if (running || dead) return;
+    running = true;
+    try {
+      while (!dead) {
+        const v = version;
+        const a = latest;
+        if (!(await ensurePortraits())) return;
+        const p = portraits!;
+        const stale = () => v !== version;
+        try {
+          const big = await p.render(a, { isStale: stale });
+          if (!stale()) putPortrait(preview.querySelector(".avatar"), big, a.colour);
+          const todo = chips().filter((el) => !chipCache.has(chipKey(el.dataset.char!, a.colour)));
+          for (const el of todo) {
+            if (stale()) break;
+            const c = await p.render({ ...a, character: el.dataset.char! }, { bare: true, isStale: stale });
+            chipCache.set(chipKey(el.dataset.char!, a.colour), c);
+          }
+          if (!stale()) {
+            for (const el of chips()) {
+              const c = chipCache.get(chipKey(el.dataset.char!, a.colour));
+              if (c && c.parentElement == null) putPortrait(el.querySelector(".avatar"), c, a.colour);
+            }
+          }
+          fails = 0;
+        } catch (err) {
+          if ((err as Error)?.name !== "StaleRender") {
+            // Keep what is on screen and retry on the next change.
+            if (++fails >= 3) { giveUp(); return; }
+            if (v === version) return;
+          }
+        }
+        if (v === version) return;
+      }
+    } finally {
+      running = false;
+    }
+  }
+
+  // The drawn badges: first paint, and the fallback once 3D has given up.
+  function draw2d(a: Avatar) {
+    const big = avatar(me, a);
+    big.classList.add("avatar-lg");
+    preview.replaceChildren(big);
+    // Character chips show each character bare, in the chosen outfit colour.
+    for (const el of chips()) {
+      el.replaceChildren(avatar(me, { ...a, character: el.dataset.char!, hat: "none", accessory: "none", aid: "none", mood: "chill" }));
     }
   }
 
   function draw() {
     const a = read();
-    const big = avatar(me, a);
-    big.classList.add("avatar-lg");
-    preview.replaceChildren(big);
-    // Character chips show each character bare, in the chosen outfit colour.
-    for (const el of document.querySelectorAll<HTMLElement>(".chip-badge")) {
-      el.replaceChildren(avatar(me, { ...a, character: el.dataset.char!, hat: "none", accessory: "none", aid: "none", mood: "chill" }));
-    }
-    void paint3d(a, ++seq);
+    latest = a;
+    version++;
+    if (dead || !has3d()) draw2d(a);
+    void paint3d();
   }
 
   function say(text: string, kind: "ok" | "bad" | "") {

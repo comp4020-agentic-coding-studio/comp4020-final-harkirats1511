@@ -8,18 +8,28 @@ import { Character, Kit } from "./character.ts";
 import { createEngine } from "./engine.ts";
 
 export type Portraits = {
-  // `bare` leaves out hat, eyewear and aid (the character chips).
-  render(look: Avatar, opts?: { bare?: boolean }): Promise<HTMLCanvasElement>;
+  // `bare` leaves out hat, eyewear and aid (the character chips). `isStale` is
+  // checked just before the render starts; if it returns true the render is
+  // dropped and the promise rejects with StaleRender (not a failure).
+  render(look: Avatar, opts?: { bare?: boolean; isStale?: () => boolean }): Promise<HTMLCanvasElement>;
   destroy(): void;
 };
 
 const SIZE = 192;
 
-export async function createPortraits(): Promise<Portraits> {
+export class StaleRender extends Error {
+  override name = "StaleRender";
+}
+
+export async function createPortraits(opts: { onContextLost?: () => void } = {}): Promise<Portraits> {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = SIZE;
   const engine = await createEngine(canvas, { alpha: true, antialias: true, maxPixelRatio: 1 });
   const { app } = engine;
+  canvas.addEventListener("webglcontextlost", (e) => {
+    e.preventDefault();
+    opts.onContextLost?.();
+  });
   app.autoRender = false;
   const kit = new Kit(engine);
 
@@ -53,8 +63,11 @@ export async function createPortraits(): Promise<Portraits> {
     return out;
   };
   return {
-    render(look, opts = {}) {
-      const run = queue.then(() => one(look, !!opts.bare));
+    render(look, o = {}) {
+      const run = queue.then(() => {
+        if (o.isStale?.()) throw new StaleRender();
+        return one(look, !!o.bare);
+      });
       queue = run.catch(() => {});
       return run;
     },
