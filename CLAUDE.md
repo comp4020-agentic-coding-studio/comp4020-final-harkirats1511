@@ -99,6 +99,40 @@ did when something goes wrong, so it stays after any crit.
   `public/models/CREDITS.md`). New assets need a licence that allows it, recorded
   there.
 
+## The shop (free roam)
+
+The app is a record shop after hours: the home page is the shopfront, `/shop`
+is the floor you walk around as your character, and tables are listening
+booths. See `docs/decisions/0004`, `0005` and `0006`.
+
+- **Positions are not game state.** Where people stand lives in server memory
+  only and is gone after a restart. Nothing a game depends on may ever live
+  there.
+- **The shop stream is public-state only.** It carries names, avatars,
+  positions, emotes and each booth's public state, built from `publicState`.
+  Never a theme, role, pick, title, or who has picked or voted.
+- **The server is the referee for movement.** Positions are clamped to the room,
+  speed is capped, more than 8 moves a second from one person are dropped, and
+  emotes come from a fixed list. A client is never trusted to say where someone
+  else is.
+- **Booths are public unless the host makes them private.** A private booth
+  shows only that it is private and who hosts it; joining needs the code. A
+  removed person can't rejoin that table. Reports and removals are logged like
+  every other action.
+- **Every shop action has a 2D twin.** The booth list (take a seat, quick seat,
+  knock with a code, report) works with the 3D off, with a keyboard and with a
+  screen reader. The 3D shop only loads where the 3D table scene may load.
+- **Sound.** The shop radio plays Deezer previews from fixed station lists and
+  is never hosted by us. It is silent on a table page from when a game starts
+  until it ends. It starts only after a tap, always has a visible off control,
+  and the choice is saved on the device. Sound effects are synthesised with Web
+  Audio, never files. No sound is the only signal for anything.
+- **The look is the record shop.** Tokens and fonts come from
+  `src/styles/global.css` (wall plum, lamp amber, neon pink only for the sign and
+  the mole stamp, sleeve cream, wood). The reference is the mockups the student
+  approved in `docs/design/`; don't drift back to generic cards, gradients or
+  emoji.
+
 ## Where things live
 
 - Decisions: `docs/decisions/`. Write a new record when one changes.

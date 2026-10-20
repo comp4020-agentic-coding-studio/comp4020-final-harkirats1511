@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mole Records Mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=IBM+Plex+Mono:wght@500;600&family=Caveat:wght@600&display=swap">
+<style>
+/* Layout: a row of phone frames on the shop's back wall, each one screen of the
+   record-shop game. One committed after-hours look (dark by design). */
+:root {
+  color-scheme: dark;
+  --wall: #1B1420;      /* the shop at night */
+  --wall-2: #251B2B;    /* a booth, a panel */
+  --floor: #2A1F1A;     /* dark wood floor */
+  --wood: #7A5333;      /* crates and the turntable plinth */
+  --lamp: #F4B860;      /* lamplight: the UI accent */
+  --neon: #FF4F8B;      /* the sign, and the mole stamp, nothing else */
+  --sleeve: #EFE7D7;    /* paper: sleeves, notes, liner notes */
+  --ink: #1A1416;       /* text on paper */
+  --text: #F3EADB;      /* text on the dark */
+  --muted: #B6A898;
+  --vinyl: #121012;
+  --sign: "Bungee", "Arial Black", Impact, sans-serif;
+  --ui: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif;
+  --cat: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --hand: "Caveat", "Segoe Print", "Bradley Hand", cursive;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--wall); color: var(--text); font: 400 15px/1.5 var(--ui); }
+.page { max-width: 1500px; margin: 0 auto; padding-inline: 16px; padding-block: 32px 64px; display: grid; gap: 28px; }
+.intro { display: grid; gap: 10px; max-width: 70ch; }
+.intro h1 { font-family: var(--sign); font-weight: 400; font-size: clamp(1.8rem, 5vw, 2.6rem); line-height: 1; margin: 0; color: var(--lamp); }
+.intro p { margin: 0; color: var(--muted); }
+.intro b { color: var(--text); }
+.rack { display: grid; gap: 28px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); align-items: start; }
+.shot { display: grid; gap: 12px; justify-items: center; min-width: 0; }
+.cap { max-width: 360px; font-size: 13.5px; color: var(--muted); }
+.cap b { color: var(--text); font-weight: 600; }
+.cap .cat { font-family: var(--cat); color: var(--lamp); font-size: 12px; }
+
+/* The phone */
+.phone { width: 360px; max-width: 100%; height: 760px; border-radius: 42px; padding: 12px; background: #0B080C; box-shadow: 0 0 0 2px #3A2E3E, 0 24px 60px rgba(0,0,0,.55); }
+.screen { position: relative; height: 100%; border-radius: 32px; overflow: hidden; background: var(--wall); display: flex; flex-direction: column; }
+.status { display: flex; justify-content: space-between; padding: 12px 22px 4px; font: 600 12px/1 var(--ui); color: var(--muted); }
+.bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 18px 10px; }
+.bar .where { font: 600 12px/1.2 var(--cat); color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+.timer { font: 600 15px/1 var(--cat); color: var(--lamp); font-variant-numeric: tabular-nums; }
+.body { flex: 1; padding: 4px 18px 18px; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+h2 { margin: 0; font: 800 22px/1.1 var(--ui); letter-spacing: -.01em; text-wrap: balance; }
+.lede { margin: 0; color: var(--muted); font-size: 14px; }
+.btn { appearance: none; border: 0; border-radius: 999px; padding: 14px 20px; font: 800 15px/1 var(--ui); cursor: pointer; background: var(--lamp); color: var(--ink); }
+.btn.ghost { background: transparent; color: var(--text); box-shadow: inset 0 0 0 1.5px #5A4A5E; }
+.btn:focus-visible, .sleeve-btn:focus-visible, .floor:focus-visible { outline: 3px solid var(--lamp); outline-offset: 3px; }
+.mono { font-family: var(--cat); }
+
+/* 1. Shopfront */
+.front { background: radial-gradient(120% 70% at 50% 0%, #3A2440 0%, var(--wall) 60%); }
+.sign { margin: 34px auto 6px; text-align: center; font-family: var(--sign); color: #FFE3EE; line-height: .9; }
+.sign .big { display: block; font-size: 64px; letter-spacing: .02em; text-shadow: 0 0 6px var(--neon), 0 0 18px var(--neon), 0 0 40px rgba(255,79,139,.6); }
+.sign .small { display: block; margin-top: 8px; font-size: 15px; letter-spacing: .3em; color: var(--lamp); text-shadow: none; }
+.disc-o { display: inline-block; width: .78em; height: .78em; border-radius: 50%; vertical-align: -.06em; background: radial-gradient(circle, var(--neon) 0 14%, var(--vinyl) 15% 100%); box-shadow: 0 0 0 .05em #FFE3EE, 0 0 16px var(--neon); }
+.hours { align-self: center; font: 600 12px/1.3 var(--cat); color: var(--muted); text-align: center; border: 1.5px dashed #5A4A5E; border-radius: 8px; padding: 8px 14px; }
+.hours b { color: var(--lamp); }
+.member { margin-top: auto; background: var(--sleeve); color: var(--ink); border-radius: 14px; padding: 16px; display: grid; gap: 10px; transform: rotate(-1.2deg); box-shadow: 0 12px 30px rgba(0,0,0,.45); }
+.member .head { display: flex; justify-content: space-between; align-items: baseline; }
+.member .head span { font: 800 13px/1 var(--ui); letter-spacing: .08em; text-transform: uppercase; }
+.member .head em { font: 600 11px/1 var(--cat); font-style: normal; color: #6B5B57; }
+.field { display: grid; gap: 4px; }
+.field label { font: 600 12px/1 var(--ui); color: #4B3E3B; }
+.field div { border-bottom: 1.5px solid var(--ink); padding: 6px 0; font: 600 16px/1.2 var(--ui); }
+.field .pin { letter-spacing: .5em; }
+
+/* 2. The hub (free roam) */
+.floor { position: relative; flex: 1; margin: 0 12px; border-radius: 18px; overflow: hidden; cursor: pointer;
+  background: repeating-linear-gradient(90deg, #2C211B 0 38px, #261C17 38px 76px); box-shadow: inset 0 0 0 1.5px #3E3036; }
+.room-label { position: absolute; font: 600 10px/1 var(--cat); color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+.crates { position: absolute; display: grid; gap: 4px; }
+.crate { width: 64px; height: 16px; border-radius: 3px; background: var(--wood); box-shadow: inset 0 -4px 0 rgba(0,0,0,.25); }
+.booth { position: absolute; width: 108px; height: 92px; border-radius: 14px; background: var(--wall-2); box-shadow: inset 0 0 0 1.5px #4A3B4E; display: grid; place-items: center; }
+.booth.open { box-shadow: inset 0 0 0 1.5px var(--lamp), 0 0 22px rgba(244,184,96,.18); }
+.booth .table { width: 46px; height: 46px; border-radius: 50%; background: radial-gradient(circle, #3A2C22 0 30%, var(--wood) 31%); }
+.booth .tag { position: absolute; top: -10px; left: 50%; transform: translateX(-50%); white-space: nowrap; font: 600 10px/1 var(--cat); padding: 4px 7px; border-radius: 999px; background: var(--wall); box-shadow: inset 0 0 0 1px #5A4A5E; }
+.booth.open .tag { color: var(--ink); background: var(--lamp); box-shadow: none; }
+.jukebox { position: absolute; width: 44px; height: 58px; border-radius: 22px 22px 6px 6px; background: linear-gradient(#5B2E4A, #3A1E31); box-shadow: inset 0 0 0 2px var(--neon); }
+.counter { position: absolute; height: 22px; border-radius: 6px; background: var(--wood); }
+.door { position: absolute; width: 56px; height: 8px; border-radius: 4px; background: var(--lamp); opacity: .6; }
+.av { position: absolute; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font: 800 12px/1 var(--ui); color: var(--ink); box-shadow: 0 0 0 2px var(--wall), 0 3px 8px rgba(0,0,0,.5); transform: translate(-50%, -50%); }
+.av.me { background: var(--lamp); box-shadow: 0 0 0 2px var(--text), 0 0 0 5px rgba(244,184,96,.35); transition: left .9s cubic-bezier(.45,0,.25,1), top .9s cubic-bezier(.45,0,.25,1); z-index: 2; }
+.av small { position: absolute; top: 31px; left: 50%; transform: translateX(-50%); font: 600 9.5px/1 var(--ui); color: var(--text); white-space: nowrap; }
+.sheet { margin: 12px; padding: 14px 16px; border-radius: 18px; background: var(--wall-2); box-shadow: inset 0 0 0 1.5px #4A3B4E; display: grid; gap: 8px; }
+.sheet .row { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.sheet .row strong { font: 800 16px/1.2 var(--ui); }
+.sheet .open-pill { font: 600 10.5px/1 var(--cat); color: var(--ink); background: var(--lamp); border-radius: 999px; padding: 4px 8px; }
+.sheet .meta { font-size: 13px; color: var(--muted); margin: 0; }
+.sheet .actions { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.report { font: 600 12px/1 var(--ui); color: var(--muted); background: none; border: 0; text-decoration: underline; cursor: pointer; padding: 6px 0; }
+
+/* 3. Pick: shelf talker + crate */
+.talker { position: relative; background: var(--sleeve); color: var(--ink); border-radius: 6px; padding: 18px 16px 16px; transform: rotate(-2deg); box-shadow: 0 10px 24px rgba(0,0,0,.4); }
+.talker::before { content: ""; position: absolute; top: -9px; left: 50%; width: 46px; height: 16px; transform: translateX(-50%); border-radius: 3px; background: #C9C1B0; box-shadow: inset 0 -3px 0 rgba(0,0,0,.15); }
+.talker .k { font: 800 11px/1 var(--ui); letter-spacing: .1em; text-transform: uppercase; color: #8A2E52; }
+.talker .t { font: 600 30px/1.05 var(--hand); margin-top: 6px; }
+.talker .hide { position: absolute; right: 10px; top: 12px; font: 600 11px/1 var(--ui); color: #6B5B57; }
+.crate-box { flex: 1; min-height: 0; border-radius: 14px; background: linear-gradient(#3A2A1E, #2A1F17); box-shadow: inset 0 0 0 2px var(--wood); padding: 12px 10px; display: grid; gap: 8px; align-content: start; overflow: hidden; }
+.crate-box .label { font: 600 10.5px/1 var(--cat); color: var(--lamp); letter-spacing: .08em; text-transform: uppercase; }
+.rec { display: grid; grid-template-columns: 46px 1fr auto; gap: 10px; align-items: center; padding: 6px; border-radius: 10px; background: rgba(239,231,215,.05); }
+.cover { width: 46px; height: 46px; border-radius: 4px; }
+.rec b { display: block; font: 600 14px/1.2 var(--ui); }
+.rec span { font-size: 12px; color: var(--muted); }
+.rec .pick { font: 800 12px/1 var(--ui); color: var(--ink); background: var(--lamp); border-radius: 999px; padding: 8px 12px; }
+
+/* 4. Listen: the needle drop */
+.stage { position: relative; width: 324px; height: 210px; margin: 6px auto 0; }
+.sleeve { position: absolute; left: 6px; top: 36px; width: 140px; height: 140px; border-radius: 4px; background: #E9DFC9; box-shadow: 0 8px 18px rgba(0,0,0,.45); z-index: 3; display: grid; align-content: end; padding: 10px; color: var(--ink); }
+.sleeve::after { content: ""; position: absolute; right: 10px; top: 50%; width: 46px; height: 46px; transform: translateY(-50%); border-radius: 50%; box-shadow: inset 0 0 0 2px rgba(26,20,22,.18); }
+.sleeve .sl-k { font: 600 10px/1 var(--cat); }
+.sleeve .sl-t { font: 800 22px/1 var(--ui); }
+.plinth { position: absolute; left: 150px; top: 8px; width: 170px; height: 196px; border-radius: 14px; background: linear-gradient(160deg, #8A6040, var(--wood)); box-shadow: 0 10px 24px rgba(0,0,0,.45), inset 0 0 0 2px rgba(0,0,0,.2); }
+.platter { position: absolute; left: 162px; top: 32px; width: 140px; height: 140px; border-radius: 50%; background: #2A2528; box-shadow: inset 0 0 0 5px #3A3438; }
+.record { position: absolute; left: 166px; top: 36px; width: 132px; height: 132px; z-index: 2; transform: translate(-138px, 0); }
+.disc { width: 100%; height: 100%; border-radius: 50%; background: repeating-radial-gradient(circle, var(--vinyl) 0 2px, #1D1A1D 2px 3px); box-shadow: 0 6px 14px rgba(0,0,0,.5); display: grid; place-items: center; }
+.labelc { width: 48px; height: 48px; border-radius: 50%; background: var(--sleeve); color: var(--ink); display: grid; place-items: center; text-align: center; position: relative; }
+.labelc b { font: 800 15px/1 var(--ui); }
+.labelc i { font: 600 6.5px/1.1 var(--cat); font-style: normal; display: block; }
+.labelc::after { content: ""; position: absolute; width: 5px; height: 5px; border-radius: 50%; background: var(--vinyl); top: 50%; left: 50%; transform: translate(-50%,-50%); }
+.arm { position: absolute; left: 294px; top: 22px; width: 8px; height: 118px; transform-origin: 4px 6px; transform: rotate(-4deg); z-index: 4; }
+.arm::before { content: ""; position: absolute; left: -7px; top: -6px; width: 22px; height: 22px; border-radius: 50%; background: #CFC7B8; box-shadow: inset 0 0 0 4px #9A9183; }
+.arm .rod { position: absolute; left: 2px; top: 8px; width: 4px; height: 104px; border-radius: 2px; background: #D8D0C1; }
+.arm .head { position: absolute; left: -3px; bottom: -6px; width: 14px; height: 18px; border-radius: 3px; background: #CFC7B8; transform-origin: 7px 0; }
+.playing .record { animation: drop 1.5s cubic-bezier(.45,0,.25,1) forwards; }
+.playing .disc { animation: spin 1.8s linear 2.35s infinite; }
+.playing .arm { animation: swing .7s cubic-bezier(.45,0,.25,1) 1.55s forwards; }
+.playing .arm .head { animation: needle .25s ease-in 2.2s forwards; }
+@keyframes drop {
+  0%   { transform: translate(-138px, 0) scale(1); z-index: 2; }
+  28%  { transform: translate(-78px, 0) scale(1); z-index: 2; }
+  29%  { z-index: 5; }
+  55%  { transform: translate(-22px, -16px) scale(1.07); z-index: 5; }
+  78%  { transform: translate(0, -16px) scale(1.07); z-index: 5; }
+  100% { transform: translate(0, 0) scale(1); z-index: 2; }
+}
+@keyframes swing { from { transform: rotate(-4deg); } to { transform: rotate(23deg); } }
+@keyframes needle { from { transform: scaleY(1); } to { transform: scaleY(.82) translateY(2px); } }
+@keyframes spin { to { transform: rotate(360deg); } }
+.np { text-align: center; display: grid; gap: 2px; min-height: 40px; }
+.np b { font: 800 16px/1.2 var(--ui); }
+.np span { font: 600 12px/1.2 var(--cat); color: var(--muted); }
+.np .crackle { color: var(--lamp); opacity: 0; }
+.playing .np .crackle { animation: fade 1s ease 2.3s forwards; }
+@keyframes fade { to { opacity: 1; } }
+.sides { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: auto; }
+.sleeve-btn { appearance: none; border: 0; cursor: pointer; aspect-ratio: 1; max-width: 100%; border-radius: 6px; background: #E9DFC9; color: var(--ink); display: grid; place-items: center; font: 800 18px/1 var(--ui); position: relative; box-shadow: 0 4px 10px rgba(0,0,0,.35); }
+.sleeve-btn[aria-pressed="true"] { background: var(--lamp); }
+.sleeve-btn small { position: absolute; bottom: 5px; font: 600 8px/1 var(--cat); }
+.replay { align-self: center; }
+
+/* 5. Liner notes */
+.liner { flex: 1; min-height: 0; background: var(--sleeve); color: var(--ink); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
+.liner .top { display: flex; justify-content: space-between; align-items: baseline; font: 600 11px/1 var(--cat); color: #6B5B57; }
+.liner h3 { margin: 0; font: 800 24px/1.05 var(--ui); }
+.tracks { display: grid; gap: 0; }
+.trk { display: grid; grid-template-columns: 30px 1fr auto; gap: 8px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid rgba(26,20,22,.15); }
+.trk .n { font: 600 12px/1 var(--cat); color: #6B5B57; }
+.trk b { font: 600 14px/1.2 var(--ui); display: block; }
+.trk span { font-size: 12px; color: #5B4E4A; }
+.trk .by { font: 600 12px/1.2 var(--ui); text-align: right; }
+.stamp { display: inline-block; font: 800 10px/1 var(--ui); letter-spacing: .1em; color: var(--neon); border: 2px solid var(--neon); border-radius: 4px; padding: 3px 5px; transform: rotate(-6deg); margin-top: 3px; }
+.pressing { margin-top: auto; font-size: 13px; display: grid; gap: 6px; padding-top: 10px; border-top: 2px solid var(--ink); }
+.pressing p { margin: 0; }
+.pressing .hand { font: 600 19px/1.1 var(--hand); }
+.credits { font: 600 10.5px/1.4 var(--cat); color: #6B5B57; }
+
+@media (prefers-reduced-motion: reduce) {
+  .playing .record, .playing .disc, .playing .arm, .playing .arm .head, .playing .np .crackle { animation: none; }
+  .playing .record { transform: none; }
+  .playing .arm { transform: rotate(23deg); }
+  .playing .np .crackle { opacity: 1; }
+  .av.me { transition: none; }
+}
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="intro">
+    <h1>Mole Records</h1>
+    <p><b>Mockups for the final project, nothing built yet.</b> The app as a record shop after hours: the home page is the shopfront, the hub is the shop floor you walk around, tables are listening booths, your theme is a staff-pick card, tracks are white-label records, and the reveal is the liner notes on the back cover.</p>
+    <p>Try it: tap the shop floor in screen 2 to walk there. In screen 4, tap a sleeve to drop that record on the turntable.</p>
+  </header>
+
+  <section class="rack">
+
+    <div class="shot">
+      <div class="phone"><div class="screen front">
+        <div class="status"><span>23:58</span><span>5G</span></div>
+        <div class="body">
+          <div class="sign"><span class="big">M<span class="disc-o" aria-hidden="true"></span>LE</span><span class="small">RECORDS</span></div>
+          <div class="hours">Open late <b>tonight</b><br>3 booths spinning, 11 in the shop</div>
+          <div class="member">
+            <div class="head"><span>Membership card</span><em>No. 0417</em></div>
+            <div class="field"><label>Name</label><div>Priya</div></div>
+            <div class="field"><label>PIN</label><div class="pin">••••</div></div>
+            <button class="btn" type="button">Step inside</button>
+          </div>
+        </div>
+      </div></div>
+      <p class="cap"><b>1. Shopfront.</b> The neon sign is the logo: the O is a record. Signing in is your membership card. The hours card shows the shop is alive before you enter.</p>
+    </div>
+
+    <div class="shot">
+      <div class="phone"><div class="screen">
+        <div class="status"><span>23:59</span><span>5G</span></div>
+        <div class="bar"><span class="where">Shop floor</span><span class="where">11 here</span></div>
+        <div class="floor" id="floor" tabindex="0" aria-label="Shop floor. Tap to walk.">
+          <span class="room-label" style="left:14px;top:12px">Crates</span>
+          <div class="crates" style="left:14px;top:28px"><div class="crate"></div><div class="crate"></div><div class="crate"></div></div>
+          <div class="crates" style="left:92px;top:28px"><div class="crate"></div><div class="crate"></div><div class="crate"></div></div>
+          <div class="jukebox" style="right:18px;top:20px" aria-hidden="true"></div>
+          <span class="room-label" style="right:12px;top:84px">Jukebox</span>
+          <div class="booth open" style="left:16px;top:130px"><span class="tag">KGZW open 2 seats</span><div class="table"></div></div>
+          <div class="booth" style="right:16px;top:130px"><span class="tag">Private</span><div class="table"></div></div>
+          <div class="booth open" style="left:16px;top:262px"><span class="tag">RTBQ starting</span><div class="table"></div></div>
+          <div class="counter" style="right:16px;top:290px;width:96px"></div>
+          <span class="room-label" style="right:18px;top:320px">Counter</span>
+          <div class="door" style="left:50%;bottom:0;transform:translateX(-50%)"></div>
+          <div class="av" style="left:52px;top:176px;background:#E58FB0">T<small>Tom</small></div>
+          <div class="av" style="left:92px;top:176px;background:#9FC7E8">L<small>Lee</small></div>
+          <div class="av" style="left:250px;top:178px;background:#B9D99A">S<small>Sam</small></div>
+          <div class="av" style="left:44px;top:308px;background:#F0C987">A<small>Ana</small></div>
+          <div class="av" style="left:150px;top:62px;background:#C9B3E8">J<small>Jo</small></div>
+          <div class="av me" id="me" style="left:160px;top:400px">P<small>You</small></div>
+        </div>
+        <div class="sheet">
+          <div class="row"><strong>Booth KGZW</strong><span class="open-pill">Open to anyone</span></div>
+          <p class="meta">Tom's table. 4 of 6 seats, pick 60s, autoplay on.</p>
+          <div class="actions"><button class="btn" type="button">Take a seat</button><button class="report" type="button">Report</button></div>
+        </div>
+      </div></div>
+      <p class="cap"><b>2. The shop floor (free roam).</b> Everyone online, as their character. Tap anywhere to walk. Lit booths are open to anyone; a private booth asks for its code. Report sits on every booth because tables are public. <span class="cat">Desktop: WASD.</span></p>
+    </div>
+
+    <div class="shot">
+      <div class="phone"><div class="screen">
+        <div class="status"><span>00:03</span><span>5G</span></div>
+        <div class="bar"><span class="where">Booth KGZW, round 2</span><span class="timer">0:41</span></div>
+        <div class="body">
+          <div class="talker" role="note">
+            <span class="hide">Hide</span>
+            <div class="k">Staff pick</div>
+            <div class="t">A song for crying in the car</div>
+          </div>
+          <p class="lede">Dig your crate for one that fits. You might have a different card from everyone else, and you won't be told.</p>
+          <div class="crate-box">
+            <div class="label">Your crate</div>
+            <div class="rec"><div class="cover" style="background:linear-gradient(135deg,#3B5BA9,#1C2B55)"></div><div><b>Motion Sickness</b><span>Phoebe Bridgers</span></div><span class="pick">Pick</span></div>
+            <div class="rec"><div class="cover" style="background:linear-gradient(135deg,#D9A441,#6B3F1D)"></div><div><b>Dreams</b><span>Fleetwood Mac</span></div><span class="pick">Pick</span></div>
+            <div class="rec"><div class="cover" style="background:linear-gradient(135deg,#B33A4C,#3D1220)"></div><div><b>Liability</b><span>Lorde</span></div><span class="pick">Pick</span></div>
+            <div class="rec"><div class="cover" style="background:linear-gradient(135deg,#5E8C6A,#1F3A2A)"></div><div><b>Holocene</b><span>Bon Iver</span></div><span class="pick">Pick</span></div>
+          </div>
+        </div>
+      </div></div>
+      <p class="cap"><b>3. Pick.</b> Your theme is a handwritten staff-pick card clipped to the crate, the way record shops label their recommendations. In 3D you walk to the crate shelf to dig. Example songs, not anyone's real crate.</p>
+    </div>
+
+    <div class="shot">
+      <div class="phone"><div class="screen" id="listen">
+        <div class="status"><span>00:05</span><span>5G</span></div>
+        <div class="bar"><span class="where">Booth KGZW, listening</span><span class="timer">A2 of 4</span></div>
+        <div class="body">
+          <h2>Whose is this?</h2>
+          <div class="stage" aria-hidden="true">
+            <div class="sleeve"><span class="sl-k">MOLE-014</span><span class="sl-t" id="slv">A2</span></div>
+            <div class="plinth"></div>
+            <div class="platter"></div>
+            <div class="record"><div class="disc"><div class="labelc"><div><i>MOLE-014</i><b id="lbl">A2</b><i>33&#8531; RPM</i></div></div></div></div>
+            <div class="arm"><div class="rod"></div><div class="head"></div></div>
+          </div>
+          <div class="np" aria-live="polite"><b id="nowtxt">Side A, track 2</b><span class="crackle">Needle down. Playing on Tom's turntable.</span></div>
+          <div class="sides" role="group" aria-label="Choose a record">
+            <button class="sleeve-btn" type="button" data-t="A1" aria-pressed="false">A1<small>MOLE-014</small></button>
+            <button class="sleeve-btn" type="button" data-t="A2" aria-pressed="true">A2<small>MOLE-014</small></button>
+            <button class="sleeve-btn" type="button" data-t="B1" aria-pressed="false">B1<small>MOLE-014</small></button>
+            <button class="sleeve-btn" type="button" data-t="B2" aria-pressed="false">B2<small>MOLE-014</small></button>
+          </div>
+          <button class="btn ghost replay" type="button" id="replay">Drop the needle again</button>
+        </div>
+      </div></div>
+      <p class="cap"><b>4. Listen: the needle drop.</b> The record slides out of its sleeve, lifts onto the platter, the tonearm swings over and the needle drops, then it spins. The label shows only side and track, like a white-label pressing, because a title would give the owner away. <span class="cat">Reduced motion: it skips straight to the record on the platter.</span></p>
+    </div>
+
+    <div class="shot">
+      <div class="phone"><div class="screen">
+        <div class="status"><span>00:09</span><span>5G</span></div>
+        <div class="bar"><span class="where">Booth KGZW, round 2</span><span class="where">Reveal</span></div>
+        <div class="body">
+          <div class="liner">
+            <div class="top"><span>MOLE-014</span><span>Side A</span></div>
+            <h3>Tom was the mole.</h3>
+            <div class="tracks">
+              <div class="trk"><span class="n">A1</span><div><b>Motion Sickness</b><span>Phoebe Bridgers</span></div><span class="by">Priya</span></div>
+              <div class="trk"><span class="n">A2</span><div><b>Killing in the Name</b><span>Rage Against the Machine</span></div><span class="by">Tom<br><span class="stamp">Mole</span></span></div>
+              <div class="trk"><span class="n">B1</span><div><b>Liability</b><span>Lorde</span></div><span class="by">Lee</span></div>
+              <div class="trk"><span class="n">B2</span><div><b>Holocene</b><span>Bon Iver</span></div><span class="by">Ana</span></div>
+            </div>
+            <div class="pressing">
+              <p>Most of you were pressed for</p>
+              <p class="hand">a song for crying in the car</p>
+              <p>Tom's copy said</p>
+              <p class="hand">a song for screaming in the car</p>
+              <p class="credits">Recorded live at Booth KGZW. Votes: 3 for Tom.</p>
+            </div>
+          </div>
+        </div>
+      </div></div>
+      <p class="cap"><b>5. Liner notes (game over).</b> The back cover of the round: the tracklist with who picked each, the mole stamped, and both themes written as the pressing notes. Example game. A keepsake image of this is the thing to share in the group chat.</p>
+    </div>
+
+  </section>
+</main>
+<script>
+// Screen 4: drop the needle on a chosen record. Restarting a CSS animation
+// means removing the class, forcing a reflow, and adding it back.
+(() => {
+  const screen = document.getElementById("listen");
+  const lbl = document.getElementById("lbl"), slv = document.getElementById("slv"), now = document.getElementById("nowtxt");
+  const names = { A: "Side A", B: "Side B" };
+  function play(t) {
+    lbl.textContent = t; slv.textContent = t;
+    now.textContent = `${names[t[0]]}, track ${t[1]}`;
+    screen.classList.remove("playing"); void screen.offsetWidth; screen.classList.add("playing");
+  }
+  for (const b of screen.querySelectorAll(".sleeve-btn")) {
+    b.addEventListener("click", () => {
+      for (const o of screen.querySelectorAll(".sleeve-btn")) o.setAttribute("aria-pressed", String(o === b));
+      play(b.dataset.t);
+    });
+  }
+  document.getElementById("replay").addEventListener("click", () => play(lbl.textContent));
+  setTimeout(() => play("A2"), 600);
+})();
+// Screen 2: tap the floor to walk there.
+(() => {
+  const floor = document.getElementById("floor"), me = document.getElementById("me");
+  floor.addEventListener("click", (e) => {
+    const r = floor.getBoundingClientRect();
+    me.style.left = `${Math.max(16, Math.min(r.width - 16, e.clientX - r.left))}px`;
+    me.style.top = `${Math.max(16, Math.min(r.height - 16, e.clientY - r.top))}px`;
+  });
+})();
+</script>
+</body>
+</html>
