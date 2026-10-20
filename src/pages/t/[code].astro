@@ -15,8 +15,9 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     <p class="conn" id="conn" role="status" aria-live="polite" hidden></p>
 
     <div class="bar">
-      <button id="leave" type="button" class="secondary sm"><i class="ph-bold ph-sign-out" aria-hidden="true"></i>Leave table</button>
+      <button id="leave" type="button" class="secondary sm">Leave table</button>
       <span class="hint" id="leave-note"></span>
+      <span class="where mono">Booth {code}</span>
     </div>
     <div id="leave-confirm" class="card" role="alertdialog" aria-labelledby="leave-q" hidden>
       <p id="leave-q"><strong>Leave the game?</strong> You will be out of it for good.</p>
@@ -40,7 +41,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
         <div id="lobby-code" class="ticket-wrap">
           <p class="hint" id="code-label">Share this code with the room</p>
           <div class="ticket" aria-labelledby="code-label" id="table-code">{code}</div>
-          <button id="copy-code" type="button" class="secondary sm"><i class="ph-bold ph-copy" aria-hidden="true"></i>Copy code</button>
+          <button id="copy-code" type="button" class="secondary sm">Copy code</button>
           <p class="hint" id="copy-msg" role="status"></p>
         </div>
         <p class="status" id="status" hidden>
@@ -58,12 +59,13 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
         <section class="role phase" id="v-role" aria-labelledby="role-h" hidden>
           <div class="role-head">
             <h2 id="role-h">Your theme</h2>
-            <button id="role-toggle" type="button" class="secondary sm" aria-controls="role-body" aria-expanded="true"><i class="ph-bold ph-eye-slash" aria-hidden="true"></i><span id="role-toggle-text">Hide</span></button>
+            <button id="role-toggle" type="button" class="secondary sm" aria-controls="role-body" aria-expanded="true"><span id="role-toggle-text">Hide</span></button>
           </div>
           <div class="theme-card" id="theme-card">
             <span class="tape" aria-hidden="true"></span>
             <div class="flip">
               <div class="face front" id="role-body">
+                <p class="talker-k" aria-hidden="true">Staff pick</p>
                 <p class="theme" id="role-text"></p>
               </div>
               <div class="face back" id="role-back" aria-hidden="true">
@@ -82,14 +84,14 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
             <p><strong>Your pick is in.</strong> It is final. Wait for the others.</p>
           </div>
           <div id="pick-ui" hidden>
-            <h3>From your taste file</h3>
-            <p class="hint" id="quick-empty" hidden>Your taste file is empty. Search for a song instead.</p>
-            <ul class="tracks" id="quick" aria-label="Your taste file"></ul>
-            <h3>Search</h3>
+            <h3>Your crate</h3>
+            <p class="hint" id="quick-empty" hidden>Your crate is empty. Search for a song instead.</p>
+            <ul class="tracks" id="quick" aria-label="Your crate"></ul>
+            <h3>Dig for another</h3>
             <form id="search" role="search">
               <label for="q">Search songs or artists</label>
               <input id="q" name="q" type="search" autocomplete="off" required />
-              <button type="submit"><i class="ph-bold ph-magnifying-glass" aria-hidden="true"></i>Search</button>
+              <button type="submit">Search</button>
             </form>
             <p class="hint" id="search-status" role="status"></p>
             <ul class="tracks" id="results" aria-label="Search results"></ul>
@@ -104,7 +106,16 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
             <label><input type="checkbox" id="own-audio" /> Play the tracks on this phone</label>
             <p class="hint" id="audio-choice-note"></p>
           </div>
-          <p id="np" aria-live="polite"></p>
+          <div class="stage-wrap" aria-hidden="true">
+            <div class="stage" id="stage">
+              <div class="sleeve"><span class="sl-k">{code}</span><span class="sl-t" id="stage-side">A1</span></div>
+              <div class="plinth"></div>
+              <div class="platter"></div>
+              <div class="record"><div class="disc"><div class="labelc"><div><i>{code}</i><b id="stage-label">A1</b><i>33&#8531; RPM</i></div></div></div></div>
+              <div class="arm"><div class="rod"></div><div class="head"></div></div>
+            </div>
+          </div>
+          <p id="np" class="np" aria-live="polite"></p>
           <div id="auto" class="auto" hidden>
             <p class="auto-line"><span class="stamp">Auto</span> Playing every track in turn</p>
             <div class="auto-bar" id="auto-bar" role="img"></div>
@@ -130,15 +141,18 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
           <p id="vote-msg" class="error" role="alert"></p>
         </section>
 
-        <section class="card phase" id="v-reveal" aria-labelledby="reveal-h" hidden>
+        <section class="card liner phase" id="v-reveal" aria-labelledby="reveal-h" hidden>
+          <p class="liner-top mono" aria-hidden="true"><span>{code}</span><span id="reveal-side">Back cover</span></p>
           <h2 id="reveal-h">Reveal</h2>
           <p class="instr" id="reveal-instr"></p>
           <p id="eject" class="eject"></p>
           <ul class="tracks reveal" id="reveal-slots" aria-label="Who picked what"></ul>
           <p id="winner" class="stamp-big" hidden></p>
           <div id="themes-end" hidden>
-            <h3>The tracklist</h3>
-            <ol class="pairs" id="themes-list"></ol>
+            <div class="pressing">
+              <h3>Pressing notes</h3>
+              <ol class="pairs" id="themes-list"></ol>
+            </div>
           </div>
           <button id="next" type="button" class="full" hidden>Next round</button>
           <button id="again" type="button" class="full" hidden>Play again</button>
@@ -221,15 +235,22 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     b.addEventListener("click", onClick);
     return b;
   }
-  function icon(name: string) {
-    return h("i", { class: `ph-bold ph-${name}`, "aria-hidden": "true" });
+  // Side and track for a slot, like a record's label: with 4 tracks, A1 A2 B1 B2.
+  // Derived from the slot number and how many there are; it says nothing about who or what.
+  function sideOf(n: number, total: number) {
+    const half = Math.max(1, Math.ceil(total / 2));
+    return `${n < half ? "A" : "B"}${(n % half) + 1}`;
   }
+  const sideWords = (n: number, total: number) => {
+    const s = sideOf(n, total);
+    return `Side ${s[0]}, track ${s[1]}`;
+  };
   // A record sleeve row: cover art with a record peeking out, title and artist,
   // then whatever the caller puts after (actions, or the owner on the reveal).
   function trackRow(t: Track, ...extra: (Node | string)[]) {
     const art = t.cover
       ? Object.assign(document.createElement("img"), { src: t.cover, alt: "", width: 56, height: 56, loading: "lazy" })
-      : h("div", { class: "nocover" }, icon("music-notes"));
+      : h("div", { class: "nocover" });
     return h("li", {}, h("div", { class: "sleeve-art" }, art), h("div", { class: "meta" }, h("strong", {}, t.title), h("span", {}, t.artist)), ...extra);
   }
   async function api<T = Record<string, unknown>>(url: string, body?: unknown) {
@@ -268,6 +289,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
   let announcedLow = "";
   let clockSkew = 0;
   const phaseWords = { pick: "Pick a song", listen: "Listen", vote: "Vote", reveal: "Reveal" };
+  let dropKey = "";
 
   const announce = (t: string) => { $("announce").textContent = t; };
   const isHost = () => state?.host === myName;
@@ -359,7 +381,6 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     $("role-body").setAttribute("aria-hidden", String(!open));
     $("role-back").setAttribute("aria-hidden", String(open));
     $("role-toggle-text").textContent = open ? "Hide" : "Show";
-    $("role-toggle").querySelector("i")!.className = `ph-bold ${open ? "ph-eye-slash" : "ph-eye"}`;
     $("role-toggle").setAttribute("aria-expanded", String(open));
     $("role-text").textContent = me.theme ?? "You're watching this game.";
     $("role-h").textContent = hasTheme ? "Your theme" : "Watching";
@@ -383,25 +404,25 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     const g = state!.game!;
     const host = isHost();
     const np = g.nowPlaying;
-    const name = (n: number) => `Track ${n + 1}`;
+    const name = (n: number) => sideWords(n, slots.length);
     $("listen-h").textContent = g.phase === "vote" ? "Listen again" : "Listen";
     $("np").textContent =
       np === null
         ? host
-          ? "Tap a number to play it."
+          ? "Tap a sleeve to play it."
           : `Waiting for ${state!.host} to play a track.`
         : speakerHere() && !host
           ? `${name(np)} is playing on this phone.`
           : host
-            ? `${name(np)} is playing. Tap a number to play another.`
+            ? `${name(np)} is playing. Tap a sleeve to play another.`
             : `${name(np)} is playing on ${state!.host}'s phone.`;
     once("slots", JSON.stringify([slots, host]), () => {
       $("slots").replaceChildren(
         ...slots.map((n) => {
           const inner = [
-            h("span", { class: "record", "aria-hidden": "true" }),
-            h("span", { class: "playing-stamp stamp", "aria-hidden": "true" }, "Playing"),
-            h("span", { class: "sleeve-text", "aria-hidden": "true" }, h("span", { class: "lbl" }, "Track"), h("span", { class: "num" }, String(n + 1))),
+            h("span", { class: "playing-stamp", "aria-hidden": "true" }, "Playing"),
+            h("span", { class: "num", "aria-hidden": "true" }, sideOf(n, slots.length)),
+            h("span", { class: "cat", "aria-hidden": "true" }, code),
           ];
           if (!host) return h("li", {}, h("span", { class: "slot", "aria-label": name(n) }, ...inner));
           const b = h("button", { type: "button", "aria-label": `Play ${name(n)}` }, ...inner) as HTMLButtonElement;
@@ -410,6 +431,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
         }),
       );
     });
+    dropNeedle(np === null ? null : sideOf(np, slots.length), `${g.round}:${np}`);
     for (const [i, li] of [...$("slots").children].entries()) {
       const active = slots[i] === np;
       li.classList.toggle("playing", active);
@@ -439,6 +461,27 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
       : audioChoice === "mine"
         ? "This phone plays each track as it is picked."
         : `Listening to ${state!.host}'s phone.`;
+  }
+
+  // The needle drop. The label shows side and track only, never a title, artist,
+  // owner or cover. A slot that starts playing replays the drop; arriving to one
+  // already playing finds the record on the platter. CSS skips the motion under
+  // reduced motion and leaves the record resting.
+  function dropNeedle(label: string | null, key: string) {
+    const stage = $("stage");
+    $("stage-label").textContent = label ?? "A1";
+    $("stage-side").textContent = label ?? "A1";
+    if (label === null) {
+      stage.classList.remove("on", "go");
+      dropKey = "";
+      return;
+    }
+    if (key === dropKey) return;
+    dropKey = key;
+    stage.classList.remove("go");
+    stage.classList.add("on");
+    void stage.offsetWidth;
+    stage.classList.add("go");
   }
 
   function renderVote(on: boolean) {
@@ -480,7 +523,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     once("themes", JSON.stringify(g.themes ?? []), () => {
       $("themes-list").replaceChildren(
         ...(g.themes ?? []).map((t) =>
-          h("li", {}, h("span", { class: "t" }, h("strong", {}, `Round ${t.round}: `), "most of you had ", h("em", {}, t.majority), "; the mole had ", h("em", {}, t.mole), ".")),
+          h("li", {}, h("span", {}, h("span", { class: "t" }, "Most of you were pressed for"), h("span", { class: "hand" }, t.majority), h("span", { class: "t" }, "The mole's copy said"), h("span", { class: "hand odd" }, t.mole))),
         ),
       );
     });
@@ -489,10 +532,14 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
       : r.ejected
         ? `${r.ejected} was voted out. ${r.wasMole ? "They were a mole." : "They were not a mole."}`
         : "Nobody was voted out.";
+    // The stamp repeats what the sentence says (shown to everyone at the reveal): colour is never the only signal.
+    if (r?.ejected && r.wasMole) $("eject").append(h("span", { class: "stamp mole" }, "Mole"));
     once("reveal", JSON.stringify([r?.slots ?? [], state!.members]), () => {
       $("reveal-slots").replaceChildren(
         ...(r?.slots ?? []).map((t, i) => {
-          const li = trackRow(t, h("span", { class: "owner" }, h("span", { class: "slot-no" }, `Track ${t.slot + 1}: `), face(t.owner), h("strong", {}, t.owner)));
+          const total = r?.slots.length ?? 0;
+          const li = trackRow(t, h("span", { class: "owner" }, face(t.owner), h("strong", {}, t.owner)));
+          li.prepend(h("span", { class: "n" }, sideOf(t.slot, total)));
           li.style.setProperty("--i", String(i));
           return li;
         }),
@@ -501,6 +548,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     const win = $("winner");
     win.hidden = !g.winner;
     win.textContent = g.winner === "players" ? "The players caught every mole." : g.winner === "moles" ? "The moles took over." : "";
+    win.classList.toggle("moles", g.winner === "moles");
     show("next", host && !g.winner);
     show("again", host && !!g.winner);
     delete $("again").dataset.conn;
