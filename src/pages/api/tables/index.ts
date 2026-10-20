@@ -25,6 +25,8 @@ export const POST: APIRoute = async ({ cookies, request }) => {
   const body = ((await request.json().catch(() => ({}))) ?? {}) as Record<string, unknown>;
   const autoplay = body.autoplay ?? false;
   if (typeof autoplay !== "boolean") return json({ error: "autoplay is true or false." }, 400);
+  const priv = body.private ?? false;
+  if (typeof priv !== "boolean") return json({ error: "private is true or false." }, 400);
   const slotSeconds = seconds(body.slotSeconds, DEFAULT_SLOT_SECONDS, 120);
   if (slotSeconds === null) return json({ error: "slotSeconds is a whole number of seconds." }, 400);
   const pickSeconds = seconds(body.pickSeconds, DEFAULT_PICK_SECONDS);
@@ -37,5 +39,5 @@ export const POST: APIRoute = async ({ cookies, request }) => {
   if (moles !== null && (typeof moles !== "number" || !Number.isInteger(moles) || moles < 1 || moles > maxMoles(MAX_PLAYERS))) {
     return json({ error: `moles is a whole number from 1 to ${maxMoles(MAX_PLAYERS)}.` }, 400);
   }
-  return json({ code: createTable(me.id, { pickSeconds, voteSeconds, moles, autoplay, slotSeconds }) }, 201);
+  return json({ code: createTable(me.id, { pickSeconds, voteSeconds, moles, autoplay, slotSeconds, private: priv }) }, 201);
 };

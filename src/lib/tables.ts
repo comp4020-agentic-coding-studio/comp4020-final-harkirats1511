@@ -2,9 +2,12 @@ import { randomInt } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { type Avatar, defaultAvatar, PARTS } from "./avatar.ts";
+import type { Person } from "./auth.ts";
 import { db } from "./db.ts";
-import { log, personTag, tableScope } from "./log.ts";
-import { avatars, gamePlayers, gameThemes, games, people, picks, tableMembers, tables } from "./schema.ts";
+import { log, personTag, refused, tableScope, tag } from "./log.ts";
+import {
+  avatars, gamePlayers, gameThemes, games, people, picks, tableMembers, tableRemovals, tableReports, tables,
+} from "./schema.ts";
 
 // No I or O: they read as 1 and 0 when a code is shouted across a room.
 const LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ";
@@ -16,7 +19,9 @@ export const DEFAULT_VOTE_SECONDS = 45;
 export const DEFAULT_SLOT_SECONDS = 30;
 export type TableOptions = {
   pickSeconds: number; voteSeconds: number; moles: number | null; autoplay: boolean; slotSeconds: number;
+  private: boolean;
 };
+export const REPORT_REASONS = ["rude names", "spam", "trolling the game", "something else"];
 
 export function normaliseCode(raw: unknown): string {
   return String(raw ?? "").trim().toUpperCase();
@@ -42,7 +47,8 @@ export function createTable(hostId: string, opts: TableOptions): string {
         tx.insert(tables).values({ code, hostPersonId: hostId, status: "open", ...opts, createdAt: now }).run();
         tx.insert(tableMembers).values({ tableCode: code, personId: hostId, joinedAt: now }).run();
       });
-      log(tableScope(code), `${personTag(hostId)} created the table · pick ${opts.pickSeconds}s, vote ${opts.voteSeconds}s${opts.autoplay ? `, autoplay ${opts.slotSeconds}s/track` : ""}`);
+      log(tableScope(code), `${personTag(hostId)} created the table · pick ${opts.pickSeconds}s, vote ${opts.voteSeconds}s${opts.autoplay ? `, autoplay ${opts.slotSeconds}s/track` : ""}${opts.private ? ", private" : ""}`);
+      notifyTable(code);
       return code;
     } catch {
       // code collision: try another
@@ -62,6 +68,46 @@ export function addMember(code: string, personId: string): boolean {
     .onConflictDoNothing()
     .run();
   return res.changes > 0;
+}
+
+export function isRemoved(code: string, personId: string): boolean {
+  return !!db
+    .select({ p: tableRemovals.personId })
+    .from(tableRemovals)
+    .where(and(eq(tableRemovals.tableCode, code), eq(tableRemovals.personId, personId)))
+    .get();
+}
+
+export type Fail = { ok: false; status: number; error: string };
+
+// Sitting down, from the join route and from quick seat: same checks, same lines.
+export function joinTable(code: string, me: Person): { ok: true; state: PublicTable | null } | Fail {
+  if (!tableExists(code)) {
+    refused("table", tag(me), `join ${code}`, "no such table");
+    return { ok: false, status: 404, error: "No such table." };
+  }
+  if (isRemoved(code, me.id)) {
+    refused(tableScope(code), tag(me), "join", "removed from this table");
+    return { ok: false, status: 403, error: "The host removed you from this table." };
+  }
+  if (addMember(code, me.id)) {
+    log(tableScope(code), `${tag(me)} joined the table`);
+    notifyTable(code);
+  }
+  return { ok: true, state: publicState(code) };
+}
+
+// True the first time this person reports this table.
+export function addReport(code: string, personId: string, reason: string): boolean {
+  return db
+    .insert(tableReports)
+    .values({ tableCode: code, personId, reason, at: Date.now() })
+    .onConflictDoNothing()
+    .run().changes > 0;
+}
+
+export function setPrivate(code: string, value: boolean) {
+  db.update(tables).set({ private: value }).where(eq(tables.code, code)).run();
 }
 
 export function isHost(code: string, personId: string): boolean {
@@ -120,6 +166,8 @@ export type PublicTable = {
   code: string;
   status: string;
   host: string;
+  // Public: the table page tells its members, the shop lists only a private booth's host.
+  private: boolean;
   members: { name: string; avatar: Avatar }[];
   game?: PublicGame;
 };
@@ -188,7 +236,7 @@ function roleOf(gameId: string, personId: string): string | undefined {
 
 export function publicState(code: string): PublicTable | null {
   const t = db
-    .select({ code: tables.code, status: tables.status, host: people.name })
+    .select({ code: tables.code, status: tables.status, host: people.name, private: tables.private })
     .from(tables)
     .innerJoin(people, eq(people.id, tables.hostPersonId))
     .where(eq(tables.code, code))
@@ -215,8 +263,17 @@ export function publicState(code: string): PublicTable | null {
 const bus = new EventEmitter();
 bus.setMaxListeners(0);
 
+// Whoever wants to hear about any table (the shop's booth list) rather than one.
+const anyTable = new Set<() => void>();
+
 export function notifyTable(code: string) {
   bus.emit(code);
+  for (const fn of anyTable) fn();
+}
+
+export function watchAnyTable(fn: () => void): () => void {
+  anyTable.add(fn);
+  return () => anyTable.delete(fn);
 }
 
 export function watchTable(code: string, fn: () => void): () => void {

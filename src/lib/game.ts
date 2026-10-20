@@ -1,7 +1,7 @@
 import { randomInt, randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "./db.ts";
-import { gamePlayers, gameThemes, games, people, picks, tableMembers, tables, votes } from "./schema.ts";
+import { gamePlayers, gameThemes, games, people, picks, tableMembers, tableRemovals, tables, votes } from "./schema.ts";
 import { log, personTag, tableScope } from "./log.ts";
 import { THEMES } from "./themes.ts";
 import {
@@ -406,15 +406,21 @@ export function castVote(code: string, personId: string, choice: string): { ok: 
 }
 
 // Leaving takes someone out of the table and the game, then re-checks the win,
-// whether the phase is now complete, and who hosts.
-export function leaveTable(code: string, personId: string): boolean {
+// whether the phase is now complete, and who hosts. A host removing someone
+// goes through the same steps and also records the removal.
+export function leaveTable(code: string, personId: string, removedBy?: string): boolean {
   const left = db.transaction((tx) => {
     const gone = tx
       .delete(tableMembers)
       .where(and(eq(tableMembers.tableCode, code), eq(tableMembers.personId, personId)))
       .run();
     if (!gone.changes) return false;
-    log(tableScope(code), `${personTag(personId)} left the table`);
+    if (removedBy) {
+      tx.insert(tableRemovals).values({ tableCode: code, personId, at: Date.now() }).onConflictDoNothing().run();
+      log(tableScope(code), `${personTag(removedBy)} removed ${personTag(personId)}`);
+    } else {
+      log(tableScope(code), `${personTag(personId)} left the table`);
+    }
     const t = tableOptions(code)!;
     if (t.hostPersonId === personId) {
       const next = tx
