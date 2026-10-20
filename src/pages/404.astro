@@ -1,0 +1,12 @@
+---
+import Base from "../layouts/Base.astro";
+
+// The page for any address that isn't one. It never echoes the requested path,
+// so every miss looks the same (including /api/logs without its token).
+Astro.response.status = 404;
+---
+<Base title="Not found">
+  <h1>Not found</h1>
+  <p>There's nothing at this address.</p>
+  <p><a href="/">Back to Mole</a></p>
+</Base>
