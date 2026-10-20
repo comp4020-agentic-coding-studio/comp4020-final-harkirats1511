@@ -10,9 +10,15 @@ if (me && safeNext) return Astro.redirect(safeNext);
 const mine = me ? getAvatar(me.id) : null;
 const tasteCount = me ? listTaste(me.id).length : 0;
 ---
-<Base title="Mole">
-  <h1>Mole</h1>
-  <p class="pitch">A party game for friends in one room. Everyone picks a song. One of you got a slightly different theme.</p>
+<Base title="Mole Records" width="home">
+  <div class="home">
+    <div class="home-side">
+      <h1 class="sign"><span class="sr-only">Mole Records</span><span class="big" aria-hidden="true">M<span class="disc-o"></span>LE</span><span class="small" aria-hidden="true">RECORDS</span></h1>
+      <p class="hours">Open late <b>tonight</b><br />A party game for friends in one room</p>
+      <p class="pitch">Everyone picks a song. One of you got a slightly different theme.</p>
+      <p class="enter-shop"><a class="btn ghost" href="/shop">Enter the shop</a></p>
+    </div>
+    <div class="home-main">
   {me ? (
     <>
       <p class="who"><span id="who-badge" class="avatar" aria-hidden="true" data-avatar={JSON.stringify(mine)}></span><span>Signed in as <strong>{me.name}</strong>.</span></p>
@@ -55,39 +61,41 @@ const tasteCount = me ? listTaste(me.id).length : 0;
           </select>
           <p class="hint" id="moles-hint">Moles must stay fewer than everyone else: 2 need 5 players, 3 need 7, 4 need 9. Start tells you if the table is too small.</p>
         </details>
-        <button id="create" type="button" class="full">Create a table</button>
+        <button id="create" type="button" class="full">Start a table</button>
       </section>
       <section class="card" aria-labelledby="join-h">
-        <h2 id="join-h">Join a table</h2>
+        <h2 id="join-h">Join with a code</h2>
         <form id="join-code">
           <label for="code">Table code</label>
           <input id="code" name="code" class="mono-input" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" required />
           <button type="submit">Join</button>
         </form>
       </section>
-      <section class="card" aria-labelledby="taste-h">
-        <h2 id="taste-h">Your taste file</h2>
-        <p class="hint">{tasteCount} / 10 tracks.</p>
-        {tasteCount < 5 && <p class="nudge">A mole needs something to study. Add a few tracks you would actually play.</p>}
-        <p><a href="/taste">{tasteCount === 0 ? "Build your taste file" : "Edit your taste file"}</a></p>
-      </section>
-      <section class="card" aria-labelledby="hist-h">
-        <h2 id="hist-h">Your past games</h2>
-        <p class="hint">Themes, picks and who won.</p>
-        <p><a href="/history">Your past games</a></p>
-      </section>
-      <section class="card" aria-labelledby="char-h">
-        <h2 id="char-h">Your character</h2>
-        <p class="hint">Pick how you look at the table.</p>
-        <p><a href="/me">Change your character</a></p>
-      </section>
       <p id="msg" class="error" role="alert"></p>
+      <div class="shelf-links">
+        <section class="card" aria-labelledby="taste-h">
+          <h2 id="taste-h">Your crate</h2>
+          <p class="hint">{tasteCount} / 10 tracks in your taste file.</p>
+          {tasteCount < 5 && <p class="nudge">A mole needs something to study. Add a few tracks you would actually play.</p>}
+          <p><a href="/taste">{tasteCount === 0 ? "Build your taste file" : "Edit your taste file"}</a></p>
+        </section>
+        <section class="card" aria-labelledby="hist-h">
+          <h2 id="hist-h">Your shelf</h2>
+          <p class="hint">Themes, picks and who won.</p>
+          <p><a href="/history">Your past games</a></p>
+        </section>
+        <section class="card" aria-labelledby="char-h">
+          <h2 id="char-h">Your character</h2>
+          <p class="hint">Pick how you look at the table.</p>
+          <p><a href="/me">Change your character</a></p>
+        </section>
+      </div>
     </>
   ) : (
-    <form id="sign-in" class="card member-card" data-next={safeNext} aria-labelledby="member-h">
+    <form id="sign-in" class="card paper member-card" data-next={safeNext} aria-labelledby="member-h">
       <div class="card-top">
-        <h2 id="member-h" style="margin:0">Membership card</h2>
-        <span class="stamp">Members only</span>
+        <h2 id="member-h">Membership card</h2>
+        <span class="card-no" aria-hidden="true">Members only</span>
       </div>
       <div class="stripe" aria-hidden="true"></div>
       <label for="name">Name</label>
@@ -96,10 +104,12 @@ const tasteCount = me ? listTaste(me.id).length : 0;
       <input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4,8}" minlength="4" maxlength="8" autocomplete="current-password" required />
       <p class="hint">New name? It is yours with this PIN. Taken? Enter its PIN to sign back in.</p>
       <p id="msg" class="error" role="alert"></p>
-      <button type="submit">Continue</button>
+      <button type="submit">Step inside</button>
     </form>
   )}
   <p class="hint"><a href="/readme/">About this project</a></p>
+    </div>
+  </div>
 </Base>
 <script>
   import { avatar } from "../ui/avatar.ts";

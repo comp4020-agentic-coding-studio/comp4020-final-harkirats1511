@@ -1,10 +1,11 @@
 ---
-import "@fontsource/archivo-black";
-import "@fontsource-variable/archivo/wdth.css";
-import "@fontsource-variable/jetbrains-mono";
-import "@phosphor-icons/web/bold";
+import "@fontsource/bungee";
+import "@fontsource-variable/bricolage-grotesque/opsz.css";
+import "@fontsource/ibm-plex-mono/500.css";
+import "@fontsource/ibm-plex-mono/600.css";
+import "@fontsource/caveat/600.css";
 import "../styles/global.css";
-interface Props { title: string; width?: "narrow" | "table" | "prose" }
+interface Props { title: string; width?: "narrow" | "table" | "prose" | "home" }
 const { title, width = "narrow" } = Astro.props;
 ---
 <!doctype html>
@@ -12,57 +13,17 @@ const { title, width = "narrow" } = Astro.props;
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light dark" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#1B1420" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>{title}</title>
-    <script is:inline>
-      // Apply the saved theme before first paint so there is no flash.
-      try {
-        var t = localStorage.getItem("mole:theme");
-        if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
-      } catch (e) { /* no storage: follow the system */ }
-    </script>
   </head>
   <body>
     <header class={`site-head head-${width}`}>
-      <a class="brand" href="/" aria-label="Mole, home">Mole</a>
-      <button id="theme-toggle" type="button" class="icon-btn" aria-label="Theme: system. Tap to change.">
-        <i class="ph-bold ph-monitor" aria-hidden="true"></i>
-        <span class="theme-word">System</span>
-      </button>
+      <a class="brand" href="/" aria-label="Mole Records, home">M<span class="disc-o" aria-hidden="true"></span>LE</a>
     </header>
     <main class={`page page-${width}`}>
       <slot />
     </main>
   </body>
 </html>
-<script>
-  // Theme toggle: system, light, dark. Saved in localStorage when it works.
-  const KEY = "mole:theme";
-  type Mode = "system" | "light" | "dark";
-  const order: Mode[] = ["system", "light", "dark"];
-  const icons: Record<Mode, string> = { system: "ph-monitor", light: "ph-sun", dark: "ph-moon" };
-  const words: Record<Mode, string> = { system: "System", light: "Light", dark: "Dark" };
-  const read = (): Mode => {
-    try {
-      const v = localStorage.getItem(KEY);
-      return v === "light" || v === "dark" ? v : "system";
-    } catch { return "system"; }
-  };
-  const btn = document.getElementById("theme-toggle") as HTMLButtonElement;
-  function apply(mode: Mode) {
-    if (mode === "system") document.documentElement.removeAttribute("data-theme");
-    else document.documentElement.setAttribute("data-theme", mode);
-    btn.querySelector("i")!.className = `ph-bold ${icons[mode]}`;
-    btn.querySelector(".theme-word")!.textContent = words[mode];
-    btn.setAttribute("aria-label", `Theme: ${words[mode].toLowerCase()}. Tap to change.`);
-  }
-  apply(read());
-  btn.addEventListener("click", () => {
-    const next = order[(order.indexOf(read()) + 1) % order.length];
-    try {
-      if (next === "system") localStorage.removeItem(KEY);
-      else localStorage.setItem(KEY, next);
-    } catch { /* not saved; still applied for this visit */ }
-    apply(next);
-  });
-</script>

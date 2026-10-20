@@ -7,7 +7,8 @@ if (!me) return Astro.redirect("/?next=/taste");
 const initial = listTaste(me.id);
 ---
 <Base title="Your taste file · Mole">
-  <a class="back-link" href="/"><i class="ph-bold ph-arrow-left" aria-hidden="true"></i>Back</a>
+  <a class="back-link" href="/"><span aria-hidden="true">&larr;</span>Back</a>
+  <p class="kicker">Your crate</p>
   <h1>Your taste file</h1>
   <p class="hint">Up to {TASTE_MAX} tracks you would actually play. A mole studies this to pass as you.</p>
 
@@ -23,7 +24,7 @@ const initial = listTaste(me.id);
     <form id="search" role="search">
       <label for="q">Search songs or artists</label>
       <input id="q" name="q" type="search" autocomplete="off" required />
-      <button type="submit"><i class="ph-bold ph-magnifying-glass" aria-hidden="true"></i>Search</button>
+      <button type="submit">Search</button>
     </form>
     <p class="hint" id="full" hidden>Your taste file is full. Remove a track to add another.</p>
     <p id="msg" class="error" role="alert"></p>
@@ -55,10 +56,6 @@ const initial = listTaste(me.id);
     else {
       const nc = document.createElement("div");
       nc.className = "nocover";
-      const ic = document.createElement("i");
-      ic.className = "ph-bold ph-music-notes";
-      ic.setAttribute("aria-hidden", "true");
-      nc.append(ic);
       art.append(nc);
     }
     const meta = document.createElement("div");

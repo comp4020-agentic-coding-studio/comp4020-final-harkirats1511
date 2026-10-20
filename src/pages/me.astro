@@ -8,7 +8,8 @@ if (!me) return Astro.redirect("/?next=/me");
 const current = getAvatar(me.id);
 ---
 <Base title="Your character · Mole">
-  <a class="back-link" href="/"><i class="ph-bold ph-arrow-left" aria-hidden="true"></i>Back</a>
+  <a class="back-link" href="/"><span aria-hidden="true">&larr;</span>Back</a>
+  <p class="kicker">Behind the counter</p>
   <h1>Your character</h1>
   <p class="hint">Everyone at your table sees this next to your name.</p>
 
@@ -38,7 +39,7 @@ const current = getAvatar(me.id);
 
       <div class="row btns editor-btns">
         <button id="save" type="submit">Save character</button>
-        <button id="randomise" type="button" class="secondary"><i class="ph-bold ph-dice-five" aria-hidden="true"></i>Randomise</button>
+        <button id="randomise" type="button" class="secondary">Randomise</button>
       </div>
       <p id="status" class="status-line" role="status" aria-live="polite"></p>
     </form>

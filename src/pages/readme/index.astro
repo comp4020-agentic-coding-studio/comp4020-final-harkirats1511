@@ -4,6 +4,6 @@ import { renderReadme } from "../../lib/readme.ts";
 const html = renderReadme();
 ---
 <Base title="README" width="prose">
-  <a class="back-link" href="/"><i class="ph-bold ph-arrow-left" aria-hidden="true"></i>Back to the app</a>
+  <a class="back-link" href="/"><span aria-hidden="true">&larr;</span>Back to the app</a>
   <article class="prose" set:html={html} />
 </Base>
