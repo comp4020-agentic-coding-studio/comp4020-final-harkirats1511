@@ -39,9 +39,10 @@ const ROW_B = 2.7; // radius of the raised back row
 const RISER = 0.5;
 const CHAIR_OUT = 0.3; // a mobility aid is pulled out from the table so the chair is seen
 
+// One palette: a booth in the record shop after hours (plum walls, floorboards,
+// lamp light), the same room as /shop. The page has no light theme any more.
 const PALETTE = {
-  light: { paper: "#f2efe6", wall: "#e6e1d3", floor: "#cfc8b6", ink: "#16161a", stool: "#16161a", ambient: "#b8b0a0", sun: "#fff1d6" },
-  dark: { paper: "#17161b", wall: "#201f26", floor: "#2b2a33", ink: "#f2efe6", stool: "#3a3943", ambient: "#6a6678", sun: "#ffd9b0" },
+  shop: { paper: "#1b1420", wall: "#2a1f30", floor: "#6b4a33", ink: "#efe7d7", stool: "#2b2030", ambient: "#8a7480", sun: "#ffe2bf" },
 };
 
 type Seat = { x: number; y: number; z: number; yaw: number };
@@ -127,8 +128,7 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
   const root = app.root;
 
   // ---- the studio ----
-  const dark = () => document.documentElement.dataset.theme === "dark" || (document.documentElement.dataset.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
-  let pal = PALETTE[dark() ? "dark" : "light"];
+  const pal = PALETTE.shop;
   const paperMat = kit.flat(pal.floor);
   const wallMat = kit.flat(pal.wall);
   const mats = { floor: new StandardMaterial(), wall: new StandardMaterial(), wall2: new StandardMaterial(), stool: new StandardMaterial() };
@@ -150,14 +150,14 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
   void floor;
   // a rug: ink ring on the floor under the table
   const ink = kit.flat("#16161a");
-  const pink = kit.flat("#f0477e", { emissive: 0.5 });
-  const pinkMat = kit.flat("#f0477e");
-  const cream = kit.flat("#f2efe6");
+  const pink = kit.flat("#ff4f8b", { emissive: 0.8 });
+  const pinkMat = kit.flat("#f4b860", { emissive: 0.35 });
+  const cream = kit.flat("#efe7d7");
   kit.prim("cylinder", ink, [0, 0.004, 0], [3.9, 0.008, 3.9], [0, 0, 0], stage);
   kit.prim("cylinder", pinkMat, [0, 0.008, 0], [3.7, 0.008, 3.7], [0, 0, 0], stage);
   kit.prim("cylinder", mats.floor, [0, 0.012, 0], [3.55, 0.008, 3.55], [0, 0, 0], stage);
   // the table
-  const woodMat = kit.flat("#c98a4b");
+  const woodMat = kit.flat("#7a5333");
   kit.prim("cylinder", ink, [0, 0.22, 0], [0.22, 0.44, 0.22], [0, 0, 0], stage);
   kit.prim("cylinder", ink, [0, 0.02, 0], [0.7, 0.04, 0.7], [0, 0, 0], stage);
   kit.prim("cylinder", ink, [0, TABLE_TOP - 0.025, 0], [1.74, 0.07, 1.74], [0, 0, 0], stage);
@@ -214,7 +214,6 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
   root.addChild(spot);
 
   const applyTheme = () => {
-    pal = PALETTE[dark() ? "dark" : "light"];
     setCol(mats.floor, pal.floor);
     setCol(mats.wall, pal.wall);
     setCol(mats.wall2, pal.wall);
@@ -224,10 +223,6 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
     app.scene.ambientLight = new Color().fromString(pal.ambient);
   };
   applyTheme();
-  const themeObserver = new MutationObserver(applyTheme);
-  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-  const mq = matchMedia("(prefers-color-scheme: dark)");
-  mq.addEventListener("change", applyTheme);
 
   // ---- people ----
   const people = new Map<string, Person>();
@@ -610,8 +605,6 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
     },
     destroy() {
       ro.disconnect();
-      themeObserver.disconnect();
-      mq.removeEventListener("change", applyTheme);
       cancelFrame(engine);
       for (const p of [...people.values()]) leave(p);
       engine.destroy();
