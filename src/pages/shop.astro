@@ -1,0 +1,597 @@
+---
+import Base from "../layouts/Base.astro";
+import { personFromCookies } from "../lib/auth.ts";
+import { booths } from "../lib/booths.ts";
+import { boothList } from "../scene/shop-list.ts";
+// Signed out goes to the front door. (The home page only forwards /t/CODE,
+// /taste and /me after sign-in today, so you land on "/" until /shop is added
+// to its safeNext list.)
+const me = personFromCookies(Astro.cookies);
+if (!me) return Astro.redirect("/");
+// The first paint of the 2D list is server-rendered from the same public Booth
+// fields the stream carries: a private booth has no code in it.
+const list = booths();
+---
+<Base title="The shop · Mole" width="table">
+  <div id="shop" class="shop" data-me={me.name}>
+    <h1 class="sr-only">Mole Records, the shop floor</h1>
+    <p class="sr-only" id="shop-live" role="status" aria-live="polite"></p>
+
+    <div class="shop-bar">
+      <p class="shop-count" id="shop-count"><span id="count-people">0</span> in the shop · <span id="count-booths">{list.length}</span> <span id="count-booths-word">{list.length === 1 ? "booth" : "booths"}</span></p>
+      <div class="shop-bar-btns">
+        <button type="button" id="scene-toggle" class="shop-btn ghost sm" aria-pressed="true" hidden>3D: on</button>
+        <button type="button" id="sound-toggle" class="shop-btn ghost sm" aria-pressed="true">Sound: on</button>
+        <label class="shop-vol"><span>Radio volume</span><input type="range" id="sound-vol" min="0" max="100" step="5" value="35"></label>
+      </div>
+    </div>
+
+    <section id="shop-stage" class="shop-stage" aria-label="3D shop floor (decorative; everything here is also in the lists below)" hidden>
+      <div class="shop-loading" id="shop-loading" aria-hidden="true"><div>Opening up<span>unlocking the shop</span></div></div>
+      <div class="shop-hud" id="shop-hud">
+        <div class="shop-brand" aria-hidden="true"><b>Mole Records</b></div>
+        <div class="shop-hint" aria-hidden="true">WASD or click to walk · Space to jump · E to sit</div>
+        <div class="shop-sheet" id="shop-sheet" role="region" aria-label="Nearby" hidden></div>
+        <div class="shop-emotes" id="shop-emotes">
+          <button type="button" data-e="wave">Wave</button>
+          <button type="button" data-e="nope">Nope</button>
+          <button type="button" data-e="jump">Jump</button>
+          <button type="button" data-e="dance">Dance</button>
+        </div>
+        <div class="shop-stick" id="shop-stick" aria-hidden="true"><i></i></div>
+        <div class="shop-hud-btns">
+          <button type="button" id="hud-list" class="shop-btn ghost sm" aria-expanded="false" aria-controls="shop-2d">Booth list</button>
+        </div>
+      </div>
+    </section>
+
+    <details id="shop-2d" class="shop-2d" open>
+      <summary id="shop-2d-sum">Booths, people and radio</summary>
+
+      <section aria-labelledby="booths-h" class="shop-sec">
+        <div class="shop-sec-head">
+          <h2 id="booths-h">Booths</h2>
+          <button type="button" id="quick-seat" class="shop-btn">Quick seat</button>
+        </div>
+        <p class="shop-msg" id="quick-msg" role="status"></p>
+        <ul class="shop-booths" id="booth-list" set:html={boothList(list)} />
+        <p class="shop-note"><a href="/">Start a table</a> from the home page and it opens as a booth here.</p>
+      </section>
+
+      <section aria-labelledby="people-h" class="shop-sec">
+        <h2 id="people-h">In the shop</h2>
+        <ul class="shop-people" id="people-list"><li>Connecting…</li></ul>
+      </section>
+
+      <section aria-labelledby="radio-h" class="shop-sec">
+        <h2 id="radio-h">Radio</h2>
+        <p id="radio-now" class="shop-note">The jukebox picks the station for the whole shop, once a minute.</p>
+        <div class="shop-stations" id="stations" role="group" aria-label="Station">
+          <button type="button" class="shop-btn ghost" data-mode="mix" aria-pressed="false">Mix</button>
+          <button type="button" class="shop-btn ghost" data-mode="after-hours" aria-pressed="false">After Hours</button>
+          <button type="button" class="shop-btn ghost" data-mode="back-room" aria-pressed="false">Back Room</button>
+          <button type="button" class="shop-btn ghost" data-mode="late-bus" aria-pressed="false">Late Bus</button>
+        </div>
+        <p class="shop-msg" id="radio-msg" role="status"></p>
+      </section>
+    </details>
+  </div>
+</Base>
+
+<script>
+  import type { ShopScene, Target } from "../scene/shop-scene.ts";
+  import type { Booth } from "../lib/booths.ts";
+  import { createRadio, type RadioInfo } from "../audio/radio.ts";
+  import { createSfx } from "../audio/sfx.ts";
+  import { boothList, esc } from "../scene/shop-list.ts";
+
+  const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+  const shop = $("shop");
+  const myName = shop.dataset.me!;
+  const live = (t: string) => { $("shop-live").textContent = ""; setTimeout(() => ($("shop-live").textContent = t), 30); };
+
+  // ---- sound: one control for the radio and the effects ----
+  const sfx = createSfx();
+  const radio = createRadio();
+  const soundBtn = $<HTMLButtonElement>("sound-toggle");
+  const vol = $<HTMLInputElement>("sound-vol");
+  vol.value = String(Math.round(radio.state().volume * 100));
+  sfx.setEnabled(radio.state().on);
+  const hudSound: { btn: HTMLButtonElement | null } = { btn: null };
+  const paintSound = () => {
+    const s = radio.state();
+    for (const b of [soundBtn, hudSound.btn]) {
+      if (!b) continue;
+      b.textContent = `Sound: ${s.on ? "on" : "off"}`;
+      b.setAttribute("aria-pressed", String(s.on));
+    }
+    sfx.setEnabled(s.on);
+    const name = s.stationName;
+    $("radio-now").textContent = name ? `Now on the radio: ${name}.${s.on ? "" : " (Sound is off.)"}` : "The jukebox picks the station for the whole shop, once a minute.";
+    const mode = s.mode;
+    for (const b of document.querySelectorAll<HTMLButtonElement>("[data-mode]")) b.setAttribute("aria-pressed", String(b.dataset.mode === mode));
+    sheetRefresh();
+  };
+  radio.subscribe(paintSound);
+  soundBtn.addEventListener("click", () => {
+    if (radio.state().on) radio.stop();
+    else { sfx.unlock(); radio.start(); }
+    paintSound();
+  });
+  vol.addEventListener("input", () => { radio.setVolume(Number(vol.value) / 100); });
+  // Browsers play nothing before a tap or key press: the first one starts it.
+  const firstGesture = () => {
+    sfx.unlock();
+    radio.gesture();
+    removeEventListener("pointerdown", firstGesture, true);
+    removeEventListener("keydown", firstGesture, true);
+  };
+  addEventListener("pointerdown", firstGesture, true);
+  addEventListener("keydown", firstGesture, true);
+
+  // ---- the 3D scene: loaded after the page is usable, only where it can run ----
+  const SCENE_KEY = "mole:scene";
+  const readScene = () => { try { return localStorage.getItem(SCENE_KEY) !== "off"; } catch { return true; } };
+  const writeScene = (on: boolean) => { try { localStorage.setItem(SCENE_KEY, on ? "on" : "off"); } catch { /* not saved */ } };
+  let sceneWanted = readScene();
+  let scene: ShopScene | null = null;
+  let sceneLoading = false;
+  let sceneDead = false;
+  let sceneVisible = true;
+  let snapshot: { people: any[]; you: string } | null = null;
+  const stage = $("shop-stage");
+  const sceneBtn = $<HTMLButtonElement>("scene-toggle");
+  const details = $<HTMLDetailsElement>("shop-2d");
+  const canRunScene = () => {
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return false;
+    try {
+      const c = document.createElement("canvas");
+      const gl = c.getContext("webgl2");
+      if (!gl) return false;
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+      return true;
+    } catch { return false; }
+  };
+  const syncScene = () => {
+    sceneBtn.textContent = `3D: ${sceneWanted ? "on" : "off"}`;
+    sceneBtn.setAttribute("aria-pressed", String(sceneWanted));
+    stage.hidden = !sceneWanted;
+    shop.classList.toggle("is-3d", sceneWanted && !sceneDead);
+  };
+  const syncPause = () => scene?.setPaused(document.hidden || !sceneVisible || !sceneWanted);
+  function dropScene(fatal: boolean) {
+    scene?.destroy();
+    scene = null;
+    sceneLoading = false;
+    sheetClose();
+    if (fatal) { sceneDead = true; stage.hidden = true; sceneBtn.hidden = true; details.open = true; }
+    syncScene();
+  }
+  async function loadScene() {
+    if (scene || sceneLoading || sceneDead || !sceneWanted) return;
+    sceneLoading = true;
+    $("shop-loading").classList.remove("done");
+    try {
+      const { startShopScene } = await import("../scene/shop-scene.ts");
+      const s = await startShopScene(stage, {
+        sendMove: (x, z, yaw) => void post("/api/shop/move", { x, z, yaw }).catch(() => {}),
+        sendEmote: (e) => void post("/api/shop/emote", { emote: e }).catch(() => {}),
+        onNear: (t) => { near = t; sheetRefresh(true); },
+        onPrimary: () => primary(),
+        sfx,
+      }, () => $("shop-loading").classList.add("done"));
+      if (!sceneWanted || sceneDead) { s.destroy(); sceneLoading = false; return; }
+      scene = s;
+      sceneLoading = false;
+      s.setYou(myName);
+      if (snapshot) { s.reset(snapshot.people); }
+      s.setBooths(booths);
+      syncPause();
+      details.open = false;
+    } catch {
+      dropScene(true);
+    }
+  }
+  function sceneInit() {
+    if (!canRunScene()) { sceneDead = true; syncScene(); return; }
+    sceneBtn.hidden = false;
+    syncScene();
+    sceneBtn.addEventListener("click", () => {
+      sceneWanted = !sceneWanted;
+      writeScene(sceneWanted);
+      if (sceneWanted) { syncScene(); void loadScene(); }
+      else { dropScene(false); details.open = true; }
+    });
+    new IntersectionObserver((e) => { sceneVisible = e[e.length - 1].isIntersecting; syncPause(); }).observe(stage);
+    document.addEventListener("visibilitychange", syncPause);
+    // the 3D HUD's own copy of the sound toggle, and the booth-list toggle
+    hudSound.btn = document.createElement("button");
+    hudSound.btn.type = "button";
+    hudSound.btn.className = "shop-btn ghost sm";
+    hudSound.btn.addEventListener("click", () => soundBtn.click());
+    $("shop-hud").querySelector(".shop-hud-btns")!.prepend(hudSound.btn);
+    paintSound();
+    const listBtn = $<HTMLButtonElement>("hud-list");
+    const sync = () => listBtn.setAttribute("aria-expanded", String(details.open));
+    details.addEventListener("toggle", sync);
+    listBtn.addEventListener("click", () => {
+      details.open = !details.open;
+      if (details.open) details.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    sync();
+    // joystick (touch devices show it by CSS)
+    const el = $("shop-stick"), knob = el.firstElementChild as HTMLElement;
+    let id: number | null = null;
+    const move = (e: PointerEvent) => {
+      const r = el.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      let dx = e.clientX - cx, dy = e.clientY - cy;
+      const d = Math.hypot(dx, dy), max = r.width / 2 - 10;
+      if (d > max) { dx = (dx / d) * max; dy = (dy / d) * max; }
+      knob.style.transform = `translate(${dx}px, ${dy}px)`;
+      scene?.setStick(dx / max, dy / max);
+    };
+    el.addEventListener("pointerdown", (e) => { id = e.pointerId; el.setPointerCapture(id); move(e); });
+    el.addEventListener("pointermove", (e) => { if (e.pointerId === id) move(e); });
+    const end = () => { id = null; scene?.setStick(0, 0); knob.style.transform = ""; };
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+    $("shop-emotes").addEventListener("click", (e) => {
+      const c = (e.target as HTMLElement).closest("button")?.dataset.e;
+      if (c) scene?.myEmote(c as never);
+    });
+    const go = () => void loadScene();
+    if ("requestIdleCallback" in window) requestIdleCallback(go, { timeout: 1500 });
+    else setTimeout(go, 400);
+  }
+
+  // ---- talking to the server ----
+  async function post(url: string, body?: unknown) {
+    return fetch(url, { method: "POST", headers: body === undefined ? {} : { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body), credentials: "same-origin" });
+  }
+  const errorOf = async (res: Response, fallback: string) => ((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? fallback;
+
+  // ---- booths (the 2D list; the 3D draws the same data) ----
+  let booths: Booth[] = [];
+  const listEl = $("booth-list");
+  let lastHtml = listEl.innerHTML;
+  function renderList() {
+    const html = boothList(booths);
+    $("count-booths").textContent = String(booths.length);
+    $("count-booths-word").textContent = booths.length === 1 ? "booth" : "booths";
+    if (html === lastHtml) return;
+    lastHtml = html;
+    // keep what someone is typing, which report form is open and any message
+    const keep = new Map<string, { vals: Record<string, string>; open: boolean; msg: string }>();
+    for (const li of listEl.querySelectorAll<HTMLElement>("li[data-key]")) {
+      const vals: Record<string, string> = {};
+      for (const f of li.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[name]")) vals[f.name] = f.value;
+      keep.set(li.dataset.key!, { vals, open: !!li.querySelector("details")?.open, msg: li.querySelector(".shop-msg")?.textContent ?? "" });
+    }
+    const a = document.activeElement as HTMLElement | null;
+    const focus = a && listEl.contains(a) ? { key: a.closest("li")?.getAttribute("data-key"), sel: a.getAttribute("data-act") ? `[data-act="${a.getAttribute("data-act")}"]` : a.getAttribute("name") ? `[name="${a.getAttribute("name")}"]` : a.tagName.toLowerCase() } : null;
+    listEl.innerHTML = html;
+    for (const li of listEl.querySelectorAll<HTMLElement>("li[data-key]")) {
+      const k = keep.get(li.dataset.key!);
+      if (!k) continue;
+      for (const f of li.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[name]")) if (k.vals[f.name] !== undefined) f.value = k.vals[f.name];
+      const d = li.querySelector("details");
+      if (d) d.open = k.open;
+      const m = li.querySelector(".shop-msg");
+      if (m) m.textContent = k.msg;
+    }
+    if (focus?.key) listEl.querySelector<HTMLElement>(`li[data-key="${focus.key}"] ${focus.sel}`)?.focus();
+    sheetRefresh();
+  }
+  const boothByCode = (code: string) => booths.find((b) => b.code === code);
+
+  // ---- taking a seat ----
+  let leaving = false;
+  const go = (code: string) => { location.href = `/t/${code}`; };
+  async function sitDown(code: string, say: (m: string) => void): Promise<boolean> {
+    if (leaving) return false;
+    sfx.click();
+    say("Taking a seat…");
+    const res = await post(`/api/tables/${code}/join`);
+    if (!res.ok) { say(await errorOf(res, "Could not sit there.")); return false; }
+    leaving = true;
+    say(`Sitting at ${code}…`);
+    const b = boothByCode(code);
+    if (scene && b && b.spot >= 0) {
+      const ok = await scene.sitAt(b.spot);
+      setTimeout(() => go(code), ok ? 900 : 0);
+    } else go(code);
+    return true;
+  }
+  async function reportBooth(code: string, reason: string, say: (m: string) => void) {
+    const res = await post(`/api/tables/${code}/report`, { reason });
+    say(res.ok ? "Reported, thanks" : res.status === 409 ? "Already reported" : await errorOf(res, "Could not send the report."));
+  }
+  async function knock(code: string, say: (m: string) => void) {
+    code = code.trim().toUpperCase();
+    if (!/^[A-Z]{4}$/.test(code)) return say("A code is four letters.");
+    sfx.click();
+    const res = await post(`/api/tables/${code}/join`);
+    if (res.ok) { leaving = true; say("Opening the door…"); go(code); }
+    else say(res.status === 404 ? "No booth with that code." : await errorOf(res, "That code didn't work."));
+  }
+
+  listEl.addEventListener("click", (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-act]");
+    if (!btn) return;
+    const li = btn.closest("li")!;
+    const msg = li.querySelector(".shop-msg")!;
+    if (btn.dataset.act === "sit") void sitDown(btn.dataset.code!, (m) => (msg.textContent = m));
+  });
+  listEl.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const msg = form.closest("li")!.querySelector(".shop-msg")!;
+    const say = (m: string) => (msg.textContent = m);
+    if (form.dataset.form === "knock") void knock((form.elements.namedItem("code") as HTMLInputElement).value, say);
+    else if (form.dataset.form === "report") void reportBooth(form.dataset.code!, (form.elements.namedItem("reason") as HTMLSelectElement).value, say);
+  });
+
+  $("quick-seat").addEventListener("click", async () => {
+    const msg = $("quick-msg");
+    sfx.click();
+    msg.textContent = "Looking for a booth…";
+    const res = await post("/api/shop/quick-seat");
+    if (res.status === 404) {
+      msg.innerHTML = `No open booths waiting right now. <a href="/">Start one</a>.`;
+      return;
+    }
+    if (!res.ok) { msg.textContent = await errorOf(res, "Could not find a seat."); return; }
+    const { code } = (await res.json()) as { code: string };
+    leaving = true;
+    msg.textContent = `Sitting at ${code}…`;
+    const b = boothByCode(code);
+    if (scene && b && b.spot >= 0) {
+      const ok = await scene.sitAt(b.spot);
+      setTimeout(() => go(code), ok ? 900 : 0);
+    } else go(code);
+  });
+
+  // ---- people ----
+  const roster = new Map<string, string>();
+  function renderPeople() {
+    const names = [...roster.keys()].sort((a, b) => (a === myName ? -1 : b === myName ? 1 : a.localeCompare(b)));
+    $("count-people").textContent = String(names.length);
+    $("people-list").innerHTML = names.length ? names.map((n) => `<li>${esc(n)}${n === myName ? " (you)" : ""}</li>`).join("") : "<li>Nobody yet.</li>";
+  }
+
+  // ---- the jukebox ----
+  const STATIONS = [["mix", "Mix"], ["after-hours", "After Hours"], ["back-room", "Back Room"], ["late-bus", "Late Bus"]] as const;
+  async function setStation(mode: string, say: (m: string) => void) {
+    sfx.click();
+    const res = await post("/api/shop/radio", { mode });
+    if (res.status === 429) {
+      const b = (await res.json().catch(() => ({}))) as { retryAfter?: number };
+      return say(`The jukebox was just used. Try again in ${b.retryAfter ?? 60} seconds.`);
+    }
+    if (!res.ok) return say(await errorOf(res, "The jukebox didn't take that."));
+    say("");
+    const r = (await res.json()) as RadioInfo;
+    radio.update(r, { changed: true });
+    sfx.clunk();
+  }
+  $("stations").addEventListener("click", (e) => {
+    const m = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-mode]")?.dataset.mode;
+    if (m) void setStation(m, (t) => ($("radio-msg").textContent = t));
+  });
+
+  // ---- the 3D bottom sheet: the booth or jukebox you are standing at ----
+  const sheet = $("shop-sheet");
+  let near: Target = null;
+  let sheetKey = "";
+  function sheetClose() { near = null; sheetKey = ""; sheet.hidden = true; sheet.classList.remove("on"); }
+  function sheetRefresh(force = false) {
+    let key = "", html = "";
+    if (near?.kind === "booth") {
+      const b = booths.find((x) => x.spot === (near as { spot: number }).spot);
+      if (b) {
+        const full = b.seated >= b.max;
+        const status = b.status === "playing" ? "A game is on; you would join the next one." : "Not started yet.";
+        if (b.private || !b.code) {
+          key = `p-${b.spot}-${b.seated}-${b.status}`;
+          html = `<div class="row"><h2>Private booth · ${esc(b.host)}</h2><span class="shop-pill dim">Code only</span></div>
+            <p>${esc(b.host)} is playing with friends. If they gave you the code, type it in.</p>
+            <form class="row" data-s="knock" novalidate><label class="sr-only" for="sheet-code">Booth code</label><input id="sheet-code" name="code" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="CODE"><button type="submit" class="shop-btn ghost">Knock</button></form>
+            <p class="shop-msg" role="status"></p>`;
+        } else {
+          key = `o-${b.code}-${b.seated}-${b.status}`;
+          html = `<div class="row"><h2>Booth ${esc(b.code)}</h2><span class="shop-pill">${b.status === "playing" ? "Playing" : "Open to anyone"}</span></div>
+            <p>${esc(b.host)}'s table. ${b.seated} of ${b.max} seats taken. ${status}</p>
+            <div class="row"><button type="button" class="shop-btn" data-s="sit" data-code="${b.code}"${full || leaving ? " disabled" : ""}>Take a seat</button>
+            <details class="shop-report"><summary>Report</summary><form data-s="report" data-code="${b.code}" novalidate><label class="sr-only" for="sheet-why">Reason</label><select id="sheet-why" name="reason">${["rude names", "spam", "trolling the game", "something else"].map((r) => `<option>${r}</option>`).join("")}</select><button type="submit" class="shop-btn ghost sm">Send</button></form></details></div>
+            <p class="shop-msg" role="status"></p>`;
+        }
+      }
+    } else if (near?.kind === "jukebox") {
+      const s = radio.state();
+      key = `j-${s.mode}-${s.stationName}`;
+      html = `<div class="row"><h2>Jukebox</h2><span class="shop-pill">${esc(s.stationName || "Radio")}</span></div>
+        <p>Pick the station for everyone in the shop. It can change once a minute.</p>
+        <div class="stations">${STATIONS.map(([m, n]) => `<button type="button" class="shop-btn ghost sm" data-s="station" data-mode="${m}" aria-pressed="${s.mode === m}">${n}</button>`).join("")}</div>
+        <p class="shop-msg" role="status"></p>`;
+    }
+    if (key === sheetKey && !force) return;
+    if (key === sheetKey && sheet.contains(document.activeElement)) return;
+    sheetKey = key;
+    const code = (sheet.querySelector<HTMLInputElement>("input[name=code]")?.value) ?? "";
+    sheet.innerHTML = html;
+    const input = sheet.querySelector<HTMLInputElement>("input[name=code]");
+    if (input) input.value = code;
+    sheet.hidden = !html;
+    sheet.classList.toggle("on", !!html);
+    stage.classList.toggle("has-sheet", !!html);
+  }
+  sheet.addEventListener("click", (e) => {
+    const t = (e.target as HTMLElement).closest<HTMLElement>("[data-s]");
+    const say = (m: string) => { const el = sheet.querySelector(".shop-msg"); if (el) el.textContent = m; };
+    if (t?.dataset.s === "sit") void sitDown(t.dataset.code!, say);
+    else if (t?.dataset.s === "station") void setStation(t.dataset.mode!, say);
+  });
+  sheet.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const say = (m: string) => { const el = sheet.querySelector(".shop-msg"); if (el) el.textContent = m; };
+    if (form.dataset.s === "knock") void knock((form.elements.namedItem("code") as HTMLInputElement).value, say);
+    else if (form.dataset.s === "report") void reportBooth(form.dataset.code!, (form.elements.namedItem("reason") as HTMLSelectElement).value, say);
+  });
+  // E: take the open seat at the booth you are standing at
+  function primary() {
+    if (near?.kind !== "booth" || leaving) return;
+    const b = booths.find((x) => x.spot === (near as { spot: number }).spot);
+    if (!b || b.private || !b.code || b.seated >= b.max) return;
+    void sitDown(b.code, (m) => { const el = sheet.querySelector(".shop-msg"); if (el) el.textContent = m; });
+  }
+
+  // ---- the shop stream: names, avatars, positions, emotes, booths, radio ----
+  const es = new EventSource("/api/shop/events");
+  const parse = (e: MessageEvent) => JSON.parse(e.data);
+  es.addEventListener("snapshot", (e) => {
+    const d = parse(e as MessageEvent);
+    snapshot = d;
+    roster.clear();
+    for (const p of d.people) roster.set(p.name, p.name);
+    renderPeople();
+    booths = d.booths;
+    renderList();
+    radio.update(d.radio);
+    scene?.setYou(d.you);
+    scene?.reset(d.people);
+    scene?.setBooths(booths);
+  });
+  es.addEventListener("moves", (e) => scene?.moves(parse(e as MessageEvent).people));
+  es.addEventListener("joined", (e) => {
+    const p = parse(e as MessageEvent);
+    roster.set(p.name, p.name);
+    renderPeople();
+    scene?.add(p);
+    snapshot?.people.push(p);
+  });
+  es.addEventListener("left", (e) => {
+    const { name } = parse(e as MessageEvent);
+    roster.delete(name);
+    renderPeople();
+    scene?.remove(name);
+    if (snapshot) snapshot.people = snapshot.people.filter((p) => p.name !== name);
+  });
+  es.addEventListener("emote", (e) => { const d = parse(e as MessageEvent); scene?.emote(d.name, d.emote); });
+  es.addEventListener("booths", (e) => { booths = parse(e as MessageEvent); renderList(); scene?.setBooths(booths); });
+  es.addEventListener("radio", (e) => { radio.update(parse(e as MessageEvent), { changed: true }); sfx.clunk(); });
+
+  addEventListener("pagehide", () => { es.close(); radio.destroy(); sfx.destroy(); scene?.destroy(); });
+  paintSound();
+  renderList();
+  sceneInit();
+</script>
+
+<style is:global>
+  /* The shop wears its own plum so the 3D HUD and the 2D list match each other
+     whatever the rest of the site is doing. Values are the approved mockup's. */
+  .shop {
+    --s-wall: #1b1420; --s-panel: #261c2c; --s-raise: #34283c; --s-rule: #4a3b4e; --s-line: #85728c;
+    --s-lamp: #f4b860; --s-neon: #ff4f8b; --s-sleeve: #efe7d7; --s-ink: #1b1420; --s-muted: #b9a9b8; --s-bad: #ff9a8b;
+    --s-ui: "Bricolage Grotesque Variable", "Bricolage Grotesque", "Archivo Variable", system-ui, sans-serif;
+    --s-mono: "IBM Plex Mono", "JetBrains Mono Variable", ui-monospace, monospace;
+    --s-sign: Bungee, "Archivo Black", "Arial Black", Impact, sans-serif;
+    position: relative; left: 50%; width: 100vw; margin: 0 0 -3rem -50vw; padding: 0 0 3rem;
+    background: var(--s-wall); color: var(--s-sleeve); font-family: var(--s-ui); min-height: 70vh;
+  }
+  .shop * { box-sizing: border-box; }
+  .shop h2, .shop h3 { font-family: var(--s-ui); font-weight: 800; letter-spacing: 0; text-transform: none; color: var(--s-sleeve); margin: 0; }
+  .shop p { margin: 0; }
+  .shop a { color: var(--s-lamp); }
+  .shop-btn {
+    font: 700 1rem/1.1 var(--s-ui); letter-spacing: 0; min-height: 44px; padding: 0.55rem 1.1rem; border: 1px solid transparent; border-radius: 999px;
+    background: var(--s-lamp); color: var(--s-ink); cursor: pointer; box-shadow: none; text-transform: none; transform: none;
+  }
+  .shop-btn:hover:not(:disabled) { filter: brightness(1.08); }
+  .shop-btn:active:not(:disabled) { transform: none; box-shadow: none; filter: brightness(0.95); }
+  .shop-btn.ghost, .shop button.secondary { background: transparent; color: var(--s-sleeve); border-color: var(--s-line); }
+  .shop-btn.ghost[aria-pressed="true"] { background: var(--s-raise); border-color: var(--s-lamp); color: var(--s-lamp); }
+  .shop-btn.sm, .shop button.sm { min-height: 44px; padding: 0.4rem 0.9rem; font-size: 0.9rem; }
+  .shop button:disabled { background: var(--s-raise); color: var(--s-muted); border-color: transparent; cursor: not-allowed; box-shadow: none; }
+  .shop button:focus-visible, .shop input:focus-visible, .shop select:focus-visible, .shop summary:focus-visible, .shop a:focus-visible { outline: 3px solid var(--s-lamp); outline-offset: 2px; }
+  .shop input, .shop select {
+    font: 500 1rem var(--s-mono); min-height: 44px; margin: 0; width: auto; padding: 0.4rem 0.7rem; border: 1px solid var(--s-line); border-radius: 10px; background: var(--s-wall); color: var(--s-sleeve);
+  }
+  .shop input[name="code"] { width: 7.5rem; text-transform: uppercase; letter-spacing: 0.2em; }
+  .shop label { color: var(--s-muted); font-weight: 600; font-size: 0.875rem; margin: 0 0 0.25rem; }
+
+  .shop-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; padding: 0.6rem 1rem; max-width: 72rem; margin: 0 auto; }
+  .shop-count { font: 500 0.78rem var(--s-mono); color: var(--s-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .shop-count span { color: var(--s-lamp); }
+  .shop-bar-btns { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+  .shop-vol { display: flex; align-items: center; gap: 0.5rem; margin: 0; font-size: 0.8rem; }
+  .shop-vol input { min-height: 0; width: 7rem; padding: 0; accent-color: var(--s-lamp); border: 0; background: none; }
+
+  .shop-stage { position: relative; height: min(76svh, 46rem); min-height: 420px; overflow: hidden; background: var(--s-wall); border-block: 1px solid var(--s-rule); touch-action: none; }
+  .shop-stage[hidden] { display: none; }
+  .shop-canvas { position: absolute; left: 0; top: 0; display: block; touch-action: none; }
+  .shop-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  .shop-labels > * { position: absolute; left: 0; top: 0; will-change: transform; }
+  .shop-labels .name { font: 600 12px var(--s-ui); white-space: nowrap; color: var(--s-sleeve); text-shadow: 0 1px 2px #000, 0 0 6px rgba(0,0,0,.8); }
+  .shop-labels .name.you { color: var(--s-lamp); }
+  .shop-labels .tag { font: 500 11px var(--s-mono); white-space: nowrap; padding: 4px 9px; border-radius: 6px; background: var(--s-lamp); color: var(--s-ink); box-shadow: 0 0 18px rgba(244,184,96,.45); }
+  .shop-labels .tag.private { background: #3a2c40; color: var(--s-muted); box-shadow: none; border: 1px solid rgba(239,231,215,.18); }
+  .shop-labels .bubble { font: 600 13px var(--s-ui); background: var(--s-sleeve); color: var(--s-ink); padding: 4px 9px; border-radius: 10px; white-space: nowrap; }
+  .shop-labels .bubble::after { content: ""; position: absolute; left: 50%; bottom: -5px; margin-left: -5px; border: 5px solid transparent; border-bottom: 0; border-top-color: var(--s-sleeve); }
+  .shop-loading { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; background: var(--s-wall); font: 20px var(--s-sign); color: #ffd1e1; text-shadow: 0 0 10px var(--s-neon); transition: opacity 0.4s; text-align: center; }
+  .shop-loading.done { opacity: 0; pointer-events: none; }
+  .shop-loading span { display: block; font: 12px var(--s-mono); color: var(--s-muted); margin-top: 8px; text-shadow: none; }
+
+  .shop-hud { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+  .shop-hud > * { pointer-events: auto; }
+  .shop-brand { position: absolute; top: 14px; left: 16px; pointer-events: none; }
+  .shop-brand b { font: 400 22px var(--s-sign); color: #ffd1e1; letter-spacing: 0.02em; text-shadow: 0 0 6px var(--s-neon), 0 0 18px var(--s-neon), 0 0 34px rgba(255,79,139,.5); }
+  .shop-hint { position: absolute; top: 16px; right: 16px; font: 500 11px var(--s-mono); color: var(--s-muted); background: rgba(27,20,32,.72); border: 1px solid rgba(239,231,215,.14); border-radius: 999px; padding: 6px 11px; pointer-events: none; }
+  .shop-hud-btns { position: absolute; left: 16px; top: 48px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .shop-hud-btns .shop-btn { background: rgba(38,28,44,.85); min-height: 40px; }
+  .shop-hud-btns .shop-btn[aria-pressed="true"], .shop-hud-btns .shop-btn[aria-expanded="true"] { border-color: var(--s-lamp); }
+  .shop-sheet { position: absolute; left: 50%; bottom: 16px; transform: translate(-50%, 20px); width: min(420px, calc(100% - 32px)); background: var(--s-panel); border: 1px solid rgba(244,184,96,.35); border-radius: 18px; padding: 14px 16px 16px; box-shadow: 0 18px 40px rgba(0,0,0,.5); opacity: 0; transition: opacity 0.2s, transform 0.2s; pointer-events: none; }
+  .shop-sheet[hidden] { display: none; }
+  .shop-sheet.on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+  .shop-sheet .row { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 0; }
+  .shop-sheet h2 { font-size: 18px; }
+  .shop-sheet p { margin: 6px 0 12px; color: var(--s-muted); font-size: 14px; }
+  .shop-sheet .shop-msg { margin: 8px 0 0; }
+  .shop-sheet .stations { display: flex; flex-wrap: wrap; gap: 8px; }
+  .shop-pill { font: 500 11px var(--s-mono); padding: 3px 8px; border-radius: 999px; background: var(--s-lamp); color: var(--s-ink); white-space: nowrap; }
+  .shop-pill.dim { background: #3a2c40; color: var(--s-muted); }
+  .shop-emotes { position: absolute; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; transition: bottom 0.2s; }
+  .shop-emotes button { width: 52px; height: 52px; min-height: 0; padding: 0; border-radius: 50%; border: 1px solid rgba(239,231,215,.2); background: rgba(38,28,44,.9); color: var(--s-sleeve); font: 600 11px var(--s-ui); cursor: pointer; box-shadow: none; }
+  .shop-emotes button:active { background: var(--s-lamp); color: var(--s-ink); }
+  .shop-stick { position: absolute; left: 22px; bottom: 22px; width: 116px; height: 116px; border-radius: 50%; background: rgba(38,28,44,.65); border: 1px solid rgba(239,231,215,.18); display: none; touch-action: none; transition: bottom 0.2s; }
+  .shop-stick i { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; border-radius: 50%; background: var(--s-lamp); opacity: 0.9; }
+  @media (pointer: coarse) { .shop-stick { display: block; } .shop-hint { display: none; } }
+  @media (max-width: 560px) { .shop-stage.has-sheet .shop-emotes { bottom: 190px; } .shop-stage.has-sheet .shop-stick { bottom: 200px; } .shop-emotes { flex-direction: row; flex-wrap: wrap; width: 120px; justify-content: flex-end; } .shop-emotes button { width: 44px; height: 44px; font-size: 10px; } }
+
+  .shop-2d { max-width: 72rem; margin: 0 auto; padding: 0 1rem; }
+  .shop-2d > summary { cursor: pointer; font: 700 0.95rem var(--s-ui); min-height: 44px; display: flex; align-items: center; color: var(--s-sleeve); padding: 0.4rem 0; }
+  .shop:not(.is-3d) .shop-2d > summary { display: none; }
+  .shop-sec { margin: 0 0 1.75rem; }
+  .shop-sec > h2, .shop-sec-head h2 { font-size: 1.375rem; margin-bottom: 0.6rem; }
+  .shop-sec-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; margin-bottom: 0.6rem; }
+  .shop-sec-head h2 { margin: 0; }
+  .shop-booths { list-style: none; margin: 0.75rem 0; padding: 0; display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr)); }
+  .shop-booth, .shop-empty { background: var(--s-panel); border: 1px solid var(--s-rule); border-radius: 14px; padding: 0.85rem 1rem 1rem; }
+  .shop-empty { grid-column: 1 / -1; color: var(--s-muted); }
+  .shop-booth-head { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; }
+  .shop-booth-head h3 { font-size: 1.125rem; }
+  .shop-booth p { color: var(--s-muted); font-size: 0.9rem; margin: 0.35rem 0 0.75rem; }
+  .shop-booth .shop-msg { margin: 0.5rem 0 0; }
+  .shop-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.75rem; }
+  .shop-inline { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .shop-report { color: var(--s-muted); }
+  .shop-report > summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; padding: 0 0.5rem; text-decoration: underline; font-size: 0.9rem; font-weight: 400; }
+  .shop-report form { display: grid; gap: 0.4rem; justify-items: start; padding: 0.25rem 0 0.5rem; }
+  .shop-report select { font-family: var(--s-ui); }
+  .shop-msg { min-height: 1.2em; font-size: 0.875rem; color: var(--s-lamp); }
+  .shop-note { color: var(--s-muted); font-size: 0.9rem; }
+  .shop-people { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .shop-people li { background: var(--s-panel); border: 1px solid var(--s-rule); border-radius: 999px; padding: 0.25rem 0.8rem; font-size: 0.9rem; }
+  .shop-stations { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.6rem 0 0.3rem; }
+  @media (prefers-reduced-motion: reduce) { .shop-sheet, .shop-loading { transition: none; } }
+</style>

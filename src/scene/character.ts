@@ -7,6 +7,7 @@ import {
   BLEND_NORMAL,
   BoxGeometry,
   Color,
+  ConeGeometry,
   CylinderGeometry,
   Entity,
   FILTER_LINEAR,
@@ -14,6 +15,7 @@ import {
   PIXELFORMAT_SRGBA8,
   Mesh,
   MeshInstance,
+  PlaneGeometry,
   SphereGeometry,
   StandardMaterial,
   Texture,
@@ -27,7 +29,7 @@ const DARK_BG = new Set(["ink", "blue", "green", "red"]);
 const PAPER = "#f2efe6";
 const INK = "#16161a";
 
-export type Prim = "box" | "cylinder" | "sphere" | "torus";
+export type Prim = "box" | "cylinder" | "sphere" | "torus" | "cone" | "plane";
 
 // Shared meshes, materials and recoloured atlases for one engine.
 export class Kit {
@@ -48,7 +50,11 @@ export class Kit {
             ? new CylinderGeometry({ radius: 0.5, height: 1, capSegments: 20, heightSegments: 1 })
             : kind === "sphere"
               ? new SphereGeometry({ radius: 0.5, latitudeBands: 10, longitudeBands: 14 })
-              : new TorusGeometry({ tubeRadius: 0.5, ringRadius: 1, segments: 24, sides: 8 });
+              : kind === "cone"
+                ? new ConeGeometry({ baseRadius: 0.5, peakRadius: 0, height: 1, capSegments: 20, heightSegments: 1 })
+                : kind === "plane"
+                  ? new PlaneGeometry()
+                  : new TorusGeometry({ tubeRadius: 0.5, ringRadius: 1, segments: 24, sides: 8 });
       m = Mesh.fromGeometry(d, geo);
       this.meshes.set(kind, m);
     }
@@ -141,11 +147,13 @@ export class Kit {
 
 // The clips used. `base` clips move the whole body (sit, die); `act` clips only
 // move torso, head and arms, and play over the base.
-const BASE_CLIPS = ["sit", "wheelchair-sit", "die", "static"] as const;
+// The shop adds the standing clips (idle, walk, jump, wheelchair-move-forward).
+const BASE_CLIPS = ["sit", "wheelchair-sit", "die", "static", "idle", "walk", "jump", "wheelchair-move-forward"] as const;
 const ACT_CLIPS = ["idle", "emote-yes", "emote-no", "interact-right", "holding-right", "interact-left"] as const;
-const ONE_SHOT = new Set(["die"]);
+const ONE_SHOT = new Set(["die", "jump"]);
 
-export type CharacterOpts = { seated: boolean };
+// `shadows` lets the figure cast a shadow (the shop has a sun; the table does not).
+export type CharacterOpts = { seated: boolean; shadows?: boolean };
 
 export class Character {
   readonly root = new Entity("person");
@@ -172,7 +180,7 @@ export class Character {
 
   private async build(kit: Kit, opts: CharacterOpts) {
     const res = await kit.engine.load(`/models/character-${this.look.character}.glb`);
-    const model = res.instantiateRenderEntity();
+    const model = res.instantiateRenderEntity(opts.shadows ? { castShadows: true } : undefined);
     this.root.addChild(model);
     for (const r of model.findComponents("render")) {
       for (const mi of (r as unknown as { meshInstances: MeshInstance[] }).meshInstances) {
@@ -288,6 +296,20 @@ export class Character {
       act.transition(clip, blend);
       this.actClip = clip;
     }
+  }
+
+  // Whole-body clip for someone standing about: idle, walk, jump or sit.
+  // Wheelchair users get the chair clips in their place.
+  setBase(clip: string, blend = 0.2) {
+    if (this.wheelchair) clip = clip === "walk" ? "wheelchair-move-forward" : clip === "idle" || clip === "sit" ? "wheelchair-sit" : clip;
+    if (clip === this.baseClip) return;
+    this.anim.layers[0].transition(clip, blend);
+    this.baseClip = clip;
+  }
+
+  // How much the torso/arm overlay shows: 0 while the legs carry a walk or a hop.
+  setOverlay(weight: number) {
+    this.anim.layers[1].weight = weight;
   }
 
   // Make the whole figure see-through (a ghost) or solid again.
