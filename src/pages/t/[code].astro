@@ -2,6 +2,7 @@
 import Base from "../../layouts/Base.astro";
 import { personFromCookies } from "../../lib/auth.ts";
 import { MIN_PLAYERS, normaliseCode, publicState } from "../../lib/tables.ts";
+import { MIN_CRATE } from "../../lib/taste.ts";
 
 const code = normaliseCode(Astro.params.code);
 const state = publicState(code);
@@ -10,7 +11,7 @@ const me = personFromCookies(Astro.cookies);
 if (!me) return Astro.redirect(`/?next=/t/${code}`);
 ---
 <Base title={`Table ${code}`} width="table">
-  <div id="app" data-code={code} data-me={me.name} data-min={MIN_PLAYERS}>
+  <div id="app" data-code={code} data-me={me.name} data-min={MIN_PLAYERS} data-crate={MIN_CRATE}>
     <p class="sr-only" id="announce" role="status" aria-live="polite"></p>
     <p class="conn" id="conn" role="status" aria-live="polite" hidden></p>
 
@@ -76,6 +77,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
             <p class="hint" id="vis-msg" role="status"></p>
           </fieldset>
           <p class="hint"><a href="/me">Change your character</a></p>
+          <p class="nudge" id="crate-me" hidden><a id="crate-me-link" href={`/taste?next=/t/${code}`}>Fill your crate</a></p>
           <button id="start" type="button" class="full" disabled hidden>Start game</button>
           <p class="hint" id="start-note" aria-live="polite"></p>
           <p id="msg" class="error" role="alert"></p>
@@ -110,16 +112,9 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
           </div>
           <div id="pick-ui" hidden>
             <h3>Your crate</h3>
-            <p class="hint" id="quick-empty" hidden>Your crate is empty. Search for a song instead.</p>
+            <p class="hint" id="quick-empty" hidden>Your crate is empty. Add some tracks, then pick one.</p>
             <ul class="tracks" id="quick" aria-label="Your crate"></ul>
-            <h3>Dig for another</h3>
-            <form id="search" role="search">
-              <label for="q">Search songs or artists</label>
-              <input id="q" name="q" type="search" autocomplete="off" required />
-              <button type="submit">Search</button>
-            </form>
-            <p class="hint" id="search-status" role="status"></p>
-            <ul class="tracks" id="results" aria-label="Search results"></ul>
+            <p class="hint"><a href={`/taste?next=/t/${code}`}>Add to your crate</a>. The pick timer keeps running while you are away.</p>
           </div>
           <p id="pick-msg" class="error" role="alert"></p>
         </section>
@@ -195,7 +190,10 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
               <li>
                 <span class="avatar" aria-hidden="true"><span class="av-disc"></span></span>
                 <span class="name">{m.name}</span>
-                {m.name === state.host && <span class="stamps"><span class="stamp host">Host</span></span>}
+                <span class="stamps">
+                  {m.name === state.host && <span class="stamp host">Host</span>}
+                  <span class="stamp crate">{m.crateReady ? "Crate ready" : "Crate: not ready"}</span>
+                </span>
               </li>
             ))}
           </ul>
@@ -258,7 +256,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     winner?: "players" | "moles";
     themes?: { round: number; majority: string; mole: string }[];
   };
-  type State = { status: string; private: boolean; host: string; members: { name: string; avatar: Avatar }[]; game?: Game };
+  type State = { status: string; private: boolean; host: string; members: { name: string; avatar: Avatar; crateReady: boolean }[]; game?: Game };
   type Me = { role: "player" | "ghost" | "spectator"; theme?: string; picked?: boolean };
 
   import type { TableScene } from "../../scene/table-scene.ts";
@@ -267,6 +265,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
   const code = app.dataset.code!;
   const myName = app.dataset.me!;
   const minPlayers = Number(app.dataset.min);
+  const minCrate = Number(app.dataset.crate);
   const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
   const show = (id: string, on: boolean) => { $(id).hidden = !on; };
 
@@ -333,6 +332,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
   let me: Me | null = null;
   let slots: number[] = [];
   let taste: Found[] | null = null;
+  let myCrate: number | null = null;
   let roleShown = true;
   let howtoSet = false;
   let lastKey = "";
@@ -389,12 +389,14 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     const s = state!;
     const g = s.game;
     const inGame = s.status === "playing" && !!g;
-    once("members", JSON.stringify([s.members, s.host, inGame, g?.alive, g?.ghosts, isHost()]), () => {
+    once("members", JSON.stringify([s.members, s.host, inGame, g?.alive, g?.ghosts, isHost(), myCrate]), () => {
       $("members").replaceChildren(
-        ...s.members.map(({ name }) => {
+        ...s.members.map(({ name, crateReady }) => {
           const stamps = h("span", { class: "stamps" });
           const stamp = (t: string, kind: string) => stamps.append(h("span", { class: `stamp ${kind}` }, t));
           if (name === s.host) stamp("Host", "host");
+          const own = name === myName && myCrate !== null;
+          stamp(crateReady ? "Crate ready" : own ? `Crate: ${myCrate}/${minCrate}` : "Crate: not ready", crateReady ? "crate ready" : "crate");
           if (inGame && g!.ghosts.includes(name)) stamp("Out", "out");
           else if (inGame && !g!.alive.includes(name)) stamp("Watching", "watching");
           const li = h("li", {}, face(name), h("span", { class: "name" }, name), stamps);
@@ -424,9 +426,15 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     show("start", isHost());
     start.textContent = s.game ? "Play again" : "Start game";
     delete start.dataset.conn;
-    start.disabled = n < minPlayers;
+    const notReady = s.members.filter((m) => !m.crateReady).map((m) => m.name);
+    start.disabled = n < minPlayers || notReady.length > 0;
+    const mineReady = s.members.find((m) => m.name === myName)?.crateReady ?? true;
+    show("crate-me", !mineReady);
+    if (!mineReady) $("crate-me-link").textContent = `Fill your crate (${myCrate ?? 0}/${minCrate})`;
     $("start-note").textContent = isHost()
-      ? n < minPlayers
+      ? notReady.length
+        ? `Waiting on crates: ${notReady.join(", ")} (${minCrate} tracks each).`
+        : n < minPlayers
         ? `Needs at least ${minPlayers} players to start (${minPlayers - n} more). 4 or more is best.`
         : n < 4
           ? "You can start now. 4 or more players is recommended."
@@ -673,6 +681,17 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     render();
   }
 
+  // How many tracks I have, for "Crate: 2/5". Others' counts are never sent.
+  async function loadMyCrate() {
+    const { res, data } = await api<Found[]>("/api/taste");
+    if (res.ok && Array.isArray(data) && data.length !== myCrate) {
+      myCrate = data.length;
+      if (state) render();
+    }
+  }
+  window.addEventListener("pageshow", () => void loadMyCrate());
+  void loadMyCrate();
+
   async function loadTaste() {
     taste = [];
     const { res, data } = await api<Found[]>("/api/taste");
@@ -705,20 +724,6 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     }
     msg.textContent = res.status === 409 ? "Too late: picking is over for this round." : (data.error ?? `Could not pick ${t.title}.`);
   }
-
-  document.getElementById("search")!.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    $("pick-msg").textContent = "";
-    $("search-status").textContent = "Searching...";
-    const { res, data } = await api<Found[]>(`/api/search?q=${encodeURIComponent($<HTMLInputElement>("q").value.trim())}`);
-    if (!res.ok || !Array.isArray(data)) {
-      $("search-status").textContent = "";
-      return void ($("pick-msg").textContent = (data as { error?: string }).error ?? "Search failed.");
-    }
-    $("search-status").textContent = data.length ? `${data.length} results` : "No results.";
-    $("results").replaceChildren(...data.map((t) => pickRow(t)));
-    syncActions();
-  });
 
   let voting = false;
   async function vote(choice: string) {
@@ -1083,7 +1088,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
   const conn = $("conn");
   // Anything that would fail while we can't reach the server. Buttons we turn off
   // are marked, so turning back on never touches one that was off for another reason.
-  const ACTIONS = "#start, #again, #next, #to-vote, #slots button, #quick button, #results button, #names button, #search button";
+  const ACTIONS = "#start, #again, #next, #to-vote, #slots button, #quick button, #names button";
   function syncActions() {
     const down = !connected || !navigator.onLine;
     for (const b of document.querySelectorAll<HTMLButtonElement>(ACTIONS)) {

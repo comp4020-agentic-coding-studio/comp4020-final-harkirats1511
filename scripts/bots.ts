@@ -12,6 +12,7 @@
 // --stay the script also exits when the game finishes.
 
 const PIN = "2580";
+const MIN_CRATE = 5; // the app refuses a start until every player has this many
 const DEFAULT_URL = "https://comp4020-final-harkirats1511.fly.dev";
 // One name and one taste word per bot, so tastes differ.
 const BOTS = [
@@ -104,6 +105,7 @@ class Bot {
         if (r.ok && Array.isArray(r.data)) { this.taste = r.data; have.add(tr.id); added++; }
       }
     }
+    if (this.taste.length < MIN_CRATE) throw new Error(`${this.name} could only build a crate of ${this.taste.length} (needs ${MIN_CRATE})`);
     log(this.name, `signed in, taste file has ${this.taste.length} tracks (${this.genre})`);
     const jr = await this.call(`/api/tables/${code}/join`, {});
     if (!jr.ok) throw new Error(`${this.name} could not join ${code}`);
@@ -137,10 +139,10 @@ class Bot {
     else if (g.phase === "reveal") log(this.name, `round ${g.round} reveal`);
   }
 
-  // Bots can't judge a theme, so they play from their own taste file at random
-  // (searching their genre word if the file is empty). The theme is only logged.
+  // Bots can't judge a theme, so they play from their own taste file at random:
+  // the server only accepts picks from your own crate. The theme is only logged.
   async chooseTrack(): Promise<Track | undefined> {
-    return pickOne(this.taste) ?? pickOne(await this.search(this.genre));
+    return pickOne(this.taste);
   }
 
   async pick(g: Game, mine: number) {

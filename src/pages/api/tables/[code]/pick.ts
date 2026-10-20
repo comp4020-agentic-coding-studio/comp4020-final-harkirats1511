@@ -1,12 +1,11 @@
 import type { APIRoute } from "astro";
 import { json, personFromCookies } from "../../../../lib/auth.ts";
-import { DeezerDown, getTrack } from "../../../../lib/deezer.ts";
 import { checkPick, recordPick } from "../../../../lib/game.ts";
 import { refused, tableScope, tag } from "../../../../lib/log.ts";
 import { isMember, normaliseCode, tableExists } from "../../../../lib/tables.ts";
-import { listTaste } from "../../../../lib/taste.ts";
+import { crateTrack } from "../../../../lib/taste.ts";
 
-// Body {trackId}: a Deezer id. Final once made, and refused after the deadline.
+// Body {trackId}: a Deezer id that is in the picker's own crate. Final once made, and refused after the deadline.
 export const POST: APIRoute = async ({ params, cookies, request }) => {
   const me = personFromCookies(cookies);
   const code = normaliseCode(params.code);
@@ -28,15 +27,12 @@ export const POST: APIRoute = async ({ params, cookies, request }) => {
     return json({ error: pre.error }, pre.status);
   }
 
-  // Title and artist are kept for the reveal. Own taste file first, then Deezer.
-  let track: { id: number; title: string; artist: string; cover?: string | null } | null | undefined = listTaste(me.id).find((t) => t.id === id);
-  try {
-    track ??= await getTrack(id);
-  } catch (e) {
-    if (e instanceof DeezerDown) return json({ error: "Music service is unavailable right now." }, 502);
-    throw e;
+  // Only from your own crate, as it is right now. Title and artist are kept for the reveal.
+  const track = crateTrack(me.id, id);
+  if (!track) {
+    refused(tableScope(code), tag(me), "pick", "track not in their crate");
+    return json({ error: "Pick from your crate." }, 403);
   }
-  if (!track) return json({ error: "No such track." }, 400);
   // recordPick checks the phase and deadline again: the lookup took time.
   const res = recordPick(code, me.id, { id, title: track.title, artist: track.artist, cover: track.cover });
   if (!res.ok) refused(tableScope(code), tag(me), "pick", res.error);

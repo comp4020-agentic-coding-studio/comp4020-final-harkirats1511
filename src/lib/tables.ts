@@ -4,6 +4,7 @@ import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { type Avatar, defaultAvatar, PARTS } from "./avatar.ts";
 import type { Person } from "./auth.ts";
 import { db } from "./db.ts";
+import { crateSize, MIN_CRATE } from "./taste.ts";
 import { log, personTag, refused, tableScope, tag } from "./log.ts";
 import {
   avatars, gamePlayers, gameThemes, games, people, picks, tableMembers, tableRemovals, tableReports, tables,
@@ -97,6 +98,11 @@ export function joinTable(code: string, me: Person): { ok: true; state: PublicTa
   return { ok: true, state: publicState(code) };
 }
 
+// A crate change can flip crateReady, which the lobby shows: tell their tables.
+export function notifyTablesOf(personId: string) {
+  for (const r of db.select({ c: tableMembers.tableCode }).from(tableMembers).where(eq(tableMembers.personId, personId)).all()) notifyTable(r.c);
+}
+
 // True the first time this person reports this table.
 export function addReport(code: string, personId: string, reason: string): boolean {
   return db
@@ -168,7 +174,8 @@ export type PublicTable = {
   host: string;
   // Public: the table page tells its members, the shop lists only a private booth's host.
   private: boolean;
-  members: { name: string; avatar: Avatar }[];
+  // Whether this member has the tracks to play (public; never the tracks themselves).
+  members: { name: string; avatar: Avatar; crateReady: boolean }[];
   game?: PublicGame;
 };
 
@@ -252,6 +259,7 @@ export function publicState(code: string): PublicTable | null {
     .all()
     .map((m) => ({
       name: m.name,
+      crateReady: crateSize(m.id) >= MIN_CRATE,
       avatar: m.a ? (Object.fromEntries(PARTS.map((p) => [p, m.a![p]])) as Avatar) : defaultAvatar(m.id),
     }));
   const game = publicGame(code);

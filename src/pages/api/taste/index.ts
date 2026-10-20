@@ -2,6 +2,7 @@ import type { APIRoute } from "astro";
 import { json, personFromCookies } from "../../../lib/auth.ts";
 import { DeezerDown, getTrack } from "../../../lib/deezer.ts";
 import { log, refused, tag } from "../../../lib/log.ts";
+import { notifyTablesOf } from "../../../lib/tables.ts";
 import { addTaste, listTaste, TASTE_MAX } from "../../../lib/taste.ts";
 
 export const GET: APIRoute = ({ cookies }) => {
@@ -36,6 +37,9 @@ export const POST: APIRoute = async ({ cookies, request }) => {
     refused("taste", tag(me), "add to taste file", "taste file is full");
     return json({ error: `A taste file holds up to ${TASTE_MAX} tracks.` }, 409);
   }
-  if (result === "added") log("taste", `${tag(me)} added a track to their taste file`);
+  if (result === "added") {
+    log("taste", `${tag(me)} added a track to their taste file`);
+    notifyTablesOf(me.id);
+  }
   return json(listTaste(me.id), result === "added" ? 201 : 200);
 };

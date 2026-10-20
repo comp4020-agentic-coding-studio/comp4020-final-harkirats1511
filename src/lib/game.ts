@@ -4,6 +4,7 @@ import { db } from "./db.ts";
 import { gamePlayers, gameThemes, games, people, picks, tableMembers, tableRemovals, tables, votes } from "./schema.ts";
 import { log, personTag, tableScope } from "./log.ts";
 import { THEMES } from "./themes.ts";
+import { crateSize, MIN_CRATE } from "./taste.ts";
 import {
   currentGame, defaultMoles, MAX_PLAYERS, maxMoles, MIN_PLAYERS, notifyTable, tableOptions,
 } from "./tables.ts";
@@ -77,6 +78,16 @@ export function startGame(code: string, by?: string): StartResult {
       .map((m) => m.id);
     if (members.length < MIN_PLAYERS) return fail(409, `A game needs at least ${MIN_PLAYERS} players.`);
     if (members.length > MAX_PLAYERS) return fail(409, `A table holds at most ${MAX_PLAYERS} players.`);
+    // Everyone who would play needs a crate: nobody is quietly made a spectator.
+    const short = tx
+      .select({ id: people.id, name: people.name })
+      .from(tableMembers)
+      .innerJoin(people, eq(people.id, tableMembers.personId))
+      .where(eq(tableMembers.tableCode, code))
+      .orderBy(asc(tableMembers.joinedAt), asc(people.name))
+      .all()
+      .filter((m) => crateSize(m.id) < MIN_CRATE);
+    if (short.length) return fail(409, `Waiting on crates: ${short.map((m) => m.name).join(", ")} (${MIN_CRATE} tracks each)`);
     const moleCount = t.moles ?? defaultMoles(members.length);
     if (moleCount > maxMoles(members.length)) {
       return fail(409, `${members.length} players can hold at most ${maxMoles(members.length)} moles.`);

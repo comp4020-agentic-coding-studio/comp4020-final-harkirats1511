@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { session, uniqueName } from "./helpers";
+import { fillCrate, session, uniqueName } from "./helpers";
 
 // Contract: GET /api/shop/events is a signed-in-only SSE stream (snapshot,
 // moves, joined, left, emote, booths, radio). POST /api/shop/move {x, z, yaw}
@@ -174,6 +174,7 @@ it("sends public state only: no theme, role, title or owner during a game", asyn
   await stream.next((e) => e.event === "snapshot");
   const { code } = (await (await people[0].s.call("/api/tables", { body: {} })).json()) as { code: string };
   for (const p of people.slice(1)) await p.s.call(`/api/tables/${code}/join`, { body: {} });
+  for (const p of people) await fillCrate(p.s);
   expect((await people[0].s.call(`/api/tables/${code}/start`, { body: {} })).status).toBe(202);
   const playing = await stream.next((e) => e.event === "booths" && e.data.some((b: { code?: string; status: string }) => b.code === code && b.status === "playing"), 3000);
   expect(playing).not.toBeNull();

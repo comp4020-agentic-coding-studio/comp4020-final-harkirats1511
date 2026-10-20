@@ -1,7 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import { personFromCookies } from "../lib/auth.ts";
-import { listTaste } from "../lib/taste.ts";
+import { listTaste, MIN_CRATE } from "../lib/taste.ts";
 import { getAvatar } from "../lib/avatars.ts";
 const me = personFromCookies(Astro.cookies);
 const next = Astro.url.searchParams.get("next") ?? "";
@@ -87,8 +87,8 @@ const tasteCount = me ? listTaste(me.id).length : 0;
       <div class="shelf-links">
         <section class="card" aria-labelledby="taste-h">
           <h2 id="taste-h">Your crate</h2>
-          <p class="hint">{tasteCount} / 10 tracks in your taste file.</p>
-          {tasteCount < 5 && <p class="nudge">A mole needs something to study. Add a few tracks you would actually play.</p>}
+          <p class="hint">{tasteCount} / {MIN_CRATE} needed to play. Up to 10 tracks.</p>
+          {tasteCount < MIN_CRATE && <p class="nudge">You pick every song from your crate, so you need {MIN_CRATE} tracks to play. Add a few you would actually play.</p>}
           <p><a href="/taste">{tasteCount === 0 ? "Build your taste file" : "Edit your taste file"}</a></p>
         </section>
         <section class="card" aria-labelledby="hist-h">

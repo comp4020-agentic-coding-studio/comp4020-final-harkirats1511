@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { baseUrl, session, uniqueName } from "./helpers";
+import { baseUrl, fillCrate, session, uniqueName } from "./helpers";
 
 // Contract: a table can let the server play the round's tracks in order, so the
 // room isn't waiting on the host's phone (which may lock or drop).
@@ -23,7 +23,8 @@ async function setup(opts: Record<string, unknown>) {
     await s.call("/api/join", { body: { name, pin: "7531" } });
     ps.push({ s, name });
   }
-  const ids = ((await (await ps[0].s.call("/api/search?q=love")).json()) as { id: number }[]).map((t) => t.id);
+  let ids: number[] = [];
+  for (const p of ps) ids = await fillCrate(p.s);
   const res = await ps[0].s.call("/api/tables", { body: { pickSeconds: 30, voteSeconds: 30, ...opts } });
   const { code } = (await res.json()) as { code: string };
   for (const p of ps.slice(1)) await p.s.call(`/api/tables/${code}/join`, { body: {} });

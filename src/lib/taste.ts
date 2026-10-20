@@ -4,6 +4,21 @@ import { tasteTracks } from "./schema.ts";
 import type { Track } from "./deezer.ts";
 
 export const TASTE_MAX = 10;
+// The fewest tracks a crate needs for its owner to play. Sitting down needs none.
+export const MIN_CRATE = 5;
+
+export function crateSize(personId: string): number {
+  return db.select({ id: tasteTracks.trackId }).from(tasteTracks).where(eq(tasteTracks.personId, personId)).all().length;
+}
+
+// The track, if it is in this person's own crate right now.
+export function crateTrack(personId: string, trackId: number) {
+  return db
+    .select({ id: tasteTracks.trackId, title: tasteTracks.title, artist: tasteTracks.artist, cover: tasteTracks.cover })
+    .from(tasteTracks)
+    .where(and(eq(tasteTracks.personId, personId), eq(tasteTracks.trackId, trackId)))
+    .get();
+}
 
 export function listTaste(personId: string) {
   return db

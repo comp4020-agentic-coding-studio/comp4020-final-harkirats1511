@@ -1,6 +1,7 @@
 import type { APIRoute } from "astro";
 import { json, personFromCookies } from "../../../lib/auth.ts";
 import { log, refused, tag } from "../../../lib/log.ts";
+import { notifyTablesOf } from "../../../lib/tables.ts";
 import { removeTaste } from "../../../lib/taste.ts";
 
 export const DELETE: APIRoute = ({ cookies, params }) => {
@@ -12,6 +13,7 @@ export const DELETE: APIRoute = ({ cookies, params }) => {
   const id = Number(params.trackId);
   if (!Number.isSafeInteger(id)) return json({ error: "Bad track id." }, 400);
   removeTaste(me.id, id);
+  notifyTablesOf(me.id);
   log("taste", `${tag(me)} removed a track from their taste file`);
   return json({ ok: true });
 };

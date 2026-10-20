@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { baseUrl, session, uniqueName } from "./helpers";
+import { baseUrl, CRATE_IDS, fillCrate, session, uniqueName } from "./helpers";
 
 // Contract for a game at a table (CLAUDE.md has the rules these hold):
 //   POST /api/tables {pickSeconds?, voteSeconds?, speaker?} -> {code}
@@ -32,7 +32,7 @@ type Game = {
   winner?: "players" | "moles";
   themes?: { round: number; majority: string; mole: string }[];
 };
-type State = { status: string; members: { name: string }[]; game?: Game };
+type State = { status: string; members: { name: string; crateReady: boolean }[]; game?: Game };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -40,6 +40,7 @@ async function player(prefix: string): Promise<Player> {
   const s = session();
   const name = uniqueName(prefix);
   await s.call("/api/join", { body: { name, pin: "2580" } });
+  await fillCrate(s);
   return { s, name };
 }
 
@@ -65,15 +66,8 @@ async function me(p: Player, code: string) {
   };
 }
 
-// Real catalogue ids for picks; one search, shared by every test.
-let ids: number[] = [];
-async function trackIds(s: Session): Promise<number[]> {
-  if (!ids.length) {
-    const found = (await (await s.call("/api/search?q=love")).json()) as { id: number }[];
-    ids = found.map((t) => t.id);
-  }
-  return ids;
-}
+// Everyone's crate holds the first five of these (fillCrate); picks come from it.
+const ids = CRATE_IDS;
 
 async function table(n: number, opts: Record<string, unknown> = {}) {
   const players = await Promise.all(Array.from({ length: n }, (_, i) => player(`p${i}`)));
@@ -82,7 +76,6 @@ async function table(n: number, opts: Record<string, unknown> = {}) {
     await host.s.call("/api/tables", { body: { pickSeconds: 15, voteSeconds: 15, ...opts } })
   ).json()) as { code: string };
   for (const p of players.slice(1)) await p.s.call(`/api/tables/${code}/join`, { body: {} });
-  await trackIds(host.s);
   return { code, host, players };
 }
 
@@ -104,7 +97,7 @@ async function started(n: number, opts: Record<string, unknown> = {}) {
 
 async function pickAll(code: string, players: Player[]) {
   for (const [i, p] of players.entries()) {
-    expect((await p.s.call(`/api/tables/${code}/pick`, { body: { trackId: ids[i] } })).status).toBeLessThan(300);
+    expect((await p.s.call(`/api/tables/${code}/pick`, { body: { trackId: ids[i % 5] } })).status).toBeLessThan(300);
   }
 }
 
@@ -171,7 +164,7 @@ it("doesn't count a pick that misses the deadline", async () => {
   const g = await started(3, { pickSeconds: 4 });
   await pickAll(g.code, g.players.slice(0, 2));
   await waitFor(g.code, (s) => s.game?.phase === "listen");
-  const late = await g.players[2].s.call(`/api/tables/${g.code}/pick`, { body: { trackId: ids[5] } });
+  const late = await g.players[2].s.call(`/api/tables/${g.code}/pick`, { body: { trackId: ids[0] } });
   expect(late.status).toBe(409);
   const { slots } = (await (await g.host.s.call(`/api/tables/${g.code}/round`)).json()) as { slots: unknown[] };
   expect(slots).toHaveLength(2);
@@ -238,7 +231,7 @@ it("lets someone who joins mid-game watch but not play", async () => {
   const late = await player("late");
   await late.s.call(`/api/tables/${g.code}/join`, { body: {} });
   expect((await me(late, g.code)).role).toBe("spectator");
-  expect((await late.s.call(`/api/tables/${g.code}/pick`, { body: { trackId: ids[7] } })).status).toBe(403);
+  expect((await late.s.call(`/api/tables/${g.code}/pick`, { body: { trackId: ids[0] } })).status).toBe(403);
 });
 
 it("carries on when someone leaves if the game still works, and ends when the mole leaves", async () => {
@@ -313,4 +306,72 @@ it("lets everyone pick again in a second game at the same table", async () => {
   for (const p of t.players) expect((await me(p, t.code)).picked).toBe(false);
   await pickAll(t.code, t.players);
   await waitFor(t.code, (s) => s.game?.phase === "listen");
+});
+
+// Decision 0007: you bring a crate, and every pick comes from it.
+it("refuses to start while a member has fewer than 5 tracks, naming only names", async () => {
+  const [host, a, b] = await Promise.all([player("cr"), player("cr"), player("cr")]);
+  const { code } = (await (await host.s.call("/api/tables", { body: {} })).json()) as { code: string };
+  await a.s.call(`/api/tables/${code}/join`, { body: {} });
+  await b.s.call(`/api/tables/${code}/join`, { body: {} });
+  // Sitting down was fine with a small crate: take two tracks off a and b.
+  for (const p of [a, b]) for (const id of ids.slice(0, 2)) await p.s.call(`/api/taste/${id}`, { method: "DELETE" });
+  const res = await host.s.call(`/api/tables/${code}/start`, { body: {} });
+  expect(res.status).toBe(409);
+  const { error } = (await res.json()) as { error: string };
+  expect(error).toBe(`Waiting on crates: ${[a.name, b.name].join(", ")} (5 tracks each)`);
+  const pub = await state(code);
+  expect(pub.members.map((m) => [m.name === host.name, m.crateReady])).toEqual([[true, true], [false, false], [false, false]]);
+  // Fill up again and the same table starts.
+  for (const p of [a, b]) await fillCrate(p.s);
+  expect((await host.s.call(`/api/tables/${code}/start`, { body: {} })).status).toBeLessThan(300);
+});
+
+it("accepts only a track from the picker's own crate, at the time of picking", async () => {
+  const g = await started(3);
+  const [p0, p1] = g.players;
+  const outside = await p0.s.call(`/api/tables/${g.code}/pick`, { body: { trackId: ids[7] } });
+  expect(outside.status).toBe(403);
+  expect(((await outside.json()) as { error: string }).error).toBe("Pick from your crate.");
+  expect((await me(p0, g.code)).picked).toBe(false);
+  // Adding it mid-round makes it theirs to pick.
+  expect((await p0.s.call("/api/taste", { body: { trackId: ids[7] } })).status).toBeLessThan(300);
+  expect((await p0.s.call(`/api/tables/${g.code}/pick`, { body: { trackId: ids[7] } })).status).toBe(200);
+  // Someone else's crate id that isn't in mine is refused; one in mine is fine.
+  expect((await p1.s.call(`/api/tables/${g.code}/pick`, { body: { trackId: ids[7] } })).status).toBe(403);
+  expect((await p1.s.call(`/api/tables/${g.code}/pick`, { body: { trackId: ids[2] } })).status).toBe(200);
+});
+
+it("lets a ghost pick from their crate, and only from it", async () => {
+  const g = await started(5, { pickSeconds: 30, voteSeconds: 30 });
+  await pickAll(g.code, g.players);
+  await toVote(g);
+  const target = g.players[1];
+  for (const p of g.players) await p.s.call(`/api/tables/${g.code}/vote`, { body: { name: target.name } });
+  await waitFor(g.code, (s) => s.game?.round === 2 && s.game?.phase === "pick" || s.status === "finished", 12000);
+  const now = await state(g.code);
+  if (now.status === "finished") return; // the vote ended the game: no ghost round to test
+  expect((await me(target, g.code)).role).toBe("ghost");
+  expect((await target.s.call(`/api/tables/${g.code}/pick`, { body: { trackId: ids[6] } })).status).toBe(403);
+  expect((await target.s.call(`/api/tables/${g.code}/pick`, { body: { trackId: ids[0] } })).status).toBe(200);
+});
+
+it("shows crateReady per member and never any crate contents in public state or the stream", async () => {
+  const host = await player("pub");
+  const lone = await player("pub");
+  await lone.s.call("/api/taste/" + ids[0], { method: "DELETE" });
+  const { code } = (await (await host.s.call("/api/tables", { body: {} })).json()) as { code: string };
+  const stream = await host.s.open(`/api/tables/${code}/events`);
+  await lone.s.call(`/api/tables/${code}/join`, { body: {} });
+  await stream.next((e) => e.event === "state" && e.data.members.length === 2);
+  const titles = ((await (await host.s.call("/api/taste")).json()) as { title: string }[]).map((t) => t.title);
+  const pub = await state(code);
+  expect(Object.fromEntries(pub.members.map((m) => [m.name, m.crateReady]))).toEqual({ [host.name]: true, [lone.name]: false });
+  // Topping up flips it, live, on the open stream.
+  await lone.s.call("/api/taste", { body: { trackId: ids[0] } });
+  expect(await stream.next((e) => e.event === "state" && e.data.members.every((m: { crateReady: boolean }) => m.crateReady), 3000)).not.toBeNull();
+  const text = JSON.stringify(pub) + stream.raw;
+  for (const t of titles) expect(text).not.toContain(t);
+  for (const id of ids.slice(0, 5)) expect(text).not.toContain(String(id));
+  stream.close();
 });

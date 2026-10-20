@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { session, uniqueName } from "./helpers";
+import { fillCrate, session, uniqueName } from "./helpers";
 
 // Contract: GET /api/shop/booths -> Booth[] (signed in only), the 2D booth list;
 // the shop stream's booths event carries the same. A Booth is {spot, private,
@@ -86,6 +86,7 @@ it("never puts a private booth's code in a shop event", async () => {
 it("lets only the host change visibility, and not mid-game", async () => {
   const [host, guest, third] = await crowd(3, "vis");
   const code = await table(host, {}, [guest, third]);
+  for (const p of [host, guest, third]) await fillCrate(p.s);
   expect((await guest.s.call(`/api/tables/${code}/visibility`, { body: { private: true } })).status).toBe(403);
   expect((await host.s.call(`/api/tables/${code}/visibility`, { body: { private: "yes" } })).status).toBe(400);
   const ok = await host.s.call(`/api/tables/${code}/visibility`, { body: { private: true } });
@@ -113,6 +114,7 @@ it("treats a player removed mid-game like one who left", async () => {
   const people = await crowd(4, "rmg");
   const [host, ...rest] = people;
   const code = await table(host, {}, rest);
+  for (const p of people) await fillCrate(p.s);
   expect((await host.s.call(`/api/tables/${code}/start`, { body: {} })).status).toBe(202);
   await host.s.call(`/api/tables/${code}/remove`, { body: { name: rest[0].name } });
   const state = (await (await host.s.call(`/api/tables/${code}`)).json()) as {
@@ -140,6 +142,7 @@ it("quick seat picks the fullest public waiting booth and skips private, playing
   const priv = await table(guests[0], { private: true }, guests.slice(1, 7));
   const playHost = (await crowd(1, "qsp"))[0];
   const playing = await table(playHost, {}, [rest[5], rest[6], guests[1]]);
+  for (const p of [playHost, rest[5], rest[6], guests[1]]) await fillCrate(p.s);
   await playHost.s.call(`/api/tables/${playing}/start`, { body: {} });
 
   const seeker = await signedIn("qsk");

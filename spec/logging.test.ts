@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { baseUrl, session, uniqueName } from "./helpers";
+import { baseUrl, fillCrate, session, uniqueName } from "./helpers";
 
 // Contract (CLAUDE.md "Logging"): the server logs who did what, one line per
 // action, and keeps the recent lines for GET /api/logs, which answers only to
@@ -80,7 +80,8 @@ withToken("logs a round without leaking themes, moles or who picked what until i
     await s.call("/api/join", { body: { name, pin: "4680" } });
     ps.push({ s, name });
   }
-  const found = (await (await ps[0].s.call("/api/search?q=love")).json()) as { id: number; title: string }[];
+  for (const p of ps) await fillCrate(p.s);
+  const found = (await (await ps[0].s.call("/api/taste")).json()) as { id: number; title: string }[];
   const { code } = (await (await ps[0].s.call("/api/tables", { body: { pickSeconds: 30, voteSeconds: 30 } })).json()) as {
     code: string;
   };

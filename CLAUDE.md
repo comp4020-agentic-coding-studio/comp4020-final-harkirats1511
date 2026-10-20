@@ -26,6 +26,15 @@ works out whose pick doesn't quite fit. They are decisions, not defaults.
 ## Rules the game keeps
 
 - A game needs 3 players to start and the UI recommends 4 or more.
+- **Bring your crate.** A crate (taste file) needs at least `MIN_CRATE` = 5
+  tracks to play. Sitting down (join, quick seat, creating a table) is allowed
+  with fewer, so you can spectate and fill it, but starting a game needs every
+  member to have 5: otherwise start is refused 409 ("Waiting on crates: Ana, Ben
+  (5 tracks each)") and nobody is silently made a spectator. A pick must be a
+  track in the picker's own crate at that moment (403 "Pick from your crate.");
+  there is no search fallback, and ghosts follow the same rule. Editing your
+  crate during a game is fine. The public table state carries `crateReady`
+  (5 or more) per member and never the tracks. See `docs/decisions/0007`.
 - Moles default by player count (1 up to 5 players, 2 up to 10); the host may
   override within a cap. With two moles both get the same odd theme.
 - Voted-out players become ghosts: they still pick tracks, and they cannot vote.

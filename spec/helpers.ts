@@ -94,3 +94,16 @@ export const uniqueName = (prefix: string): string =>
   `${prefix}${Math.random().toString(36).slice(2, 8)}`;
 
 export { baseUrl };
+
+// Known-good Deezer ids: a crate needs 5 to play, and a pick must come from it.
+export const CRATE_IDS = [3512895311, 3512895281, 13159670, 2791780102, 1951194587, 1123844, 445960982, 84107655];
+
+// Gives this session's person `n` tracks (default 5, the minimum to play).
+export async function fillCrate(s: ReturnType<typeof session>, n = 5): Promise<number[]> {
+  const ids = CRATE_IDS.slice(0, n);
+  for (const trackId of ids) {
+    const res = await s.call("/api/taste", { body: { trackId } });
+    if (res.status >= 300) throw new Error(`could not add ${trackId} to the crate: ${res.status}`);
+  }
+  return ids;
+}

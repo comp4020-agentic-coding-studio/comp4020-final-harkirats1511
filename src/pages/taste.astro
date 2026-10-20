@@ -1,16 +1,19 @@
 ---
 import Base from "../layouts/Base.astro";
 import { personFromCookies } from "../lib/auth.ts";
-import { listTaste, TASTE_MAX } from "../lib/taste.ts";
+import { listTaste, MIN_CRATE, TASTE_MAX } from "../lib/taste.ts";
 const me = personFromCookies(Astro.cookies);
 if (!me) return Astro.redirect("/?next=/taste");
+// Back to the table we came from; the same shape index.astro accepts for ?next.
+const next = Astro.url.searchParams.get("next") ?? "";
+const back = /^\/t\/[A-Za-z]{4}$/.test(next) ? next : "";
 const initial = listTaste(me.id);
 ---
 <Base title="Your taste file · Mole">
-  <a class="back-link" href="/"><span aria-hidden="true">&larr;</span>Back</a>
+  <a class="back-link" href={back || "/"}><span aria-hidden="true">&larr;</span>{back ? "Back to the table" : "Back"}</a>
   <p class="kicker">Your crate</p>
   <h1>Your taste file</h1>
-  <p class="hint">Up to {TASTE_MAX} tracks you would actually play. A mole studies this to pass as you.</p>
+  <p class="hint">Up to {TASTE_MAX} tracks you would actually play, and at least {MIN_CRATE} to take part in a game. Every pick you make comes from here.</p>
 
   <section class="card" aria-labelledby="mine-h">
     <div class="card-head"><h2 id="mine-h">Your tracks</h2><span class="counter stamp mono" id="counter" aria-live="polite"></span></div>

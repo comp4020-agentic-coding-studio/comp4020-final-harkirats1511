@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { baseUrl, session, uniqueName } from "./helpers";
+import { baseUrl, fillCrate, session, uniqueName } from "./helpers";
 
 // Contract: a person can look back at the games they played, which is what the
 // persistence is for. Only finished games, only ones they were in.
@@ -42,11 +42,12 @@ async function people(n: number) {
 it("lists only finished games the person played, with their own picks, newest first", async () => {
   const ps = await people(3);
   const [host] = ps;
-  const ids = ((await (await host.s.call("/api/search?q=love")).json()) as { id: number }[]).map((t) => t.id);
   const { code } = (await (await host.s.call("/api/tables", { body: { pickSeconds: 30, voteSeconds: 30 } })).json()) as {
     code: string;
   };
   for (const p of ps.slice(1)) await p.s.call(`/api/tables/${code}/join`, { body: {} });
+  const ids = await fillCrate(host.s);
+  for (const p of ps.slice(1)) await fillCrate(p.s);
   await host.s.call(`/api/tables/${code}/start`, { body: {} });
 
   // While the game runs, it isn't history yet.
