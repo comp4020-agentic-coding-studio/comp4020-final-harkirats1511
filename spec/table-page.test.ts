@@ -24,7 +24,7 @@ it("renders the visibility and report controls on the table page", async () => {
   expect(text).toContain('id="vis-private"');
   expect(text).toContain('id="report-form"');
   expect(text).toContain("Report this table");
-  expect(text).toContain("Back to the shop floor (keeps your seat)");
+  expect(text).toMatch(/id="to-shop"[^>]*aria-label="Back to the shop floor. You keep your seat here."/);
 });
 
 it("says a public booth is open to anyone", async () => {

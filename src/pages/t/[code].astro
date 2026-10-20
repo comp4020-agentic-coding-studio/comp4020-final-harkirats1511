@@ -16,7 +16,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
 
     <div class="bar">
       <button id="leave" type="button" class="secondary sm">Leave table</button>
-      <a id="to-shop" class="btn ghost sm" href="/shop">Back to the shop floor (keeps your seat)</a>
+      <a id="to-shop" class="btn ghost sm" href="/shop" aria-label="Back to the shop floor. You keep your seat here.">Shop floor</a>
       <span class="hint" id="leave-note"></span>
       <span class="where mono">Booth {code}</span>
     </div>
