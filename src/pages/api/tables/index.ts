@@ -3,6 +3,7 @@ import { json, personFromCookies } from "../../../lib/auth.ts";
 import {
   createTable, DEFAULT_PICK_SECONDS, DEFAULT_SLOT_SECONDS, DEFAULT_VOTE_SECONDS, maxMoles, MAX_PLAYERS,
 } from "../../../lib/tables.ts";
+import { refused } from "../../../lib/log.ts";
 
 const MIN_SECONDS = 2;
 const MAX_SECONDS = 300;
@@ -16,7 +17,10 @@ function seconds(raw: unknown, fallback: number, max = MAX_SECONDS): number | nu
 
 export const POST: APIRoute = async ({ cookies, request }) => {
   const me = personFromCookies(cookies);
-  if (!me) return json({ error: "Sign in first." }, 401);
+  if (!me) {
+    refused("table", null, "create a table", "not signed in");
+    return json({ error: "Sign in first." }, 401);
+  }
   // Every option is optional, and the body may be empty.
   const body = ((await request.json().catch(() => ({}))) ?? {}) as Record<string, unknown>;
   const autoplay = body.autoplay ?? false;

@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { type Avatar, defaultAvatar, PARTS } from "./avatar.ts";
 import { db } from "./db.ts";
+import { log, personTag, tableScope } from "./log.ts";
 import { avatars, gamePlayers, gameThemes, games, people, picks, tableMembers, tables } from "./schema.ts";
 
 // No I or O: they read as 1 and 0 when a code is shouted across a room.
@@ -41,6 +42,7 @@ export function createTable(hostId: string, opts: TableOptions): string {
         tx.insert(tables).values({ code, hostPersonId: hostId, status: "open", ...opts, createdAt: now }).run();
         tx.insert(tableMembers).values({ tableCode: code, personId: hostId, joinedAt: now }).run();
       });
+      log(tableScope(code), `${personTag(hostId)} created the table · pick ${opts.pickSeconds}s, vote ${opts.voteSeconds}s${opts.autoplay ? `, autoplay ${opts.slotSeconds}s/track` : ""}`);
       return code;
     } catch {
       // code collision: try another

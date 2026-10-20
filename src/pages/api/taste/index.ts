@@ -1,6 +1,7 @@
 import type { APIRoute } from "astro";
 import { json, personFromCookies } from "../../../lib/auth.ts";
 import { DeezerDown, getTrack } from "../../../lib/deezer.ts";
+import { log, refused, tag } from "../../../lib/log.ts";
 import { addTaste, listTaste, TASTE_MAX } from "../../../lib/taste.ts";
 
 export const GET: APIRoute = ({ cookies }) => {
@@ -11,7 +12,10 @@ export const GET: APIRoute = ({ cookies }) => {
 
 export const POST: APIRoute = async ({ cookies, request }) => {
   const me = personFromCookies(cookies);
-  if (!me) return json({ error: "Sign in first." }, 401);
+  if (!me) {
+    refused("taste", null, "add to taste file", "not signed in");
+    return json({ error: "Sign in first." }, 401);
+  }
   const body = (await request.json().catch(() => ({}))) as { trackId?: unknown };
   const raw = body.trackId;
   const id = typeof raw === "number" ? raw : typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : NaN;
@@ -28,6 +32,10 @@ export const POST: APIRoute = async ({ cookies, request }) => {
   if (!track) return json({ error: "No such track." }, 404);
 
   const result = addTaste(me.id, track);
-  if (result === "full") return json({ error: `A taste file holds up to ${TASTE_MAX} tracks.` }, 409);
+  if (result === "full") {
+    refused("taste", tag(me), "add to taste file", "taste file is full");
+    return json({ error: `A taste file holds up to ${TASTE_MAX} tracks.` }, 409);
+  }
+  if (result === "added") log("taste", `${tag(me)} added a track to their taste file`);
   return json(listTaste(me.id), result === "added" ? 201 : 200);
 };
