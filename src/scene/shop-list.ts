@@ -20,7 +20,7 @@ export function boothItem(b: Booth, i: number): string {
     <label for="${id}-code">Booth code</label>
     <div class="shop-inline">
       <input id="${id}-code" name="code" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="CODE" data-key="private-${i}-code">
-      <button type="submit" class="secondary">Knock</button>
+      <button type="submit" class="shop-btn ghost">Knock</button>
     </div>
     <p class="shop-msg" role="status"></p>
   </form>
@@ -30,13 +30,13 @@ export function boothItem(b: Booth, i: number): string {
   <div class="shop-booth-head"><h3>Booth ${esc(b.code)}</h3><span class="shop-pill">Open to anyone</span></div>
   <p>${esc(b.host)}'s table. ${seats}. ${status}.${b.status === "playing" ? " You would join the next game." : ""}</p>
   <div class="shop-actions">
-    <button type="button" data-act="sit" data-code="${b.code}"${full ? " disabled" : ""}>Take a seat</button>
+    <button type="button" class="shop-btn" data-act="sit" data-code="${b.code}"${full ? " disabled" : ""}>Take a seat</button>
     <details class="shop-report">
       <summary>Report</summary>
       <form data-form="report" data-code="${b.code}" novalidate>
         <label for="${id}-why">Reason</label>
         <select id="${id}-why" name="reason" data-key="${b.code}-why">${REPORT_REASONS.map((r) => `<option>${esc(r)}</option>`).join("")}</select>
-        <button type="submit" class="secondary sm">Send report</button>
+        <button type="submit" class="shop-btn ghost sm">Send report</button>
       </form>
     </details>
   </div>

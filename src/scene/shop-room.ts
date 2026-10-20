@@ -13,7 +13,8 @@ export const WALK = { minX: -7.72, maxX: 7.72, minZ: -5.5, maxZ: 4.7 };
 
 const C = { wall: "#2a1f30", wallTrim: "#3a2a40", wood: "#7A5333", woodDark: "#4a3020", lamp: "#F4B860", neon: "#FF4F8B", sleeve: "#EFE7D7", ink: "#1B1420", stool: "#2b2030", rug: "#3a2434" };
 const SLEEVES = ["#e94f37", "#f4b860", "#3f88c5", "#efe7d7", "#2a9d8f", "#ff4f8b", "#8f5bd6", "#1b1b1b", "#f6d743", "#d9734e", "#5c8a4f", "#c8b6e2"];
-const sleeve = (i: number) => SLEEVES[(((i * 7 + 3) % SLEEVES.length) + SLEEVES.length) % SLEEVES.length];
+// i is rounded: the shelf heights feed fractions in, and an array has no index 13.5.
+const sleeve = (i: number) => SLEEVES[(((Math.round(i) * 7 + 3) % SLEEVES.length) + SLEEVES.length) % SLEEVES.length];
 
 export type Box = { x0: number; x1: number; z0: number; z1: number };
 export type Circle = { x: number; z: number; r: number };

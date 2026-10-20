@@ -29,7 +29,7 @@ const list = booths();
     <section id="shop-stage" class="shop-stage" aria-label="3D shop floor (decorative; everything here is also in the lists below)" hidden>
       <div class="shop-loading" id="shop-loading" aria-hidden="true"><div>Opening up<span>unlocking the shop</span></div></div>
       <div class="shop-hud" id="shop-hud">
-        <div class="shop-brand" aria-hidden="true"><b>Mole Records</b></div>
+        <div class="shop-brand" aria-hidden="true"><b>Mole Records</b><small><em id="hud-people">0</em> in the shop · <em id="hud-booths">0</em> booths</small></div>
         <div class="shop-hint" aria-hidden="true">WASD or click to walk · Space to jump · E to sit</div>
         <div class="shop-sheet" id="shop-sheet" role="region" aria-label="Nearby" hidden></div>
         <div class="shop-emotes" id="shop-emotes">
@@ -188,7 +188,9 @@ const list = booths();
       s.setBooths(booths);
       syncPause();
       details.open = false;
-    } catch {
+    } catch (err) {
+      // The 2D list is complete without it: drop the scene quietly (a note for whoever reads the console).
+      console.debug("3D shop unavailable", err);
       dropScene(true);
     }
   }
@@ -258,6 +260,7 @@ const list = booths();
     const html = boothList(booths);
     $("count-booths").textContent = String(booths.length);
     $("count-booths-word").textContent = booths.length === 1 ? "booth" : "booths";
+    $("hud-booths").textContent = String(booths.length);
     if (html === lastHtml) return;
     lastHtml = html;
     // keep what someone is typing, which report form is open and any message
@@ -355,7 +358,7 @@ const list = booths();
   const roster = new Map<string, string>();
   function renderPeople() {
     const names = [...roster.keys()].sort((a, b) => (a === myName ? -1 : b === myName ? 1 : a.localeCompare(b)));
-    $("count-people").textContent = String(names.length);
+    $("count-people").textContent = $("hud-people").textContent = String(names.length);
     $("people-list").innerHTML = names.length ? names.map((n) => `<li>${esc(n)}${n === myName ? " (you)" : ""}</li>`).join("") : "<li>Nobody yet.</li>";
   }
 
@@ -482,6 +485,8 @@ const list = booths();
   es.addEventListener("radio", (e) => { radio.update(parse(e as MessageEvent), { changed: true }); sfx.clunk(); });
 
   addEventListener("pagehide", () => { es.close(); radio.destroy(); sfx.destroy(); scene?.destroy(); });
+  // A read-only peek for the browser checks.
+  (window as unknown as { __shop: unknown }).__shop = { debug: () => scene?.debug() };
   paintSound();
   renderList();
   sceneInit();
@@ -503,15 +508,15 @@ const list = booths();
   .shop h2, .shop h3 { font-family: var(--s-ui); font-weight: 800; letter-spacing: 0; text-transform: none; color: var(--s-sleeve); margin: 0; }
   .shop p { margin: 0; }
   .shop a { color: var(--s-lamp); }
-  .shop-btn {
+  .shop .shop-btn {
     font: 700 1rem/1.1 var(--s-ui); letter-spacing: 0; min-height: 44px; padding: 0.55rem 1.1rem; border: 1px solid transparent; border-radius: 999px;
     background: var(--s-lamp); color: var(--s-ink); cursor: pointer; box-shadow: none; text-transform: none; transform: none;
   }
-  .shop-btn:hover:not(:disabled) { filter: brightness(1.08); }
-  .shop-btn:active:not(:disabled) { transform: none; box-shadow: none; filter: brightness(0.95); }
-  .shop-btn.ghost, .shop button.secondary { background: transparent; color: var(--s-sleeve); border-color: var(--s-line); }
-  .shop-btn.ghost[aria-pressed="true"] { background: var(--s-raise); border-color: var(--s-lamp); color: var(--s-lamp); }
-  .shop-btn.sm, .shop button.sm { min-height: 44px; padding: 0.4rem 0.9rem; font-size: 0.9rem; }
+  .shop .shop-btn:hover:not(:disabled) { filter: brightness(1.08); }
+  .shop .shop-btn:active:not(:disabled) { transform: none; box-shadow: none; filter: brightness(0.95); }
+  .shop .shop-btn.ghost, .shop button.secondary { background: transparent; color: var(--s-sleeve); border-color: var(--s-line); }
+  .shop .shop-btn.ghost[aria-pressed="true"] { background: var(--s-raise); border-color: var(--s-lamp); color: var(--s-lamp); }
+  .shop .shop-btn.sm, .shop button.sm { min-height: 44px; padding: 0.4rem 0.9rem; font-size: 0.9rem; }
   .shop button:disabled { background: var(--s-raise); color: var(--s-muted); border-color: transparent; cursor: not-allowed; box-shadow: none; }
   .shop button:focus-visible, .shop input:focus-visible, .shop select:focus-visible, .shop summary:focus-visible, .shop a:focus-visible { outline: 3px solid var(--s-lamp); outline-offset: 2px; }
   .shop input, .shop select {
@@ -546,10 +551,12 @@ const list = booths();
   .shop-hud > * { pointer-events: auto; }
   .shop-brand { position: absolute; top: 14px; left: 16px; pointer-events: none; }
   .shop-brand b { font: 400 22px var(--s-sign); color: #ffd1e1; letter-spacing: 0.02em; text-shadow: 0 0 6px var(--s-neon), 0 0 18px var(--s-neon), 0 0 34px rgba(255,79,139,.5); }
+  .shop-brand small { display: block; font: 500 11px var(--s-mono); color: var(--s-muted); letter-spacing: 0.06em; text-transform: uppercase; margin-top: 4px; }
+  .shop-brand small em { color: var(--s-lamp); font-style: normal; }
   .shop-hint { position: absolute; top: 16px; right: 16px; font: 500 11px var(--s-mono); color: var(--s-muted); background: rgba(27,20,32,.72); border: 1px solid rgba(239,231,215,.14); border-radius: 999px; padding: 6px 11px; pointer-events: none; }
-  .shop-hud-btns { position: absolute; left: 16px; top: 48px; display: flex; gap: 8px; flex-wrap: wrap; }
-  .shop-hud-btns .shop-btn { background: rgba(38,28,44,.85); min-height: 40px; }
-  .shop-hud-btns .shop-btn[aria-pressed="true"], .shop-hud-btns .shop-btn[aria-expanded="true"] { border-color: var(--s-lamp); }
+  .shop-hud-btns { position: absolute; left: 16px; top: 66px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .shop .shop-hud-btns .shop-btn { background: rgba(38,28,44,.85); min-height: 40px; }
+  .shop .shop-hud-btns .shop-btn[aria-pressed="true"], .shop-hud-btns .shop-btn[aria-expanded="true"] { border-color: var(--s-lamp); }
   .shop-sheet { position: absolute; left: 50%; bottom: 16px; transform: translate(-50%, 20px); width: min(420px, calc(100% - 32px)); background: var(--s-panel); border: 1px solid rgba(244,184,96,.35); border-radius: 18px; padding: 14px 16px 16px; box-shadow: 0 18px 40px rgba(0,0,0,.5); opacity: 0; transition: opacity 0.2s, transform 0.2s; pointer-events: none; }
   .shop-sheet[hidden] { display: none; }
   .shop-sheet.on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
