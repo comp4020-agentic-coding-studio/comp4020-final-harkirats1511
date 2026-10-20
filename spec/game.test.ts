@@ -348,9 +348,9 @@ it("lets a ghost pick from their crate, and only from it", async () => {
   await toVote(g);
   const target = g.players[1];
   for (const p of g.players) await p.s.call(`/api/tables/${g.code}/vote`, { body: { name: target.name } });
-  await waitFor(g.code, (s) => s.game?.round === 2 && s.game?.phase === "pick" || s.status === "finished", 12000);
-  const now = await state(g.code);
-  if (now.status === "finished") return; // the vote ended the game: no ghost round to test
+  await waitFor(g.code, (s) => s.game?.phase === "reveal");
+  await g.host.s.call(`/api/tables/${g.code}/advance`, { body: {} });
+  await waitFor(g.code, (s) => s.game?.round === 2 && s.game?.phase === "pick");
   expect((await me(target, g.code)).role).toBe("ghost");
   expect((await target.s.call(`/api/tables/${g.code}/pick`, { body: { trackId: ids[6] } })).status).toBe(403);
   expect((await target.s.call(`/api/tables/${g.code}/pick`, { body: { trackId: ids[0] } })).status).toBe(200);
