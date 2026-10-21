@@ -132,7 +132,15 @@ export async function slotMap(s: ReturnType<typeof session>, code: string, track
   const byTrack = new Map<number, number>();
   let house: number | null = null;
   for (const { slot } of slots) {
-    const { url } = (await (await s.call(`/api/tables/${code}/round/slots/${slot}/audio`)).json()) as { url: string };
+    // The audio route asks Deezer, which rate-limits bursts: ask again after a pause.
+    let url = "";
+    for (let attempt = 0; !url; attempt++) {
+      url = ((await (await s.call(`/api/tables/${code}/round/slots/${slot}/audio`)).json()) as { url?: string }).url ?? "";
+      if (!url) {
+        if (attempt >= 6) throw new Error(`no audio url for slot ${slot}`);
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    }
     const hit = trackIds.find((id) => previewOf.get(id) === previewPath(url));
     if (hit === undefined) house = slot;
     else byTrack.set(hit, slot);
