@@ -41,12 +41,21 @@ works out whose pick doesn't quite fit. They are decisions, not defaults.
 - A change one person makes reaches every open session of that table within about
   a second with no reload. Reconnecting, or returning the next day, restores the
   current state from the database, never from memory.
-- Nobody sees who has picked or voted, not even a count. The public state must not
-  change when someone picks or votes; only the phase moving on shows it.
+- Nobody sees who has picked, not even a count. The public state must not change
+  when someone picks; only the phase moving on shows it.
+- Votes are on tracks, not people (decision 0008). While the vote is open,
+  everyone sees how many votes each track has, never who cast them, and may
+  change their vote until it locks. Once everyone who can vote has voted, a
+  5-second last call runs, then it locks. The reveal shows who voted for which
+  track.
 - Deadlines are fixed. A pick or vote that arrives after its deadline does not
   count. A phase ends early once everyone eligible has submitted.
-- A vote is final once cast. The most-voted is ejected; a tie ejects nobody, and
-  "skip" counts as an option.
+- The most-voted track is ejected: its picker is out. A tie, skip winning, or the
+  house record or a ghost's track winning ejects nobody.
+- Every round has one house record: a song by an artist from a random player's
+  crate, not in any crate at the table, shuffled in with the picks and
+  indistinguishable from them until the reveal labels it. No house record found
+  in time means the round plays without one; the game never waits for it.
 - Only someone who picked this round can vote in it. Missing the pick means
   sitting the round out: you can listen and talk, but not vote, and the vote
   doesn't wait for you.
@@ -57,8 +66,9 @@ works out whose pick doesn't quite fit. They are decisions, not defaults.
   many as everyone else still in (moles win), as in Among Us. Leaving counts the
   same way, and a host who leaves passes the host role on.
 - Each round draws a new theme pair from `src/lib/themes.ts`, not repeating
-  within a game. Which side the majority gets is random. A pair must be close
-  enough that one song could answer both.
+  within a game. Which side the majority gets is random. A pair shares a mood
+  but is a clearly different situation: one song could answer both, but you'd
+  pick it for a different reason. Never "the same, plus a twist".
 - The reveal after a vote shows every track and its owner, and who was voted out
   and whether they were a mole. The themes are shown only when the game ends.
 - Each player chooses where they hear tracks: on their own phone, or from the
@@ -86,7 +96,8 @@ did when something goes wrong, so it stays after any crit.
   nothing a round's outcome depends on. The reveal line may name who owned which
   track and who was ejected, because the reveal screen shows that to everyone.
   Themes are logged only when the game ends, as the game-over screen shows them.
-  Who voted for whom is never logged, since no screen ever shows it.
+  Who voted for whom is never logged: the reveal shows it on screen, but the
+  logs don't need it to explain what happened.
 - Never logged at all: PINs, PIN hashes, session tokens, cookies.
 - The same lines are kept in a small in-memory ring (the last few hundred) that
   `GET /api/logs` returns to whoever presents the admin token in
