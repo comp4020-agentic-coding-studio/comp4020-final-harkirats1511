@@ -12,6 +12,7 @@ type Raw = {
   id?: number;
   title?: string;
   preview?: string;
+  explicit_lyrics?: boolean;
   artist?: { name?: string };
   album?: { title?: string; cover_medium?: string };
 };
@@ -89,8 +90,16 @@ export async function topTracksWithPreview(artistName: string, ms: number): Prom
     if (!artist) return [];
     const top = await get(`/artist/${artist.id}/top?limit=25`, left());
     const rows = (top?.data as Raw[] | undefined) ?? [];
-    return rows.filter((r) => !!r.preview).map(toTrack).filter((t): t is Track => t !== null);
+    // Nobody chose this track, and its title is shown to the whole table (often
+    // strangers): never one Deezer marks explicit, nor a title with a slur in it.
+    return rows
+      .filter((r) => !!r.preview && !r.explicit_lyrics && !(r.title && UNSAYABLE.test(r.title)))
+      .map(toTrack)
+      .filter((t): t is Track => t !== null);
   } catch {
     return [];
   }
 }
+
+// A last net under Deezer's explicit flag, which some catalogue entries lack.
+const UNSAYABLE = /n[i1]gg|f[a@]gg|retard|c[u\*]nt|wh[o0]re|sl[u\*]t\b/i;
