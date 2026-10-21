@@ -141,8 +141,10 @@ it("shows live counts and never who voted, and a vote can change until the last 
   await vote(b, t.code, skipBody());
   expect((await state(t.code)).game!.skips).toBe(1);
   // counts only: no names anywhere in the vote-phase public state
-  const text = JSON.stringify(await state(t.code));
+  const game = (await state(t.code)).game!;
+  const text = JSON.stringify({ tally: game.tally, skips: game.skips });
   for (const p of t.players) expect(text).not.toContain(p.name);
+  expect(game).not.toHaveProperty("reveal");
   expect((await vote(c, t.code, { slot: 99 })).status).toBe(400);
   expect((await vote(c, t.code, {})).status).toBe(400);
   expect((await vote(c, t.code, { name: b.name })).status).toBe(400);

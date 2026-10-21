@@ -117,9 +117,16 @@ const previewOf = new Map<number, string>();
 export async function slotMap(s: ReturnType<typeof session>, code: string, trackIds: number[]) {
   for (const id of trackIds) {
     if (previewOf.has(id)) continue;
-    const body = (await (await fetch(`https://api.deezer.com/track/${id}`)).json()) as { preview?: string };
-    if (!body.preview) throw new Error(`no preview for ${id}`);
-    previewOf.set(id, previewPath(body.preview));
+    // Deezer rate-limits bursts (an {error} body): wait and ask again.
+    for (let attempt = 0; ; attempt++) {
+      const body = (await (await fetch(`https://api.deezer.com/track/${id}`)).json().catch(() => ({}))) as { preview?: string };
+      if (body.preview) {
+        previewOf.set(id, previewPath(body.preview));
+        break;
+      }
+      if (attempt >= 6) throw new Error(`no preview for ${id}`);
+      await new Promise((r) => setTimeout(r, 1500));
+    }
   }
   const { slots } = (await (await s.call(`/api/tables/${code}/round`)).json()) as { slots: { slot: number }[] };
   const byTrack = new Map<number, number>();
