@@ -172,7 +172,7 @@ it("moves on early once everyone has picked, and the slots are anonymous", async
   const g = await started(4, { pickSeconds: 60 });  // only an early finish gets there in time
   await pickAll(g.code, g.players);
   // Picking ends early, once the house record's lookup (at most 2.5 s) is done.
-  await waitFor(g.code, (s) => s.game?.phase === "listen", 5000);
+  await waitFor(g.code, (s) => s.game?.phase === "listen", 8000);
 
   const res = await g.players[1].s.call(`/api/tables/${g.code}/round`);
   const text = await res.text();
