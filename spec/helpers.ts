@@ -107,3 +107,28 @@ export async function fillCrate(s: ReturnType<typeof session>, n = 5): Promise<n
   }
   return ids;
 }
+
+// Slots are anonymous, so a spec that wants to vote for "that person's track"
+// matches each slot's audio URL (minus its signed query) against the preview
+// Deezer gives for the track ids that were picked. A slot that matches none of
+// them is the house record. Returns null if Deezer can't be asked.
+const previewPath = (url: string) => url.split("?")[0];
+const previewOf = new Map<number, string>();
+export async function slotMap(s: ReturnType<typeof session>, code: string, trackIds: number[]) {
+  for (const id of trackIds) {
+    if (previewOf.has(id)) continue;
+    const body = (await (await fetch(`https://api.deezer.com/track/${id}`)).json()) as { preview?: string };
+    if (!body.preview) throw new Error(`no preview for ${id}`);
+    previewOf.set(id, previewPath(body.preview));
+  }
+  const { slots } = (await (await s.call(`/api/tables/${code}/round`)).json()) as { slots: { slot: number }[] };
+  const byTrack = new Map<number, number>();
+  let house: number | null = null;
+  for (const { slot } of slots) {
+    const { url } = (await (await s.call(`/api/tables/${code}/round/slots/${slot}/audio`)).json()) as { url: string };
+    const hit = trackIds.find((id) => previewOf.get(id) === previewPath(url));
+    if (hit === undefined) house = slot;
+    else byTrack.set(hit, slot);
+  }
+  return { byTrack, house, count: slots.length };
+}

@@ -169,12 +169,28 @@ class Bot {
     if (!me.picked) { log(this.name, `round ${g.round}: sits the vote out (no pick)`); return; }
     await sleep(this.delay(3, 12, g.deadline));
     if (mine !== this.run) return;
-    const others = g.alive.filter((n) => n !== this.name); // nobody can tell who the mole is
-    const choice = others.length && Math.random() < 0.8 ? pickOne(others)! : "skip";
-    const r = await this.call(`/api/tables/${code}/vote`, { name: choice });
-    if (r.ok) log(this.name, `voted ${choice}`);
+    // Votes are on tracks now. Pick a random slot that is not (we think) our own, or skip.
+    // The bot does not know which slot is its own pick (slots are anonymous), so it
+    // just votes at random; a vote for your own track is allowed by the server.
+    const cast = async () => {
+      const n = ((await this.call(`/api/tables/${code}`)).data as { game?: { tally?: { slot: number }[] } } | null)?.game?.tally ?? [];
+      const choice = n.length && Math.random() < 0.8 ? { slot: pickOne(n)!.slot } : { skip: true };
+      const r = await this.call(`/api/tables/${code}/vote`, choice);
+      if (r.ok) log(this.name, "voted" + ("skip" in choice ? " skip" : ` ${sideOf(choice.slot, n.length)}`));
+    };
+    await cast();
+    // May change its mind once, before the vote locks.
+    if (Math.random() < 0.4) {
+      await sleep(this.delay(1, 3, g.deadline));
+      if (mine === this.run) await cast();
+    }
   }
 }
+
+const sideOf = (n: number, total: number) => {
+  const half = Math.max(1, Math.ceil(total / 2));
+  return `${n < half ? "A" : "B"}${(n % half) + 1}`;
+};
 
 const bots = BOTS.slice(0, count).map((b) => new Bot(b.name, b.genre));
 let finished = false;

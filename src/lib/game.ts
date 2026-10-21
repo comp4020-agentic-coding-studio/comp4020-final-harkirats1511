@@ -1,9 +1,10 @@
 import { randomInt, randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "./db.ts";
 import { gamePlayers, gameThemes, games, people, picks, tableMembers, tableRemovals, tables, votes } from "./schema.ts";
 import { log, personTag, tableScope } from "./log.ts";
 import { THEMES } from "./themes.ts";
+import { ensureHouse, HOUSE_ID, houseSettled, takeHouse } from "./house.ts";
 import { crateSize, MIN_CRATE } from "./taste.ts";
 import {
   currentGame, defaultMoles, MAX_PLAYERS, maxMoles, MIN_PLAYERS, notifyTable, tableOptions,
@@ -113,10 +114,26 @@ export function startGame(code: string, by?: string): StartResult {
 
 // ---- phase transitions (all inside a transaction) ----
 
-// Give this round's picks their anonymous slots, once.
-function assignSlots(d: Tx, g: Game) {
-  const rows = d.select().from(picks).where(and(eq(picks.gameId, g.id), eq(picks.round, g.round))).all();
+// Give this round's picks their anonymous slots, once. The house record, if its
+// lookup finished and still holds, joins them as one more pick (personId
+// "house") and is shuffled in like the rest; nothing in a pick row's slot,
+// shape or audio route tells it apart before the reveal. A game that ends
+// before listening (someone left) gets no house record.
+function assignSlots(d: Tx, g: Game, withHouse = true) {
+  let rows = d.select().from(picks).where(and(eq(picks.gameId, g.id), eq(picks.round, g.round))).all();
   if (rows.some((r) => r.slot !== null)) return rows.length;
+  const house = withHouse && rows.length ? takeHouse(g.tableCode, g.id, g.round, rows.map((r) => r.trackId)) : null;
+  if (house) {
+    d.insert(picks)
+      .values({
+        gameId: g.id, round: g.round, personId: HOUSE_ID, trackId: house.trackId, title: house.title, artist: house.artist,
+        cover: house.cover, pickedAt: Date.now(), inspiredBy: house.inspiredBy,
+      })
+      .run();
+    rows = d.select().from(picks).where(and(eq(picks.gameId, g.id), eq(picks.round, g.round))).all();
+    // Not the title or artist: those are secret until the reveal.
+    log(tableScope(g.tableCode), `house record added · round ${g.round}`);
+  }
   shuffle(rows).forEach((r, slot) => {
     d.update(picks)
       .set({ slot })
@@ -127,7 +144,7 @@ function assignSlots(d: Tx, g: Game) {
 }
 
 function finish(d: Tx, g: Game, winner: "players" | "moles") {
-  assignSlots(d, g);
+  assignSlots(d, g, false);
   d.update(games).set({ winner, phase: "reveal", deadline: null, finishedAt: Date.now() }).where(eq(games.id, g.id)).run();
   d.update(tables).set({ status: "finished" }).where(eq(tables.code, g.tableCode)).run();
   // The game-over screen shows the winner and every round's themes to everyone.
@@ -153,25 +170,38 @@ function logReveal(d: Tx, g: Game, out: string | null) {
     .where(and(eq(picks.gameId, g.id), eq(picks.round, g.round)))
     .orderBy(asc(picks.slot))
     .all();
-  if (owners.length) log(scope, `reveal · owners: ${owners.map((o) => `track ${(o.slot ?? 0) + 1} was ${personTag(o.owner)}`).join(", ")}`);
+  if (owners.length) {
+    log(
+      scope,
+      `reveal · owners: ${owners.map((o) => `track ${(o.slot ?? 0) + 1} was ${o.owner === HOUSE_ID ? "the house record" : personTag(o.owner)}`).join(", ")}`,
+    );
+  }
 }
 
 function resolveVote(d: Tx, g: Game) {
   const alive = new Set(inPlay(d, g.id).filter((p) => p.ejectedRound === null).map((p) => p.personId));
-  const tally = new Map<string | null, number>();
+  const owners = new Map(
+    d.select({ slot: picks.slot, owner: picks.personId }).from(picks).where(and(eq(picks.gameId, g.id), eq(picks.round, g.round))).all()
+      .filter((r) => r.slot !== null)
+      .map((r) => [r.slot!, r.owner] as const),
+  );
+  const tally = new Map<number | null, number>();
   for (const v of d.select().from(votes).where(and(eq(votes.gameId, g.id), eq(votes.round, g.round))).all()) {
-    // A vote for someone who has since left counts for nothing.
-    if (v.choice === null || alive.has(v.choice)) tally.set(v.choice, (tally.get(v.choice) ?? 0) + 1);
+    if (v.slot === null || owners.has(v.slot)) tally.set(v.slot, (tally.get(v.slot) ?? 0) + 1);
   }
   const best = Math.max(0, ...tally.values());
   const top = [...tally].filter(([, n]) => n === best);
-  // The most-voted goes; a tie, "skip" on top, or no votes at all ejects nobody.
-  const out = best > 0 && top.length === 1 ? top[0][0] : null;
+  // The most-voted track wins; a tie, "skip" on top, or no votes at all means nobody.
+  const slot = best > 0 && top.length === 1 ? top[0][0] : null;
+  const owner = slot === null ? null : owners.get(slot) ?? null;
+  // The house record, a ghost's track, or a track whose picker has left ejects nobody.
+  const out = owner !== null && owner !== HOUSE_ID && alive.has(owner) ? owner : null;
   if (out) {
     d.update(gamePlayers).set({ ejectedRound: g.round }).where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.personId, out))).run();
   }
-  d.update(games).set({ phase: "reveal", deadline: null, ejectedPersonId: out }).where(eq(games.id, g.id)).run();
+  d.update(games).set({ phase: "reveal", deadline: null, ejectedPersonId: out, voteSlot: slot, lastCall: 0 }).where(eq(games.id, g.id)).run();
   logReveal(d, g, out);
+  if (owner === HOUSE_ID) log(tableScope(g.tableCode), `reveal · the room voted out the house record · round ${g.round}`);
   const winner = winnerOf(d, g.id);
   if (winner) finish(d, { ...g, ejectedPersonId: out }, winner);
 }
@@ -187,7 +217,7 @@ function logPhase(g: Game, to: string, cause: string, extra = "") {
 function toVote(d: Tx, g: Game, cause: string) {
   logPhase(g, "vote", cause);
   const t = tableOptions(g.tableCode)!;
-  d.update(games).set({ phase: "vote", deadline: Date.now() + t.voteSeconds * 1000 }).where(eq(games.id, g.id)).run();
+  d.update(games).set({ phase: "vote", deadline: Date.now() + t.voteSeconds * 1000, lastCall: 0, voteSlot: null }).where(eq(games.id, g.id)).run();
 }
 
 // Leave the phase the game is in for the next one. The caller has checked the
@@ -228,7 +258,7 @@ function step(d: Tx, g: Game, cause: string) {
   } else if (g.phase === "reveal") {
     logPhase(g, "pick", cause, ` (next round ${g.round + 1})`);
     d.update(games)
-      .set({ round: g.round + 1, phase: "pick", deadline: now + t.pickSeconds * 1000, ejectedPersonId: null, nowPlaying: null })
+      .set({ round: g.round + 1, phase: "pick", deadline: now + t.pickSeconds * 1000, ejectedPersonId: null, voteSlot: null, lastCall: 0, nowPlaying: null })
       .where(eq(games.id, g.id))
       .run();
     drawTheme(d, g.id, g.round + 1);
@@ -261,13 +291,49 @@ function settle(d: Tx, code: string, why: string) {
   if (!g || g.winner) return;
   const winner = winnerOf(d, g.id);
   if (winner) return finish(d, g, winner);
-  if (complete(d, g)) step(d, g, why);
+  if (!complete(d, g)) return;
+  if (g.phase === "vote") return lastCall(d, g);
+  // Picking is done: move on once the house record's lookup has finished, which
+  // is at most its time limit after the round began (pickWhenReady, below).
+  if (g.phase === "pick" && houseSettled(code, g.id, g.round)) return;
+  step(d, g, why);
+}
+
+// Everyone who can vote has: a short last call instead of locking at once, so a
+// changed mind still counts. The deadline only ever moves earlier.
+export const LAST_CALL_MS = 5000;
+function lastCall(d: Tx, g: Game) {
+  if (g.lastCall) return;
+  const deadline = Math.min(g.deadline ?? Infinity, Date.now() + LAST_CALL_MS);
+  d.update(games).set({ lastCall: 1, deadline }).where(eq(games.id, g.id)).run();
+  log(tableScope(g.tableCode), `last call · everyone has voted · round ${g.round}`);
+}
+
+// A pick (or a leaver) may have completed the pick phase while the house record
+// was still being looked up. Wait for that lookup (never past its time limit),
+// then move on if the phase is still complete.
+async function pickWhenReady(code: string) {
+  const g = currentGame(code);
+  if (!g || g.winner || g.phase !== "pick") return;
+  const waiting = houseSettled(code, g.id, g.round);
+  if (!waiting) return;
+  const complete_ = db.transaction((tx) => complete(tx, g));
+  if (!complete_) return;
+  await waiting;
+  const moved = db.transaction((tx) => {
+    const now = currentGame(code);
+    if (!now || now.winner || now.round !== g.round || now.phase !== "pick" || !complete(tx, now)) return false;
+    step(tx, now, "everyone picked");
+    return true;
+  });
+  if (moved) changed(code);
 }
 
 // A change landed: tell every open session and re-arm the table's timer.
 function changed(code: string) {
   schedule(code);
   notifyTable(code);
+  void pickWhenReady(code);
 }
 
 // ---- timers ----
@@ -279,6 +345,8 @@ export function schedule(code: string) {
   timers.delete(code);
   const g = currentGame(code);
   if (!g || g.winner || g.deadline === null) return;
+  // Looking for the house record starts with the round, so it is ready by the time picking ends.
+  if (g.phase === "pick") ensureHouse(code, g.id, g.round);
   // Overdue (the server was down past it): step now, so whoever's request loaded
   // the server gets the current phase back, not the one that already ended.
   if (g.deadline <= Date.now()) return fire(code, g.round, g.phase);
@@ -290,6 +358,12 @@ export function schedule(code: string) {
 // The deadline of (round, phase) arrived. Does nothing if that phase has
 // already been left, which is what makes a race with an early finish harmless.
 function fire(code: string, round: number, phase: string) {
+  if (phase === "pick") {
+    const g = currentGame(code);
+    const waiting = g && g.round === round && g.phase === "pick" ? houseSettled(code, g.id, round) : null;
+    // Never longer than the lookup's own time limit; then the round goes on with or without it.
+    if (waiting) return void waiting.then(() => fire(code, round, phase));
+  }
   const moved = db.transaction((tx) => {
     const g = currentGame(code);
     if (!g || g.winner || g.round !== round || g.phase !== phase || g.deadline === null) return false;
@@ -375,8 +449,9 @@ export function recordPick(
   return res;
 }
 
-// choice is a member's name or "skip".
-export function castVote(code: string, personId: string, choice: string): { ok: true } | Fail {
+// choice is a slot number or "skip". A vote can be changed until the vote locks:
+// the voter's row is replaced, and the last one counts.
+export function castVote(code: string, personId: string, choice: { slot: number } | "skip"): { ok: true } | Fail {
   const res = db.transaction((tx): { ok: true } | Fail => {
     const game = currentGame(code);
     if (!game || game.winner) return fail(409, "No vote is open.");
@@ -387,28 +462,27 @@ export function castVote(code: string, personId: string, choice: string): { ok: 
     if (game.phase !== "vote" || (game.deadline !== null && Date.now() >= game.deadline)) {
       return fail(409, "Voting is not open.");
     }
-    const voted = tx
+    let slot: number | null = null;
+    if (choice !== "skip") {
+      const there = tx
+        .select({ s: picks.slot })
+        .from(picks)
+        .where(and(eq(picks.gameId, game.id), eq(picks.round, game.round), eq(picks.slot, choice.slot)))
+        .get();
+      if (!there) return fail(400, "Vote for one of the tracks, or skip.");
+      slot = choice.slot;
+    }
+    const before = tx
       .select({ p: votes.voterPersonId })
       .from(votes)
       .where(and(eq(votes.gameId, game.id), eq(votes.round, game.round), eq(votes.voterPersonId, personId)))
       .get();
-    if (voted) return fail(409, "Your vote is final.");
-    let target: string | null = null;
-    if (choice !== "skip") {
-      const alive = inPlay(tx, game.id).filter((p) => p.ejectedRound === null).map((p) => p.personId);
-      const named = alive.length
-        ? tx
-            .select({ id: people.id })
-            .from(people)
-            .where(and(sql`lower(${people.name}) = lower(${choice})`, inArray(people.id, alive)))
-            .get()
-        : undefined;
-      if (!named) return fail(400, "Vote for someone still playing, or skip.");
-      target = named.id;
-    }
-    tx.insert(votes).values({ gameId: game.id, round: game.round, voterPersonId: personId, choice: target }).run();
-    // Who voted, never for whom.
-    log(tableScope(code), `${personTag(personId)} voted · round ${game.round}`);
+    tx.insert(votes)
+      .values({ gameId: game.id, round: game.round, voterPersonId: personId, choice: null, slot })
+      .onConflictDoUpdate({ target: [votes.gameId, votes.round, votes.voterPersonId], set: { slot, choice: null } })
+      .run();
+    // Who voted, never for what.
+    log(tableScope(code), `${personTag(personId)} ${before ? "changed their vote" : "voted"} · round ${game.round}`);
     settle(tx, code, "everyone voted");
     return { ok: true };
   });
@@ -462,7 +536,7 @@ export function leaveTable(code: string, personId: string, removedBy?: string): 
 // Everyone's view has the same shape and wording: their own theme and whether
 // they have picked. A mole's role reads "player"; only the theme text differs,
 // and nothing says which side is the odd one. Ghosts get the majority theme.
-export function myView(code: string, personId: string): { role: string; theme?: string; picked?: boolean } | null {
+export function myView(code: string, personId: string): { role: string; theme?: string; picked?: boolean; vote?: number | "skip" } | null {
   const g = currentGame(code);
   if (!g) return { role: "spectator" };
   const me = playerRow(g, personId);
@@ -471,7 +545,14 @@ export function myView(code: string, personId: string): { role: string; theme?: 
   const t = db.select().from(gameThemes).where(and(eq(gameThemes.gameId, g.id), eq(gameThemes.round, g.round))).get();
   const theme = t && (me.ejectedRound === null && me.role === "mole" ? t.mole : t.majority);
   const role = me.ejectedRound !== null ? "ghost" : "player";
-  return theme ? { role, theme, picked } : { role, picked };
+  // Your own current vote, only while the vote is open, so a reload shows it.
+  let vote: number | "skip" | undefined;
+  if (g.phase === "vote" && !g.winner) {
+    const v = db.select({ s: votes.slot }).from(votes)
+      .where(and(eq(votes.gameId, g.id), eq(votes.round, g.round), eq(votes.voterPersonId, personId))).get();
+    if (v) vote = v.s === null ? "skip" : v.s;
+  }
+  return { role, ...(theme ? { theme } : {}), picked, ...(vote === undefined ? {} : { vote }) };
 }
 
 // The shuffled, anonymous slots while the room listens and votes: positions

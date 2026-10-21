@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { baseUrl, fillCrate, session, uniqueName } from "./helpers";
+import { baseUrl, fillCrate, session, slotMap, uniqueName } from "./helpers";
 
 // Contract (CLAUDE.md "Logging"): the server logs who did what, one line per
 // action, and keeps the recent lines for GET /api/logs, which answers only to
@@ -113,8 +113,12 @@ withToken("logs a round without leaking themes, moles or who picked what until i
     if (s.game?.phase === "vote") break;
     await sleep(250);
   }
-  for (const p of ps) await p.s.call(`/api/tables/${code}/vote`, { body: { name: mole.name } });
+  const { byTrack } = await slotMap(ps[0].s, code, found.slice(0, 3).map((t) => t.id));
+  const slot = byTrack.get(found[ps.indexOf(mole)].id)!;
+  for (const p of ps) await p.s.call(`/api/tables/${code}/vote`, { body: { slot } });
   await sleep(800);
+  // The house record is logged as added, never by title or artist.
+  expect(linesWith(await logs(), code).join("\n")).not.toMatch(/house record · in the style|the house record: /);
 
   // Once over, the end can be logged: who was ejected, and the themes.
   const after = linesWith(await logs(), code).join("\n");

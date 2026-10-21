@@ -7,8 +7,9 @@ import { db } from "./db.ts";
 import { crateSize, MIN_CRATE } from "./taste.ts";
 import { log, personTag, refused, tableScope, tag } from "./log.ts";
 import {
-  avatars, gamePlayers, gameThemes, games, people, picks, tableMembers, tableRemovals, tableReports, tables,
+  avatars, gamePlayers, gameThemes, games, people, picks, tableMembers, tableRemovals, tableReports, tables, votes,
 } from "./schema.ts";
+import { HOUSE_ID } from "./house.ts";
 
 // No I or O: they read as 1 and 0 when a code is shouted across a room.
 const LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ";
@@ -159,10 +160,22 @@ export type PublicGame = {
   autoplay: boolean;
   alive: string[];
   ghosts: string[];
+  // Votes while the vote is open (decision 0008): a count per track and for
+  // skip, never who cast them. Every slot is listed, so a track with no votes
+  // looks like any other, and the house record is not marked.
+  tally?: { slot: number; votes: number }[];
+  skips?: number;
+  // True once everyone who can vote has: the deadline is the end of the last call.
+  lastCall?: boolean;
   reveal?: {
     ejected: string | null;
     wasMole: boolean;
-    slots: { slot: number; owner: string; title: string; artist: string; cover?: string }[];
+    // True when the track with the most votes was the house record.
+    ejectedHouse: boolean;
+    // owner is absent for the house record, which carries house and inspiredBy.
+    slots: { slot: number; owner?: string; house?: true; inspiredBy?: string; title: string; artist: string; cover?: string }[];
+    // Who voted for which slot, shown only now; slot is null for skip.
+    votes: { voter: string; slot: number | null }[];
   };
   winner?: string;
   // Every round's pair, only once the game is over.
@@ -209,21 +222,42 @@ function publicGame(code: string): PublicGame | undefined {
       .orderBy(asc(gameThemes.round))
       .all();
   }
+  if (g.phase === "vote" && !g.winner) {
+    const rows = db.select({ slot: picks.slot }).from(picks).where(and(eq(picks.gameId, g.id), eq(picks.round, g.round), isNotNull(picks.slot))).orderBy(asc(picks.slot)).all();
+    const cast = db.select({ slot: votes.slot }).from(votes).where(and(eq(votes.gameId, g.id), eq(votes.round, g.round))).all();
+    out.tally = rows.map((r) => ({ slot: r.slot!, votes: cast.filter((v) => v.slot === r.slot).length }));
+    out.skips = cast.filter((v) => v.slot === null).length;
+    if (g.lastCall) out.lastCall = true;
+  }
   if (g.phase === "reveal" || g.winner) {
     const ejected = inGame.find((p) => p.id === g.ejectedPersonId);
     const slots = db
-      .select({ slot: picks.slot, owner: people.name, title: picks.title, artist: picks.artist, cover: picks.cover })
+      .select({ slot: picks.slot, owner: people.name, who: picks.personId, inspiredBy: picks.inspiredBy, title: picks.title, artist: picks.artist, cover: picks.cover })
       .from(picks)
-      .innerJoin(people, eq(people.id, picks.personId))
+      .leftJoin(people, eq(people.id, picks.personId))
       .where(and(eq(picks.gameId, g.id), eq(picks.round, g.round), isNotNull(picks.slot)))
       .orderBy(asc(picks.slot))
       .all()
-      .map((r) => ({ ...r, slot: r.slot!, cover: r.cover ?? undefined }));
+      .map(({ who, owner, inspiredBy, ...r }): NonNullable<PublicGame["reveal"]>["slots"][number] => {
+        const base = { ...r, slot: r.slot!, cover: r.cover ?? undefined };
+        if (who !== HOUSE_ID) return { ...base, owner: owner ?? undefined };
+        const label = inspiredBy ? ejectedName(inspiredBy) : null;
+        return { ...base, house: true, ...(label ? { inspiredBy: label } : {}) };
+      });
+    const cast = db
+      .select({ voter: people.name, slot: votes.slot })
+      .from(votes)
+      .innerJoin(people, eq(people.id, votes.voterPersonId))
+      .where(and(eq(votes.gameId, g.id), eq(votes.round, g.round)))
+      .orderBy(asc(people.name))
+      .all();
     out.reveal = {
       // A person who left after being ejected is gone from the table; their name still shows.
       ejected: g.ejectedPersonId ? (ejected?.name ?? ejectedName(g.ejectedPersonId)) : null,
       wasMole: !!g.ejectedPersonId && roleOf(g.id, g.ejectedPersonId) === "mole",
+      ejectedHouse: g.voteSlot !== null && slots.some((x) => x.slot === g.voteSlot && x.house),
       slots,
+      votes: cast,
     };
   }
   return out;

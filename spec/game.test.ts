@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { baseUrl, CRATE_IDS, fillCrate, session, uniqueName } from "./helpers";
+import { baseUrl, CRATE_IDS, fillCrate, session, slotMap, uniqueName } from "./helpers";
 
 // Contract for a game at a table (CLAUDE.md has the rules these hold):
 //   POST /api/tables {pickSeconds?, voteSeconds?, speaker?} -> {code}
@@ -12,7 +12,8 @@ import { baseUrl, CRATE_IDS, fillCrate, session, uniqueName } from "./helpers";
 //   POST /api/tables/:code/pick {trackId}    during pick
 //   GET  /api/tables/:code/round             anonymous slots while listening/voting
 //   GET  /api/tables/:code/round/slots/:n/audio -> {url}
-//   POST /api/tables/:code/vote {name|"skip"} during vote; final once cast
+//   POST /api/tables/:code/vote {slot}|{skip:true} during vote; changeable until it locks
+//        (decision 0008: votes are on tracks; one house record is shuffled in)
 //   POST /api/tables/:code/advance           host: listen -> vote, reveal -> next round
 //   POST /api/tables/:code/leave
 // Public state carries game: {round, phase, deadline, alive, ghosts, reveal?, winner?,
@@ -28,7 +29,16 @@ type Game = {
   deadline: number | null;
   alive: string[];
   ghosts: string[];
-  reveal?: { ejected: string | null; wasMole: boolean; slots: { owner: string; title: string }[] };
+  tally?: { slot: number; votes: number }[];
+  skips?: number;
+  lastCall?: boolean;
+  reveal?: {
+    ejected: string | null;
+    wasMole: boolean;
+    ejectedHouse: boolean;
+    slots: { slot: number; owner?: string; house?: true; inspiredBy?: string; title: string }[];
+    votes: { voter: string; slot: number | null }[];
+  };
   winner?: "players" | "moles";
   themes?: { round: number; majority: string; mole: string }[];
 };
@@ -48,7 +58,7 @@ async function state(code: string): Promise<State> {
   return (await (await fetch(new URL(`/api/tables/${code}`, baseUrl))).json()) as State;
 }
 
-async function waitFor(code: string, ok: (s: State) => boolean, ms = 8000): Promise<State> {
+async function waitFor(code: string, ok: (s: State) => boolean, ms = 12000): Promise<State> {
   const until = Date.now() + ms;
   for (;;) {
     const s = await state(code);
@@ -95,11 +105,25 @@ async function started(n: number, opts: Record<string, unknown> = {}) {
   return { ...t, roles, moles, others };
 }
 
+// Returns who picked which track, so a vote can be aimed at a person's track.
 async function pickAll(code: string, players: Player[]) {
+  const mine = new Map<string, number>();
   for (const [i, p] of players.entries()) {
     expect((await p.s.call(`/api/tables/${code}/pick`, { body: { trackId: ids[i % 5] } })).status).toBeLessThan(300);
+    mine.set(p.name, ids[i % 5]);
   }
+  return mine;
 }
+
+// Everyone in `voters` votes for the track `target` picked.
+async function voteFor(code: string, voters: Player[], target: Player, picked: Map<string, number>) {
+  const map = await slotMap(voters[0].s, code, [...picked.values()]);
+  const slot = map.byTrack.get(picked.get(target.name)!)!;
+  expect(slot).toBeDefined();
+  for (const p of voters) expect((await p.s.call(`/api/tables/${code}/vote`, { body: { slot } })).status).toBe(200);
+  return map;
+}
+const skip = { skip: true };
 
 async function toVote(g: Awaited<ReturnType<typeof started>>) {
   await waitFor(g.code, (s) => s.game?.phase === "listen");
@@ -136,6 +160,7 @@ it("never shows roles, targets, or who has picked on the public state", async ()
   const g = await started(4);
   const before = await state(g.code);
   await pickAll(g.code, g.players.slice(0, 2));
+  await sleep(300);
   const after = await state(g.code);
   expect(after).toEqual(before);
   const text = JSON.stringify(after);
@@ -146,12 +171,14 @@ it("never shows roles, targets, or who has picked on the public state", async ()
 it("moves on early once everyone has picked, and the slots are anonymous", async () => {
   const g = await started(4, { pickSeconds: 60 });  // only an early finish gets there in time
   await pickAll(g.code, g.players);
-  await waitFor(g.code, (s) => s.game?.phase === "listen", 2000);
+  // Picking ends early, once the house record's lookup (at most 2.5 s) is done.
+  await waitFor(g.code, (s) => s.game?.phase === "listen", 5000);
 
   const res = await g.players[1].s.call(`/api/tables/${g.code}/round`);
   const text = await res.text();
   const { slots } = JSON.parse(text) as { slots: unknown[] };
-  expect(slots).toHaveLength(4);
+  // Four picks, and the house record unless Deezer didn't answer in time.
+  expect([4, 5]).toContain(slots.length);
   for (const p of g.players) expect(text).not.toContain(p.name);
 
   const audio = (await (await g.players[1].s.call(`/api/tables/${g.code}/round/slots/0/audio`)).json()) as {
@@ -167,36 +194,41 @@ it("doesn't count a pick that misses the deadline", async () => {
   const late = await g.players[2].s.call(`/api/tables/${g.code}/pick`, { body: { trackId: ids[0] } });
   expect(late.status).toBe(409);
   const { slots } = (await (await g.host.s.call(`/api/tables/${g.code}/round`)).json()) as { slots: unknown[] };
-  expect(slots).toHaveLength(2);
+  expect([2, 3]).toContain(slots.length);
 });
 
 it("ejects the most-voted, reveals every owner, and the players win when the mole goes", async () => {
   const g = await started(4);
-  await pickAll(g.code, g.players);
+  const picked = await pickAll(g.code, g.players);
   await toVote(g);
   const mole = g.moles[0].name;
-  for (const p of g.players) await p.s.call(`/api/tables/${g.code}/vote`, { body: { name: mole } });
+  await voteFor(g.code, g.players, g.moles[0], picked);
 
   const s = await waitFor(g.code, (s) => s.game?.phase === "reveal" || s.status === "finished");
   expect(s.game!.reveal!.ejected).toBe(mole);
   expect(s.game!.reveal!.wasMole).toBe(true);
-  expect(s.game!.reveal!.slots.map((x) => x.owner).sort()).toEqual(g.players.map((p) => p.name).sort());
+  expect(s.game!.reveal!.ejectedHouse).toBe(false);
+  expect(s.game!.reveal!.slots.map((x) => x.owner).filter(Boolean).sort()).toEqual(g.players.map((p) => p.name).sort());
   expect(s.game!.winner).toBe("players");
 });
 
-it("makes a final vote final, and a tie ejects nobody", async () => {
+it("lets a vote change until it locks, and a tie ejects nobody", async () => {
   const g = await started(4);
-  await pickAll(g.code, g.players);
+  const picked = await pickAll(g.code, g.players);
   await toVote(g);
   const [a, b, c, d] = g.players;
-  await a.s.call(`/api/tables/${g.code}/vote`, { body: { name: b.name } });
-  expect((await a.s.call(`/api/tables/${g.code}/vote`, { body: { name: c.name } })).status).toBe(409);
-  await b.s.call(`/api/tables/${g.code}/vote`, { body: { name: a.name } });
-  await c.s.call(`/api/tables/${g.code}/vote`, { body: { name: b.name } });
-  await d.s.call(`/api/tables/${g.code}/vote`, { body: { name: a.name } });
-  // a: 2, b: 2 -> a tie, nobody ejected
+  const { byTrack } = await slotMap(a.s, g.code, [...picked.values()]);
+  const slotOf = (p: Player) => byTrack.get(picked.get(p.name)!)!;
+  const vote = (p: Player, body: unknown) => p.s.call(`/api/tables/${g.code}/vote`, { body });
+  expect((await vote(a, { slot: slotOf(b) })).status).toBe(200);
+  expect((await vote(a, { slot: slotOf(c) })).status).toBe(200); // changed: allowed
+  await vote(b, { slot: slotOf(a) });
+  await vote(c, { slot: slotOf(c) });
+  await vote(d, { slot: slotOf(a) });
+  // a's track: 2 (b, d), c's track: 2 (a's changed vote, c) -> a tie, nobody ejected
   const s = await waitFor(g.code, (s) => s.game?.phase === "reveal");
   expect(s.game!.reveal!.ejected).toBeNull();
+  expect(s.game!.reveal!.ejectedHouse).toBe(false);
 });
 
 it("turns a wrongly ejected player into a ghost: picks, doesn't vote; moles win at parity", async () => {
@@ -204,9 +236,9 @@ it("turns a wrongly ejected player into a ghost: picks, doesn't vote; moles win 
   const mole = g.moles[0];
   const [innocent, ...rest] = g.others;
 
-  await pickAll(g.code, g.players);
+  const picked1 = await pickAll(g.code, g.players);
   await toVote(g);
-  for (const p of g.players) await p.s.call(`/api/tables/${g.code}/vote`, { body: { name: innocent.name } });
+  await voteFor(g.code, g.players, innocent, picked1);
   const s1 = await waitFor(g.code, (s) => s.game?.phase === "reveal");
   expect(s1.game!.reveal!.wasMole).toBe(false);
   expect(s1.game!.ghosts).toEqual([innocent.name]);
@@ -214,14 +246,12 @@ it("turns a wrongly ejected player into a ghost: picks, doesn't vote; moles win 
   await g.host.s.call(`/api/tables/${g.code}/advance`, { body: {} });
   await waitFor(g.code, (s) => s.game?.round === 2 && s.game?.phase === "pick");
   expect((await me(innocent, g.code)).role).toBe("ghost");
-  await pickAll(g.code, g.players);
+  const picked2 = await pickAll(g.code, g.players);
 
   await toVote(g);
-  expect(
-    (await innocent.s.call(`/api/tables/${g.code}/vote`, { body: { name: mole.name } })).status,
-  ).toBe(403);
+  expect((await innocent.s.call(`/api/tables/${g.code}/vote`, { body: skip })).status).toBe(403);
   // Vote out a second innocent: one mole against one player is parity.
-  for (const p of [mole, ...rest]) await p.s.call(`/api/tables/${g.code}/vote`, { body: { name: rest[0].name } });
+  await voteFor(g.code, [mole, ...rest], rest[0], picked2);
   const end = await waitFor(g.code, (s) => s.status === "finished");
   expect(end.game!.winner).toBe("moles");
 });
@@ -253,22 +283,22 @@ it("doesn't let someone who missed the pick vote, and doesn't wait for them eith
   await toVote(g);
 
   expect((await me(missed, g.code)) as { picked?: boolean }).toMatchObject({ picked: false });
-  const res = await missed.s.call(`/api/tables/${g.code}/vote`, { body: { name: "skip" } });
+  const res = await missed.s.call(`/api/tables/${g.code}/vote`, { body: skip });
   expect(res.status).toBe(403);
 
-  // Everyone who can vote has: the vote ends long before its 60s deadline.
-  for (const p of pickers) await p.s.call(`/api/tables/${g.code}/vote`, { body: { name: "skip" } });
-  await waitFor(g.code, (s) => s.game?.phase === "reveal", 3000);
+  // Everyone who can vote has: the 5 s last call, then it locks, long before its 60s deadline.
+  for (const p of pickers) await p.s.call(`/api/tables/${g.code}/vote`, { body: skip });
+  await waitFor(g.code, (s) => s.game?.phase === "reveal", 9000);
 });
 
 it("draws a new theme pair each round, and shows every pair only when the game ends", async () => {
   const g = await started(4);
   const first = g.roles.get(g.others[0].name)!.theme!;
-  await pickAll(g.code, g.players);
+  const picked1 = await pickAll(g.code, g.players);
   await toVote(g);
   // Vote out an innocent, so the game goes on to a second round.
   const innocent = g.others[0];
-  for (const p of g.players) await p.s.call(`/api/tables/${g.code}/vote`, { body: { name: innocent.name } });
+  await voteFor(g.code, g.players, innocent, picked1);
   const r1 = await waitFor(g.code, (s) => s.game?.phase === "reveal");
   expect(r1.game!.themes).toBeUndefined();
   expect(JSON.stringify(r1)).not.toContain(first);
@@ -279,11 +309,9 @@ it("draws a new theme pair each round, and shows every pair only when the game e
   expect(second).not.toBe(first);
   expect([first, second]).not.toContain((await me(g.moles[0], g.code)).theme);
 
-  await pickAll(g.code, g.players);
+  const picked2 = await pickAll(g.code, g.players);
   await toVote(g);
-  for (const p of g.players.filter((p) => p !== innocent)) {
-    await p.s.call(`/api/tables/${g.code}/vote`, { body: { name: g.moles[0].name } });
-  }
+  await voteFor(g.code, g.players.filter((p) => p !== innocent), g.moles[0], picked2);
   const end = await waitFor(g.code, (s) => s.status === "finished");
   expect(end.game!.themes).toHaveLength(2);
   expect(end.game!.themes![0].majority).toBe(first);
@@ -296,16 +324,16 @@ it("draws a new theme pair each round, and shows every pair only when the game e
 // game starts at round 1 again. The server is the record of who has picked.
 it("lets everyone pick again in a second game at the same table", async () => {
   const t = await started(3);
-  await pickAll(t.code, t.players);
+  const picked = await pickAll(t.code, t.players);
   await toVote(t);
-  for (const p of t.players) await p.s.call(`/api/tables/${t.code}/vote`, { body: { name: t.moles[0].name } });
+  await voteFor(t.code, t.players, t.moles[0], picked);
   await waitFor(t.code, (s) => s.status === "finished");
 
   expect((await t.host.s.call(`/api/tables/${t.code}/start`, { body: {} })).status).toBeLessThan(300);
   await waitFor(t.code, (s) => s.status === "playing" && s.game?.round === 1 && s.game?.phase === "pick");
   for (const p of t.players) expect((await me(p, t.code)).picked).toBe(false);
   await pickAll(t.code, t.players);
-  await waitFor(t.code, (s) => s.game?.phase === "listen");
+  await waitFor(t.code, (s) => s.game?.phase === "listen", 5000);
 });
 
 // Decision 0007: you bring a crate, and every pick comes from it.
@@ -344,14 +372,14 @@ it("accepts only a track from the picker's own crate, at the time of picking", a
 
 it("lets a ghost pick from their crate, and only from it", async () => {
   const g = await started(5, { pickSeconds: 30, voteSeconds: 30 });
-  await pickAll(g.code, g.players);
+  const picked = await pickAll(g.code, g.players);
   await toVote(g);
   // Vote out someone holding the majority theme: ejecting the only mole would
   // end the game in round 1 and there'd be no round to pick in as a ghost.
   const themes = await Promise.all(g.players.map(async (p) => (await me(p, g.code)).theme));
   const count = (t?: string) => themes.filter((x) => x === t).length;
   const target = g.players.find((_, i) => count(themes[i]) > 1)!;
-  for (const p of g.players) await p.s.call(`/api/tables/${g.code}/vote`, { body: { name: target.name } });
+  await voteFor(g.code, g.players, target, picked);
   await waitFor(g.code, (s) => s.game?.phase === "reveal");
   await g.host.s.call(`/api/tables/${g.code}/advance`, { body: {} });
   await waitFor(g.code, (s) => s.game?.round === 2 && s.game?.phase === "pick");

@@ -133,6 +133,13 @@ export const games = sqliteTable(
     deadline: integer("deadline"),
     // Who the last vote ejected (null: nobody); read in phase reveal.
     ejectedPersonId: text("ejected_person_id"),
+    // The slot that won the last vote (decision 0008), or null when none did
+    // (a tie, or skip on top). Whether it was the house record is read from the
+    // pick row at that slot; read in phase reveal.
+    voteSlot: integer("vote_slot"),
+    // 1 once everyone who can vote has: the 5 second last call is running and
+    // the deadline has been pulled in to match. Public (it says nothing about who).
+    lastCall: integer("last_call").notNull().default(0),
     // The anonymous slot the host has playing now, or null; public, it says
     // which number is playing and nothing about whose it is.
     nowPlaying: integer("now_playing"),
@@ -197,11 +204,17 @@ export const picks = sqliteTable(
     cover: text("cover"),
     slot: integer("slot"),
     pickedAt: integer("picked_at").notNull(),
+    // The house record (decision 0008) is a pick row whose personId is "house".
+    // inspiredBy is the person whose crate's artist it was chosen from, shown
+    // only at the reveal.
+    inspiredBy: text("inspired_by"),
   },
   (t) => [primaryKey({ columns: [t.gameId, t.round, t.personId] })],
 );
 
-// A vote, final once cast. choice is the person voted for, null for "skip".
+// A vote, changeable until the vote locks (decision 0008). slot is the track
+// voted for, null for "skip". choice is the person voted for by the old rules;
+// rows from before 0008 keep it and nothing reads it any more.
 export const votes = sqliteTable(
   "votes",
   {
@@ -211,6 +224,7 @@ export const votes = sqliteTable(
     round: integer("round").notNull(),
     voterPersonId: text("voter_person_id").notNull(),
     choice: text("choice"),
+    slot: integer("slot"),
   },
   (t) => [primaryKey({ columns: [t.gameId, t.round, t.voterPersonId] })],
 );

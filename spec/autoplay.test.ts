@@ -45,7 +45,10 @@ it("plays every slot in turn on its own, then opens the vote", async () => {
     if (phase === "vote") break;
     await sleep(200);
   }
-  expect(seen.filter((x) => x !== null)).toEqual([0, 1, 2]);
+  // Three picks, plus the house record when Deezer found one in time.
+  const played = seen.filter((x) => x !== null);
+  expect(played).toEqual([0, 1, 2, 3].slice(0, played.length));
+  expect([3, 4]).toContain(played.length);
   expect(phase).toBe("vote");
 });
 

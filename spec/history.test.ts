@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { baseUrl, fillCrate, session, uniqueName } from "./helpers";
+import { baseUrl, fillCrate, session, slotMap, uniqueName } from "./helpers";
 
 // Contract: a person can look back at the games they played, which is what the
 // persistence is for. Only finished games, only ones they were in.
@@ -61,7 +61,9 @@ it("lists only finished games the person played, with their own picks, newest fi
   // Find the mole by theme (the odd one out), then vote them out to end the game.
   const themes = await Promise.all(ps.map(async (p) => ((await (await p.s.call(`/api/tables/${code}/me`)).json()) as { theme: string }).theme));
   const mole = ps[themes.findIndex((t) => themes.filter((x) => x === t).length === 1)];
-  for (const p of ps) await p.s.call(`/api/tables/${code}/vote`, { body: { name: mole.name } });
+  const { byTrack } = await slotMap(host.s, code, ids.slice(0, 3));
+  const slot = byTrack.get(ids[ps.indexOf(mole)])!;
+  for (const p of ps) await p.s.call(`/api/tables/${code}/vote`, { body: { slot } });
   await waitFor(code, (s) => s.status === "finished");
 
   const history = (await (await host.s.call("/api/history")).json()) as {
