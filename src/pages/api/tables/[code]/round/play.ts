@@ -4,7 +4,7 @@ import { setNowPlaying } from "../../../../../lib/game.ts";
 import { refused, tableScope, tag } from "../../../../../lib/log.ts";
 import { isHost, normaliseCode, tableExists } from "../../../../../lib/tables.ts";
 
-// Body {slot}: the anonymous number now playing. Public, since it names no one.
+// Body {slot}: the card (its order) now playing. Public: picks are named by then.
 export const POST: APIRoute = async ({ params, cookies, request }) => {
   const me = personFromCookies(cookies);
   const code = normaliseCode(params.code);

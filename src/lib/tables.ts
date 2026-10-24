@@ -1,24 +1,30 @@
 import { randomInt } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import { type Avatar, defaultAvatar, PARTS } from "./avatar.ts";
 import type { Person } from "./auth.ts";
 import { db } from "./db.ts";
-import { crateSize, MIN_CRATE } from "./taste.ts";
+import { crateComplete, listTaste } from "./taste.ts";
+import { PROMPTS, type Slot } from "./prompts.ts";
 import { log, personTag, refused, tableScope, tag } from "./log.ts";
 import {
-  avatars, gamePlayers, gameThemes, games, people, picks, tableMembers, tableRemovals, tableReports, tables, votes,
+  avatars, gamePlayers, gamePrompts, gameThemes, games, people, picks, tableMembers, tableRemovals, tableReports, tables, votes,
 } from "./schema.ts";
-import { HOUSE_ID } from "./house.ts";
 
 // No I or O: they read as 1 and 0 when a code is shouted across a room.
 const LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ";
 export const MIN_PLAYERS = 3;
-// More than this and a table is refused at start: the votes and slots stop fitting a phone.
-export const MAX_PLAYERS = 10;
-export const DEFAULT_PICK_SECONDS = 60;
-export const DEFAULT_VOTE_SECONDS = 45;
-export const DEFAULT_SLOT_SECONDS = 30;
+// More than this and a table is refused at start: 8 crates is already 96 songs on a phone.
+export const MAX_PLAYERS = 8;
+// Tuning dials for playtests (game.ts re-exports them and has the steal ones).
+// A table's own pick/vote/track seconds still override these defaults.
+export const PICK_SECONDS = 45;
+export const VOTE_SECONDS = 30;
+export const SECONDS_PER_TRACK = 20;
+export const DEFAULT_PICK_SECONDS = PICK_SECONDS;
+export const DEFAULT_VOTE_SECONDS = VOTE_SECONDS;
+export const DEFAULT_SLOT_SECONDS = SECONDS_PER_TRACK;
 export type TableOptions = {
   pickSeconds: number; voteSeconds: number; moles: number | null; autoplay: boolean; slotSeconds: number;
   private: boolean;
@@ -35,7 +41,7 @@ function randomCode(): string {
   return code;
 }
 
-// Moles when the host doesn't say: 1 for 3 to 5 players, 2 for 6 to 10.
+// Moles when the host doesn't say: 1 for 3 to 5 players, 2 for 6 to 8.
 export const defaultMoles = (players: number) => (players <= 5 ? 1 : 2);
 // The most moles a table of n can hold: strictly fewer than everyone else.
 export const maxMoles = (players: number) => Math.floor((players - 1) / 2);
@@ -148,49 +154,85 @@ export function setStatus(code: string, status: string) {
 
 // What anyone holding the code may see, and all the event stream ever carries:
 // no ids, no PINs, nothing private to one player. Always read from the
-// database, so a reconnect or a restart restores it. Before the reveal it holds
-// nothing about roles, themes, picks or votes, so it cannot change when
-// someone picks or votes; only the phase moving on shows it.
+// database, so a reconnect or a restart restores it. It never holds a prompt,
+// a role, or who has picked before picking closes, so it cannot change when
+// someone picks; only the phase moving on shows it. Votes show as counts per
+// name, never who cast them.
+export type PublicCard = {
+  order: number; picker: string; lender?: string; trackId: number; title: string; artist: string; cover?: string;
+};
 export type PublicGame = {
   round: number;
   phase: string;
   deadline: number | null;
   nowPlaying: number | null;
-  // Whether the server plays the slots by itself; a table setting, public.
+  // Whether the server plays the cards by itself; a table setting, public.
   autoplay: boolean;
   alive: string[];
   ghosts: string[];
-  // Votes while the vote is open (decision 0008): a count per track and for
-  // skip, never who cast them. Every slot is listed, so a track with no votes
-  // looks like any other, and the house record is not marked.
-  tally?: { slot: number; votes: number }[];
+  // Listen and vote: every pick, named, in the order they play; and the alive
+  // players who missed the pick ("dead air").
+  cards?: PublicCard[];
+  deadAir?: string[];
+  // Vote: a count per alive player and for skip, never who cast them.
+  tally?: { name: string; votes: number }[];
   skips?: number;
   // True once everyone who can vote has: the deadline is the end of the last call.
   lastCall?: boolean;
+  // Steal: who the room voted out. Never the options or the prompt.
+  accused?: string;
   reveal?: {
+    prompt: string;
+    slot: Slot;
+    cards: PublicCard[];
+    deadAir: string[];
+    // Who voted for whom, shown only now; choice is null for skip.
+    votes: { voter: string; choice: string | null }[];
+    // The room's choice, even when a steal kept them in.
+    accused: string | null;
     ejected: string | null;
     wasMole: boolean;
-    // True when the track with the most votes was the house record.
-    ejectedHouse: boolean;
-    // owner is absent for the house record, which carries house and inspiredBy.
-    slots: { slot: number; owner?: string; house?: true; inspiredBy?: string; title: string; artist: string; cover?: string }[];
-    // Who voted for which slot, shown only now; slot is null for skip.
-    votes: { voter: string; slot: number | null }[];
+    stole: boolean;
   };
   winner?: string;
-  // Every round's pair, only once the game is over.
-  themes?: { round: number; majority: string; mole: string }[];
+  // Who the moles were, only once the game is over.
+  moles?: string[];
+  // Every round's prompt, only once the game is over.
+  prompts?: { round: number; prompt: string; slot: Slot }[];
 };
+export type PublicCrateTrack = { trackId: number; title: string; artist: string; cover?: string; slot: Slot | null };
 export type PublicTable = {
   code: string;
   status: string;
   host: string;
   // Public: the table page tells its members, the shop lists only a private booth's host.
   private: boolean;
-  // Whether this member has the tracks to play (public; never the tracks themselves).
-  members: { name: string; avatar: Avatar; crateReady: boolean }[];
+  // crateReady: 3 in every slot (public; never the tracks). crate is the
+  // player's locked crate, present only while a game is running.
+  members: { name: string; avatar: Avatar; crateReady: boolean; crate?: PublicCrateTrack[] }[];
   game?: PublicGame;
 };
+
+const promptText = new Map(PROMPTS.map((p) => [p.id, p]));
+export const promptById = (id: string) => promptText.get(id);
+
+function cardsOf(gameId: string, round: number): PublicCard[] {
+  const lender = alias(people, "lender");
+  return db
+    .select({
+      order: picks.slot, picker: people.name, lender: lender.name, trackId: picks.trackId, title: picks.title, artist: picks.artist, cover: picks.cover,
+    })
+    .from(picks)
+    .innerJoin(people, eq(people.id, picks.personId))
+    .leftJoin(lender, eq(lender.id, picks.lenderPersonId))
+    .where(and(eq(picks.gameId, gameId), eq(picks.round, round), isNotNull(picks.slot)))
+    .orderBy(asc(picks.slot))
+    .all()
+    .map((r) => ({
+      order: r.order!, picker: r.picker, ...(r.lender ? { lender: r.lender } : {}), trackId: r.trackId, title: r.title, artist: r.artist,
+      ...(r.cover ? { cover: r.cover } : {}),
+    }));
+}
 
 function publicGame(code: string): PublicGame | undefined {
   const g = currentGame(code);
@@ -213,57 +255,72 @@ function publicGame(code: string): PublicGame | undefined {
     alive: inGame.filter((p) => p.ejected === null).map((p) => p.name),
     ghosts: inGame.filter((p) => p.ejected !== null).map((p) => p.name),
   };
+  const nameOf = (id: string | null) => (id ? inGame.find((p) => p.id === id)?.name ?? personName(id) : null);
+  // Who the round's pick phase was waiting on and didn't get: alive then, no pick.
+  const deadAir = () => {
+    const done = new Set(db.select({ p: picks.personId }).from(picks).where(and(eq(picks.gameId, g.id), eq(picks.round, g.round))).all().map((r) => r.p));
+    return inGame.filter((p) => (p.ejected === null || p.ejected === g.round) && !done.has(p.id)).map((p) => p.name);
+  };
   if (g.winner) {
     out.winner = g.winner;
-    out.themes = db
-      .select({ round: gameThemes.round, majority: gameThemes.majority, mole: gameThemes.mole })
-      .from(gameThemes)
-      .where(eq(gameThemes.gameId, g.id))
-      .orderBy(asc(gameThemes.round))
-      .all();
+    out.moles = inGame.filter((p) => p.role === "mole").map((p) => p.name);
+    out.prompts = db
+      .select({ round: gamePrompts.round, promptId: gamePrompts.promptId, slot: gamePrompts.slot })
+      .from(gamePrompts)
+      .where(eq(gamePrompts.gameId, g.id))
+      .orderBy(asc(gamePrompts.round))
+      .all()
+      .map((r) => ({ round: r.round, prompt: promptById(r.promptId)?.text ?? "", slot: r.slot as Slot }));
   }
+  if ((g.phase === "listen" || g.phase === "vote") && !g.winner) {
+    out.cards = cardsOf(g.id, g.round);
+    out.deadAir = deadAir();
+  }
+  if (g.phase === "steal" && !g.winner) out.accused = nameOf(g.stealPersonId) ?? undefined;
   if (g.phase === "vote" && !g.winner) {
-    const rows = db.select({ slot: picks.slot }).from(picks).where(and(eq(picks.gameId, g.id), eq(picks.round, g.round), isNotNull(picks.slot))).orderBy(asc(picks.slot)).all();
-    const cast = db.select({ slot: votes.slot }).from(votes).where(and(eq(votes.gameId, g.id), eq(votes.round, g.round))).all();
-    out.tally = rows.map((r) => ({ slot: r.slot!, votes: cast.filter((v) => v.slot === r.slot).length }));
-    out.skips = cast.filter((v) => v.slot === null).length;
+    const here = new Set(inGame.map((p) => p.id));
+    const cast = db
+      .select({ voter: votes.voterPersonId, choice: votes.choice })
+      .from(votes)
+      .where(and(eq(votes.gameId, g.id), eq(votes.round, g.round)))
+      .all()
+      .filter((v) => here.has(v.voter));
+    out.tally = inGame.filter((p) => p.ejected === null).map((p) => ({ name: p.name, votes: cast.filter((v) => v.choice === p.id).length }));
+    out.skips = cast.filter((v) => v.choice === "skip").length;
     if (g.lastCall) out.lastCall = true;
   }
   if (g.phase === "reveal" || g.winner) {
-    const ejected = inGame.find((p) => p.id === g.ejectedPersonId);
-    const slots = db
-      .select({ slot: picks.slot, owner: people.name, who: picks.personId, inspiredBy: picks.inspiredBy, title: picks.title, artist: picks.artist, cover: picks.cover })
-      .from(picks)
-      .leftJoin(people, eq(people.id, picks.personId))
-      .where(and(eq(picks.gameId, g.id), eq(picks.round, g.round), isNotNull(picks.slot)))
-      .orderBy(asc(picks.slot))
-      .all()
-      .map(({ who, owner, inspiredBy, ...r }): NonNullable<PublicGame["reveal"]>["slots"][number] => {
-        const base = { ...r, slot: r.slot!, cover: r.cover ?? undefined };
-        if (who !== HOUSE_ID) return { ...base, owner: owner ?? undefined };
-        const label = inspiredBy ? ejectedName(inspiredBy) : null;
-        return { ...base, house: true, ...(label ? { inspiredBy: label } : {}) };
-      });
+    const prompt = db.select().from(gamePrompts).where(and(eq(gamePrompts.gameId, g.id), eq(gamePrompts.round, g.round))).get();
+    const target = alias(people, "target");
     const cast = db
-      .select({ voter: people.name, slot: votes.slot })
+      .select({ voter: people.name, choice: votes.choice, target: target.name })
       .from(votes)
       .innerJoin(people, eq(people.id, votes.voterPersonId))
+      .leftJoin(target, eq(target.id, votes.choice))
       .where(and(eq(votes.gameId, g.id), eq(votes.round, g.round)))
       .orderBy(asc(people.name))
       .all();
-    out.reveal = {
-      // A person who left after being ejected is gone from the table; their name still shows.
-      ejected: g.ejectedPersonId ? (ejected?.name ?? ejectedName(g.ejectedPersonId)) : null,
-      wasMole: !!g.ejectedPersonId && roleOf(g.id, g.ejectedPersonId) === "mole",
-      ejectedHouse: g.voteSlot !== null && slots.some((x) => x.slot === g.voteSlot && x.house),
-      slots,
-      votes: cast,
-    };
+    // The room's choice: the ejected person, or the mole whose steal kept them in.
+    const accusedId = g.ejectedPersonId ?? (g.stole ? g.stealPersonId : null);
+    if (prompt) {
+      out.reveal = {
+        prompt: promptById(prompt.promptId)?.text ?? "",
+        slot: prompt.slot as Slot,
+        cards: cardsOf(g.id, g.round),
+        deadAir: deadAir(),
+        votes: cast.map((v) => ({ voter: v.voter, choice: v.target ?? null })),
+        accused: nameOf(accusedId),
+        // A person who left after being ejected is gone from the table; their name still shows.
+        ejected: nameOf(g.ejectedPersonId),
+        wasMole: !!accusedId && roleOf(g.id, accusedId) === "mole",
+        stole: !!g.stole,
+      };
+    }
   }
   return out;
 }
 
-function ejectedName(personId: string): string | null {
+function personName(personId: string): string | null {
   return db.select({ n: people.name }).from(people).where(eq(people.id, personId)).get()?.n ?? null;
 }
 
@@ -283,6 +340,15 @@ export function publicState(code: string): PublicTable | null {
     .where(eq(tables.code, code))
     .get();
   if (!t) return null;
+  const g = currentGame(code);
+  const running = !!g && !g.winner;
+  // The crates on the table while a game runs: players still seated, ghosts
+  // included (their crate can be borrowed from). Spectators' crates stay private.
+  const playing = new Set(
+    running
+      ? db.select({ p: gamePlayers.personId }).from(gamePlayers).where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.left, 0))).all().map((r) => r.p)
+      : [],
+  );
   const members = db
     .select({ id: people.id, name: people.name, a: avatars })
     .from(tableMembers)
@@ -293,8 +359,15 @@ export function publicState(code: string): PublicTable | null {
     .all()
     .map((m) => ({
       name: m.name,
-      crateReady: crateSize(m.id) >= MIN_CRATE,
+      crateReady: crateComplete(m.id),
       avatar: m.a ? (Object.fromEntries(PARTS.map((p) => [p, m.a![p]])) as Avatar) : defaultAvatar(m.id),
+      ...(playing.has(m.id)
+        ? {
+            crate: listTaste(m.id).map((c) => ({
+              trackId: c.id, title: c.title, artist: c.artist, ...(c.cover ? { cover: c.cover } : {}), slot: (c.slot as Slot | null) ?? null,
+            })),
+          }
+        : {}),
     }));
   const game = publicGame(code);
   return game ? { ...t, members, game } : { ...t, members };
@@ -333,20 +406,24 @@ export const tableWatchers = (code: string) => bus.listenerCount(code);
 
 // ---- history ----
 
+// Games before the crate game have rounds with a theme pair (majority, mole);
+// newer ones have a prompt and its slot. Both shapes are returned, and the
+// page shows whichever a round has.
 export type HistoryGame = {
   code: string;
   finishedAt: number;
   winner: string;
   players: string[];
-  rounds: { round: number; majority: string; mole: string }[];
-  mine: { round: number; theme: string; wasMole: boolean; title: string; artist: string }[];
+  rounds: { round: number; majority?: string; mole?: string; prompt?: string; slot?: Slot }[];
+  // theme is this person's own card: the old game's theme, or the new game's prompt.
+  mine: { round: number; theme: string; wasMole: boolean; title: string; artist: string; lender?: string }[];
 };
 
 // Finished games this person was still in when they ended, newest first, at
 // most `limit`. Everything but `mine` is what the game-over screen shows the
-// whole table; `mine` is only this person's own theme and pick per round. A
-// game they left before the end is left out (they weren't at the table for the
-// reveal), as is any game still running. Four indexed queries however many
+// whole table; `mine` is only this person's own pick per round. A game they
+// left before the end is left out (they weren't at the table for the reveal),
+// as is any game still running. A handful of indexed queries however many
 // games and rounds there are.
 export function historyFor(personId: string, limit = 20): HistoryGame[] {
   const finished = sql<number>`coalesce(${games.finishedAt}, ${games.startedAt})`;
@@ -367,19 +444,20 @@ export function historyFor(personId: string, limit = 20): HistoryGame[] {
     .where(and(inArray(gamePlayers.gameId, ids), eq(gamePlayers.left, 0)))
     .orderBy(asc(people.name))
     .all();
-  const themes = db
-    .select()
-    .from(gameThemes)
-    .where(inArray(gameThemes.gameId, ids))
-    .orderBy(asc(gameThemes.round))
-    .all();
+  const themes = db.select().from(gameThemes).where(inArray(gameThemes.gameId, ids)).orderBy(asc(gameThemes.round)).all();
+  const prompts = db.select().from(gamePrompts).where(inArray(gamePrompts.gameId, ids)).orderBy(asc(gamePrompts.round)).all();
+  const lender = alias(people, "lender");
   const myPicks = db
-    .select({ gameId: picks.gameId, round: picks.round, title: picks.title, artist: picks.artist })
+    .select({ gameId: picks.gameId, round: picks.round, title: picks.title, artist: picks.artist, lender: lender.name })
     .from(picks)
+    .leftJoin(lender, eq(lender.id, picks.lenderPersonId))
     .where(and(inArray(picks.gameId, ids), eq(picks.personId, personId)))
     .all();
   return mineGames.map((g) => {
-    const rounds = themes.filter((t) => t.gameId === g.id).map((t) => ({ round: t.round, majority: t.majority, mole: t.mole }));
+    const old = themes.filter((t) => t.gameId === g.id);
+    const rounds: HistoryGame["rounds"] = old.length
+      ? old.map((t) => ({ round: t.round, majority: t.majority, mole: t.mole }))
+      : prompts.filter((p) => p.gameId === g.id).map((p) => ({ round: p.round, prompt: promptById(p.promptId)?.text ?? "", slot: p.slot as Slot }));
     const wasMole = g.role === "mole";
     return {
       code: g.code,
@@ -387,15 +465,16 @@ export function historyFor(personId: string, limit = 20): HistoryGame[] {
       winner: g.winner!,
       players: names.filter((n) => n.gameId === g.id).map((n) => n.name),
       rounds,
-      // Their own side of the pair: the odd one while a mole and still in, else the majority's.
       mine: myPicks
         .filter((p) => p.gameId === g.id)
         .sort((a, b) => a.round - b.round)
         .flatMap((p) => {
           const r = rounds.find((x) => x.round === p.round);
           if (!r) return [];
+          // Old games: their own side of the pair, the odd one while a mole and still in.
           const odd = wasMole && (g.ejected === null || p.round <= g.ejected);
-          return [{ round: p.round, theme: odd ? r.mole : r.majority, wasMole, title: p.title, artist: p.artist }];
+          const theme = r.prompt ?? (odd ? r.mole : r.majority) ?? "";
+          return [{ round: p.round, theme, wasMole, title: p.title, artist: p.artist, ...(p.lender ? { lender: p.lender } : {}) }];
         }),
     };
   });

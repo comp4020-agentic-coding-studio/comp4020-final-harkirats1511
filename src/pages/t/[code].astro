@@ -2,7 +2,7 @@
 import Base from "../../layouts/Base.astro";
 import { personFromCookies } from "../../lib/auth.ts";
 import { MIN_PLAYERS, normaliseCode, publicState } from "../../lib/tables.ts";
-import { MIN_CRATE } from "../../lib/taste.ts";
+import { TASTE_MAX as MIN_CRATE } from "../../lib/taste.ts";
 
 const code = normaliseCode(Astro.params.code);
 const state = publicState(code);
