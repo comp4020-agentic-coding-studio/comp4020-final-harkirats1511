@@ -1,76 +1,74 @@
 # Harness
 
-The rules below follow from what this app is for: a music game for a group of
-friends. Each round everyone gets a secret theme and picks a song for it; the
-mole has a different but close theme and doesn't know it. The room listens and
-works out whose pick doesn't quite fit. They are decisions, not defaults.
+The rules below follow from what this app is for: a music game for friends
+playing online. Everyone builds a crate of songs before they sit down; the
+crates go on the table for all to see. Each round, everyone but the mole gets a
+prompt and answers it with a song from their crate. The mole knows they're the
+mole and only knows the prompt's mood, so they have to bluff with their own
+songs. The room hears every pick with its picker's name and votes someone out.
+They are decisions, not defaults (see `docs/decisions/0009`).
 
 ## What the app must never do
 
-- **Leak a pick's owner or title before the reveal.** During a round, nothing the
-  server sends to a player (HTML, JSON or an SSE event) may contain who picked a
-  track or what it is called. The speaker device plays preview audio from a plain
-  `<audio>` element with no title or artwork on screen.
-- **Tell anyone they are the mole, or show two themes before the game ends.** Each
-  person's session gets only their own theme, worded the same way for everyone.
-  Nothing says whose theme is the odd one until the game is over, when every
-  round's pair is shown.
+- **Let the prompt reach a mole.** Nothing the server sends a mole (HTML, JSON or
+  an SSE event) may contain the round's prompt before the reveal: not the text,
+  not an id, not the other steal options' ordering in a way that marks it. A
+  mole gets the slot only. Non-moles get the prompt.
+- **Tell anyone else who the mole is.** Roles are private until the reveal of the
+  round a mole is voted out, or the game ends. A mole's screen says they're the
+  mole; nobody else's screen or data says anything about anyone's role. Two
+  moles are not told about each other.
+- **Show a pick before the pick phase closes.** Nobody sees who has picked, what,
+  or a count, until picking ends; then every pick is shown with its picker (and
+  lender, for a borrow). The public state must not change when someone picks.
 - **Let one person act as another.** A name is claimed with a PIN. Acting on
   someone's history needs their session.
-- **Expose more of a person than the app needs.** Taste files are for picking
-  quickly from your own songs; nothing from outside the app is ever shown, and
-  never a PIN.
+- **Expose more of a person than the app needs.** Crates are shown at the table
+  they're playing at; nothing from outside the app is ever shown, and never a
+  PIN.
 - **Host audio.** Tracks are Deezer ids and metadata. Preview URLs are signed and
   expire, so store the id and fetch a fresh URL per round.
 
 ## Rules the game keeps
 
-- A game needs 3 players to start and the UI recommends 4 or more.
-- **Bring your crate.** A crate (taste file) needs at least `MIN_CRATE` = 5
-  tracks to play. Sitting down (join, quick seat, creating a table) is allowed
-  with fewer, so you can spectate and fill it, but starting a game needs every
-  member to have 5: otherwise start is refused 409 ("Waiting on crates: Ana, Ben
-  (5 tracks each)") and nobody is silently made a spectator. A pick must be a
-  track in the picker's own crate at that moment (403 "Pick from your crate.");
-  there is no search fallback, and ghosts follow the same rule. Editing your
-  crate during a game is fine. The public table state carries `crateReady`
-  (5 or more) per member and never the tracks. See `docs/decisions/0007`.
-- Moles default by player count (1 up to 5 players, 2 up to 10); the host may
-  override within a cap. With two moles both get the same odd theme.
-- Voted-out players become ghosts: they still pick tracks, and they cannot vote.
+- A game needs 3 players to start and at most 8; the UI recommends 4 or more.
+- **The crate.** 12 songs in 4 slots of 3: Up, Down, Out, In. It is built on
+  `/taste` before you sit down. Starting needs every player's crate complete
+  (3 per slot), otherwise 409 "Waiting on crates: …". From start to game over,
+  crates are locked (edits refused 409) and shown to everyone at the table.
+  Each song can be played once per game, by anyone.
+- Roles are assigned when the game starts, after crates lock: 1 mole for 3 to 5
+  players, 2 for 6 to 8. Moles don't know each other.
+- **Each round has one prompt from `src/lib/prompts.ts`**, tagged with a slot.
+  Prompts cycle through the four slots before any slot repeats, and don't repeat
+  within a game. Non-moles see the prompt; moles see only its slot.
+- **Pick:** any unplayed song from your own crate, or one borrow per game from
+  another player's crate (the mole has one too). Picks are hidden until the
+  pick phase closes, then shown named: "Ben: song" or "Ben (borrowed from Tom):
+  song". A player who misses the pick is "dead air" and can still vote.
+- **Vote on a name.** While the vote is open, everyone sees how many votes each
+  player has, never who cast them, and may change their vote until it locks.
+  Once everyone who can vote has voted, a 5-second last call runs, then it
+  locks. The most votes ejects that player; a tie, or skip on top, ejects nobody.
+- **Steal.** When a mole is voted out, they get one guess from 4 prompts of that
+  round's slot (the real one and 3 others, in random order). Right: they stay
+  in, and the reveal says so. Wrong or out of time: they're out. Once per game
+  per mole.
+- Voted-out players are ghosts: they watch, don't pick and don't vote. Their crate
+  can still be borrowed from.
+- Deadlines are fixed. A pick, vote or steal that arrives after its deadline does
+  not count. A phase ends early once everyone eligible has submitted.
 - A change one person makes reaches every open session of that table within about
   a second with no reload. Reconnecting, or returning the next day, restores the
   current state from the database, never from memory.
-- Nobody sees who has picked, not even a count. The public state must not change
-  when someone picks; only the phase moving on shows it.
-- Votes are on tracks, not people (decision 0008). While the vote is open,
-  everyone sees how many votes each track has, never who cast them, and may
-  change their vote until it locks. Once everyone who can vote has voted, a
-  5-second last call runs, then it locks. The reveal shows who voted for which
-  track.
-- Deadlines are fixed. A pick or vote that arrives after its deadline does not
-  count. A phase ends early once everyone eligible has submitted.
-- The most-voted track is ejected: its picker is out. A tie, skip winning, or the
-  house record or a ghost's track winning ejects nobody.
-- Every round has one house record: a song by an artist from a random player's
-  crate, not in any crate at the table, shuffled in with the picks and
-  indistinguishable from them until the reveal labels it. No house record found
-  in time means the round plays without one; the game never waits for it.
-- Only someone who picked this round can vote in it. Missing the pick means
-  sitting the round out: you can listen and talk, but not vote, and the vote
-  doesn't wait for you.
 - Someone reconnecting mid-round keeps their role and gets whatever pick time is
-  left; once the pick deadline has passed they watch that round. Someone who joins
-  a table mid-game spectates until the next game.
+  left. Someone who joins a table mid-game spectates until the next game.
 - The game runs until every mole is out (players win) or the moles are at least as
   many as everyone else still in (moles win), as in Among Us. Leaving counts the
-  same way, and a host who leaves passes the host role on.
-- Each round draws a new theme pair from `src/lib/themes.ts`, not repeating
-  within a game. Which side the majority gets is random. A pair shares a mood
-  but is a clearly different situation: one song could answer both, but you'd
-  pick it for a different reason. Never "the same, plus a twist".
-- The reveal after a vote shows every track and its owner, and who was voted out
-  and whether they were a mole. The themes are shown only when the game ends.
+  same way, and a host who leaves passes the host role on. A leaver's crate
+  leaves with them.
+- The reveal after a vote shows the prompt, every pick with its picker, the votes
+  by name, and who was out and whether they were a mole.
 - Each player chooses where they hear tracks: on their own phone, or from the
   host's. The host's phone always plays. The choice is per person, saved, and can
   be changed during a game.
@@ -90,14 +88,16 @@ did when something goes wrong, so it stays after any crit.
 - Each line names the person by their display name and short id, and the table
   by its code, so two people with similar names are still told apart.
 - **Never logged before it is public, because the logs may be read aloud or on
-  a screen during a game:** a theme, who is a mole, a track's title, which
-  track is whose, or who someone voted for. The action itself is fine to log
+  a screen during a game:** a prompt, who is a mole, what someone picked before
+  picking closes, or who someone voted for. The action itself is fine to log
   ("Ana picked a track", "Ben voted"): that is who did what, and it reveals
-  nothing a round's outcome depends on. The reveal line may name who owned which
-  track and who was ejected, because the reveal screen shows that to everyone.
-  Themes are logged only when the game ends, as the game-over screen shows them.
+  nothing a round's outcome depends on. Once picking closes, picks may be
+  logged with their picker (the listen screen shows them). The reveal line may
+  name the prompt, who was ejected and whether they were a mole.
   Who voted for whom is never logged: the reveal shows it on screen, but the
-  logs don't need it to explain what happened.
+  logs don't need it to explain what happened. The prompt is never logged
+  before the reveal (logs may be on screen), and a steal guess only after it
+  resolves.
 - Never logged at all: PINs, PIN hashes, session tokens, cookies.
 - The same lines are kept in a small in-memory ring (the last few hundred) that
   `GET /api/logs` returns to whoever presents the admin token in
@@ -113,8 +113,8 @@ did when something goes wrong, so it stays after any crit.
   device can run WebGL 2 and the person hasn't asked for reduced motion or turned
   the scene off. Anything else gets the 2D page alone, with no error.
 - It shows only what the public table state already shows. It never knows a
-  theme, who the mole is, a track's owner or title before the reveal, or who has
-  picked or voted, so it can't leak them.
+  prompt, who the mole is, a pick before picking closes, or who has voted for
+  whom, so it can't leak them.
 - Models are the CC0 Kenney Mini Characters in `public/models/` (credited in
   `public/models/CREDITS.md`). New assets need a licence that allows it, recorded
   there.
@@ -130,7 +130,7 @@ booths. See `docs/decisions/0004`, `0005` and `0006`.
   there.
 - **The shop stream is public-state only.** It carries names, avatars,
   positions, emotes and each booth's public state, built from `publicState`.
-  Never a theme, role, pick, title, or who has picked or voted.
+  Never a prompt, role, pick, crate, or who has picked or voted.
 - **The server is the referee for movement.** Positions are clamped to the room,
   speed is capped, more than 8 moves a second from one person are dropped, and
   emotes come from a fixed list. A client is never trusted to say where someone
