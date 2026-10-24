@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 import { json, personFromCookies } from "../../../../../../lib/auth.ts";
-import { DeezerDown, getPreviewUrl } from "../../../../../../lib/deezer.ts";
+import { DEEZER_BUSY, DeezerBusy, DeezerDown, getPreviewUrl } from "../../../../../../lib/deezer.ts";
 import { cardTrackId } from "../../../../../../lib/game.ts";
 import { isMember, normaliseCode, tableExists } from "../../../../../../lib/tables.ts";
 
@@ -20,6 +20,7 @@ export const GET: APIRoute = async ({ params, cookies }) => {
     const url = await getPreviewUrl(id);
     return url ? json({ url }) : json({ error: "No preview for that track." }, 404);
   } catch (e) {
+    if (e instanceof DeezerBusy) return json({ error: DEEZER_BUSY }, 503);
     if (e instanceof DeezerDown) return json({ error: "Music service is unavailable right now." }, 502);
     throw e;
   }

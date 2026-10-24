@@ -7,6 +7,9 @@ export type Track = { id: number; title: string; artist: string; album?: string;
 
 // Thrown when Deezer is unreachable or misbehaving; routes turn it into a 502.
 export class DeezerDown extends Error {}
+// Thrown when Deezer says we are asking too fast (its error code 4); routes turn it into a 503.
+export class DeezerBusy extends DeezerDown {}
+export const DEEZER_BUSY = "Deezer is busy, try again in a moment.";
 
 type Raw = {
   id?: number;
@@ -31,8 +34,12 @@ async function get(path: string, timeoutMs = TIMEOUT_MS): Promise<Record<string,
   } catch {
     throw new DeezerDown("Deezer sent something unreadable.");
   }
-  // Errors arrive as HTTP 200 with an {error} body; treat them as not found.
-  return body && !body.error ? body : null;
+  // Errors arrive as HTTP 200 with an {error: {type, code, message}} body. Code 4
+  // is the quota ("Quota limit exceeded"): that is not "no such track", say so.
+  // Any other error body (code 800, "no data") means it isn't there.
+  const err = body?.error as { code?: number; type?: string } | undefined;
+  if (err && (err.code === 4)) throw new DeezerBusy("Deezer's quota is used up.");
+  return body && !err ? body : null;
 }
 
 function toTrack(r: Raw): Track | null {

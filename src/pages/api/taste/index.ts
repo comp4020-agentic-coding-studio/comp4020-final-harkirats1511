@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 import { json, personFromCookies } from "../../../lib/auth.ts";
-import { DeezerDown, getTrack } from "../../../lib/deezer.ts";
+import { DEEZER_BUSY, DeezerBusy, DeezerDown, getTrack } from "../../../lib/deezer.ts";
 import { log, refused, tag } from "../../../lib/log.ts";
 import { notifyTablesOf } from "../../../lib/tables.ts";
 import { addTaste, CRATE_LOCKED, crateLocked, isSlot, listTaste, PER_SLOT, TASTE_MAX } from "../../../lib/taste.ts";
@@ -33,6 +33,7 @@ export const POST: APIRoute = async ({ cookies, request }) => {
   try {
     track = await getTrack(id);
   } catch (e) {
+    if (e instanceof DeezerBusy) return json({ error: DEEZER_BUSY }, 503);
     if (e instanceof DeezerDown) return json({ error: "Music search is unavailable right now." }, 502);
     throw e;
   }

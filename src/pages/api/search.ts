@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 import { json, personFromCookies } from "../../lib/auth.ts";
-import { DeezerDown, searchTracks } from "../../lib/deezer.ts";
+import { DEEZER_BUSY, DeezerBusy, DeezerDown, searchTracks } from "../../lib/deezer.ts";
 
 // Metadata only: no preview URLs here, they are fetched per play.
 export const GET: APIRoute = async ({ cookies, url }) => {
@@ -10,6 +10,7 @@ export const GET: APIRoute = async ({ cookies, url }) => {
   try {
     return json(await searchTracks(q));
   } catch (e) {
+    if (e instanceof DeezerBusy) return json({ error: DEEZER_BUSY }, 503);
     if (e instanceof DeezerDown) return json({ error: "Music search is unavailable right now." }, 502);
     throw e;
   }
