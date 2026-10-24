@@ -114,6 +114,9 @@ class Bot {
     if (!j.ok) throw new Error(`${this.name} could not sign in`);
     const t = await this.call("/api/taste");
     this.taste = t.ok && Array.isArray(t.data) ? t.data : [];
+    // Rows from before slots (no slot) fill the cap and count for nothing: clear them.
+    for (const old of this.taste.filter((x) => !x.slot)) await this.call(`/api/taste/${old.id}`, undefined, "DELETE");
+    this.taste = this.taste.filter((x) => x.slot);
     const have = new Set(this.taste.map((x) => x.id));
     for (const slot of SLOTS) {
       const mine = () => this.taste.filter((x) => x.slot === slot).length;
@@ -188,7 +191,8 @@ class Bot {
     if (!me) return;
     if (mine !== this.run) return;
     if (me.role === "spectator") { log(this.name, `round ${g.round}: spectating`); return; }
-    log(this.name, `round ${g.round}: ${me.role}${me.prompt ? ` · "${me.prompt}"` : ""} (slot ${me.slot ?? "?"})`);
+    // Never the role, the prompt or the slot: the human host reads this terminal.
+    log(this.name, `round ${g.round}: picking`);
     if (me.picked || me.role === "ghost") return;
     const wait = this.delay(3, 15, g.deadline);
     await sleep(wait);
@@ -197,7 +201,7 @@ class Bot {
     const choice = this.chooseTrack((await this.call(`/api/tables/${code}/me`)).data as Me);
     if (!choice) return;
     const r = await this.call(`/api/tables/${code}/pick`, { trackId: choice.track.id, ...(choice.from ? { from: choice.from } : {}) });
-    if (r.ok) log(this.name, `picked "${choice.track.title}"${choice.from ? ` (borrowed from ${choice.from})` : ""}`);
+    if (r.ok) log(this.name, "picked a track");
   }
 
   async vote(g: Game, mine: number) {
@@ -230,7 +234,7 @@ class Bot {
     if (mine !== this.run) return;
     const guess = pickOne(me.steal.options)!;
     const r = await this.call(`/api/tables/${code}/steal`, { promptId: guess.id });
-    if (r.ok) log(this.name, `stole a guess: "${guess.text}"`);
+    if (r.ok) log(this.name, "guessed");
   }
 }
 
