@@ -4,6 +4,11 @@ import { personFromCookies } from "../lib/auth.ts";
 import { listTaste, PER_SLOT, TASTE_MAX as MIN_CRATE } from "../lib/taste.ts";
 import { SLOTS, SLOT_NAMES } from "../lib/prompts.ts";
 import { getAvatar } from "../lib/avatars.ts";
+import { PICK_SECONDS, SECONDS_PER_TRACK, VOTE_SECONDS } from "../lib/tables.ts";
+// Form defaults are the server constants, so the form and the plan agree.
+const PICK_OPTS = [30, 45, 60, 90];
+const VOTE_OPTS = [20, 30, 45];
+const TRACK_OPTS = [15, 20, 30];
 const me = personFromCookies(Astro.cookies);
 const next = Astro.url.searchParams.get("next") ?? "";
 const safeNext = /^(\/t\/[A-Za-z]{4}|\/taste|\/me|\/shop)$/.test(next) ? next : "";
@@ -45,27 +50,22 @@ const sortedCount = crate.filter((t) => (SLOTS as readonly string[]).includes(t.
           <input type="checkbox" id="autoplay" checked aria-describedby="autoplay-hint" />
           <label for="autoplay">Play the tracks automatically</label>
         </div>
-        <p class="hint" id="autoplay-hint">Each track plays for <span id="autoplay-n">30</span> seconds, then voting opens. The host can still pick a track.</p>
+        <p class="hint" id="autoplay-hint">Each track plays for <span id="autoplay-n">{SECONDS_PER_TRACK}</span> seconds, then voting opens. The host can still pick a track.</p>
         <div id="slot-wrap">
           <label for="slot-s">Seconds per track</label>
           <select id="slot-s">
-            <option value="15">15 seconds</option>
-            <option value="30" selected>30 seconds</option>
+            {TRACK_OPTS.map((n) => <option value={n} selected={n === SECONDS_PER_TRACK}>{n} seconds</option>)}
           </select>
         </div>
         <details class="options">
           <summary>Table options</summary>
           <label for="pick-s">Time to pick a song</label>
           <select id="pick-s">
-            <option value="30">30 seconds</option>
-            <option value="60" selected>60 seconds</option>
-            <option value="90">90 seconds</option>
+            {PICK_OPTS.map((n) => <option value={n} selected={n === PICK_SECONDS}>{n} seconds</option>)}
           </select>
           <label for="vote-s">Time to vote</label>
           <select id="vote-s">
-            <option value="30">30 seconds</option>
-            <option value="45" selected>45 seconds</option>
-            <option value="60">60 seconds</option>
+            {VOTE_OPTS.map((n) => <option value={n} selected={n === VOTE_SECONDS}>{n} seconds</option>)}
           </select>
         </details>
         <button id="create" type="button" class="full">Start a table</button>

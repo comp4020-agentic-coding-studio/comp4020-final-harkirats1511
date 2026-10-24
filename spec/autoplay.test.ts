@@ -4,8 +4,8 @@ import { baseUrl, fillCrate, session, uniqueName } from "./helpers";
 // Contract: a table can let the server play the round's tracks in order, so the
 // room isn't waiting on the host's phone (which may lock or drop).
 //   POST /api/tables {autoplay: true, slotSeconds?} -> the listen phase plays
-//        card 0, 1, ... in turn, `slotSeconds` each (default 30, the preview
-//        length; specs use short ones), then moves on to the vote by itself.
+//        card 0, 1, ... in turn, `slotSeconds` each (default 20 s;
+//        specs use short ones), then moves on to the vote by itself.
 // The host can still play a slot by hand, which takes over from there.
 
 vi.setConfig({ testTimeout: 90_000 });
