@@ -843,8 +843,11 @@ it("keeps every finished round, who has borrowed and what was heard, and never t
   await waitFor(g.code, (s) => s.game?.phase === "steal", 9000);
   const steal = await game();
   expect(steal.past.map((p) => p.round)).toEqual([1]);
-  expect(promptsIn(JSON.stringify(steal))).toEqual([g.prompt].filter((p) => PROMPTS.some((x) => x.text === p)).map((p) => PROMPTS.find((x) => x.text === p)!.id));
-  const { wrong } = await stealOptions(g, g.moles[0]);
+  // Only round 1's prompt (revealed) is anywhere in it; round 2's is not.
+  expect(promptsIn(JSON.stringify(steal))).toEqual([PROMPTS.find((x) => x.text === g.prompt)!.id]);
+  // Round 2's prompt, as a non-mole sees it: the steal's wrong option is anything else.
+  const second = (await me(g.others[0], g.code)).prompt!;
+  const wrong = (await me(g.moles[0], g.code)).steal!.options.find((o) => o.text !== second)!;
   await g.moles[0].s.call(at(g.code, "steal"), { body: { promptId: wrong.id } });
   const end = await waitFor(g.code, (s) => s.status === "finished");
   // Game over: every round is in the past, with the ejected mole on the last.
