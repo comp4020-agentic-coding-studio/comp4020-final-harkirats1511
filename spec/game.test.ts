@@ -348,6 +348,66 @@ it("never sends a mole the prompt, in any phase before the reveal", async () => 
   for (const st of g.streams!.values()) st.close();
 });
 
+// Everything a mole can receive, in one string: /me, public state, a fresh SSE
+// snapshot, the table page HTML and the history. (The suite has no browser, and the
+// page shell holds no game state, so the client can only show what these carry.)
+async function everythingAMoleGets(g: G, mole: Player) {
+  const stream = await mole.s.open(at(g.code, "events"));
+  await stream.next((e) => e.event === "state");
+  const parts = [
+    await (await mole.s.call(at(g.code, "me"))).text(),
+    await (await fetch(new URL(at(g.code, ""), baseUrl))).text(),
+    stream.raw,
+    await (await mole.s.call(`/t/${g.code}`)).text(),
+    await (await mole.s.call("/api/history")).text(),
+  ];
+  stream.close();
+  return textOf(...parts);
+}
+// A prompt text may appear once its round is in `past` (revealed): only then.
+const unrevealedPromptsIn = (text: string, past: Past[]) => {
+  const revealed = new Set(past.map((p) => p.prompt));
+  return PROMPTS.filter((p) => !revealed.has(p.text) && (text.includes(p.text) || text.includes(p.text.replace(/'/g, "&#39;")) || text.includes(`"${p.id}"`))).map((p) => p.id);
+};
+
+it("sends a mole no unrevealed prompt in /me, public state, a stream snapshot or the table page, in pick, listen and vote", async () => {
+  const g = await started(4);
+  const mole = g.moles[0];
+  const seen: [string, string][] = [];
+  const grab = async (label: string) => {
+    const pub = (await state(g.code)).game!;
+    seen.push([label, await everythingAMoleGets(g, mole)]);
+    return pub.past;
+  };
+  // Round 1: pick, listen, vote.
+  await grab("r1 pick");
+  await pickOwn(g.code, g.players);
+  await waitFor(g.code, (s) => s.game?.phase === "listen");
+  await grab("r1 listen");
+  await toVote(g);
+  await grab("r1 vote");
+  await voteFor(g.code, g.players, "skip");
+  await waitFor(g.code, (s) => s.game?.phase === "reveal", 9000);
+  // Round 2: round 1's prompt is public now; round 2's must not be.
+  await nextRound(g, 2);
+  const prompt2 = (await me(g.others[0], g.code)).prompt!;
+  expect(prompt2).toBeTruthy();
+  await grab("r2 pick");
+  await pickOwn(g.code, g.players, 2);
+  await waitFor(g.code, (s) => s.game?.phase === "listen");
+  await grab("r2 listen");
+  await toVote(g);
+  const past = await grab("r2 vote");
+  expect(past.map((p) => p.round)).toEqual([1]);
+  for (const [label, text] of seen) {
+    // The check bites: a non-mole's own /me does carry its prompt.
+    expect(unrevealedPromptsIn(text, past), `a prompt reached the mole in ${label}`).toEqual([]);
+  }
+  expect(unrevealedPromptsIn(prompt2, past), "the check can see a prompt").toHaveLength(1);
+  // Round 2's prompt is in the non-mole's view, which the same scan does find.
+  expect(unrevealedPromptsIn(await (await g.others[0].s.call(at(g.code, "me"))).text(), past)).toHaveLength(1);
+});
+
 // ---- picking ----
 
 it("keeps picks hidden until picking closes: public state and the stream don't change", async () => {
