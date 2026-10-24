@@ -43,8 +43,8 @@ ENV HOST=0.0.0.0
 ENV PORT=8080
 # the volume at /data is the only storage that survives a restart
 ENV DATABASE_PATH=/data/app.db
-# the machine has 256 MB: cap the V8 heap and glibc malloc arenas
-ENV NODE_OPTIONS=--max-old-space-size=128
+# the machine has 256 MB: cap the V8 heap, its young generation and glibc malloc arenas
+ENV NODE_OPTIONS="--max-old-space-size=128 --max-semi-space-size=4"
 ENV MALLOC_ARENA_MAX=2
 EXPOSE 8080
 CMD ["node", "./dist/server/entry.mjs"]
