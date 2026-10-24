@@ -21,7 +21,7 @@ export type PublicState = {
     alive: string[];
     ghosts: string[];
     reveal?: { ejected: string | null; wasMole: boolean };
-    winner?: "players" | "moles";
+    winner?: "players" | "moles" | "none";
   };
 };
 
@@ -231,7 +231,7 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
   let spin = false;
   let nod = false;
   let reveal: { name: string | null; wasMole: boolean } | null = null;
-  let over: "players" | "moles" | null = null;
+  let over: "players" | "moles" | null = null; // "none" (abandoned) is no ending to act out
   const rng = (a: number, b: number) => a + Math.random() * (b - a);
 
   // Everyone's seat is recomputed from the member list: aid users take the ends
@@ -338,7 +338,7 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
   function update(next: PublicState) {
     state = next;
     const g = next.game;
-    const live = next.status === "playing" || !!g?.winner;
+    const live = next.status === "playing" || (!!g?.winner && g.winner !== "none");
     const ghosts = new Set(live ? (g?.ghosts ?? []) : []);
     const names = new Set(next.members.map((m) => m.name));
     for (const p of [...people.values()]) if (!names.has(p.name)) leave(p);
@@ -379,7 +379,7 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
     reveal = g?.reveal && phase === "reveal" ? { name: g.reveal.ejected, wasMole: g.reveal.wasMole } : null;
     void prevReveal;
     stamp.hidden = true;
-    over = g?.winner ?? null;
+    over = g?.winner === "none" ? null : (g?.winner ?? null);
     for (const p of people.values()) {
       const tag = p.label;
       tag.replaceChildren(document.createTextNode(p.name));

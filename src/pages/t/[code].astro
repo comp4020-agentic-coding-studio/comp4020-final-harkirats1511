@@ -77,6 +77,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           <p class="hint"><a href="/me">Change your character</a></p>
           <p class="nudge" id="crate-me" hidden><a id="crate-me-link" href={`/taste?next=/t/${code}`}>Fill your crate</a></p>
           <button id="start" type="button" class="full" disabled hidden>Start game</button>
+          <p class="hint abandoned" id="abandoned" role="status" hidden></p>
           <p class="hint" id="start-note" aria-live="polite"></p>
           <p id="msg" class="error" role="alert"></p>
         </div>
@@ -266,7 +267,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
             <li>Pick a song from your crate that answers the prompt. You can borrow one song from someone else's crate, once.</li>
             <li>Every pick plays with its picker's name. A song can only be heard once a game.</li>
             <li>Vote out the player whose song doesn't fit. A mole who is caught can steal the win by guessing the prompt.</li>
-            <li>Players win when every mole is out. Moles win when they are as many as everyone left, or when a steal lands.</li>
+            <li>Players win when every mole is out. Moles win when they are as many as everyone left, when a steal lands, when a vote with three left ejects nobody, or if they are still in after round 12. A round nobody picks in ends the game with no winner.</li>
           </ol>
         </details>
       </aside>
@@ -302,7 +303,8 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     past: Past[];
     borrowed: string[];
     played: number[];
-    winner?: "players" | "moles";
+    winner?: "players" | "moles" | "none";
+    ending?: "final-vote" | "round-cap" | "nobody-picked";
     moles?: string[];
   };
   type Member = { name: string; avatar: Avatar; crateReady: boolean; crate?: CrateTrack[] };
@@ -409,7 +411,8 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     if (!state) return;
     const g = state.game;
     const playing = state.status === "playing" && !!g;
-    const over = !!g?.winner;
+    // An abandoned game (winner "none") leaves the table in the lobby, not on a game-over screen.
+    const over = !!g?.winner && g.winner !== "none";
     const inGame = playing || over;
     const phase = g?.phase;
 
@@ -427,6 +430,9 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     }
     renderMembers();
     renderLobby();
+    const gone = state.status !== "playing" && g?.winner === "none";
+    show("abandoned", gone);
+    $("abandoned").textContent = gone ? (g!.ending === "nobody-picked" ? "Game abandoned: nobody picked. Your crates are open again." : "That game was left unfinished and has ended with no winner.") : "";
     renderCard(playing && (phase === "pick" || phase === "listen" || phase === "vote"), phase);
     renderPick(playing && phase === "pick");
     renderListen(playing && (phase === "listen" || phase === "vote"));
@@ -498,7 +504,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     const n = s.members.length;
     const start = $<HTMLButtonElement>("start");
     show("start", isHost());
-    start.textContent = s.game ? "Play again" : "Start game";
+    start.textContent = s.game && s.game.winner !== "none" ? "Play again" : "Start game";
     delete start.dataset.conn;
     const notReady = s.members.filter((m) => !m.crateReady).map((m) => m.name);
     start.disabled = n < minPlayers || notReady.length > 0;
@@ -634,20 +640,31 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
       };
       const fit = mine.filter((c) => c.slot === slot);
       const rest = mine.filter((c) => c.slot !== slot);
-      $("pick-lists").replaceChildren(
-        h("h3", {}, `Fits the mood: ${slotLabel(slot)}`),
-        h("ul", { class: "tracks pickable", "aria-label": "Songs that fit the mood" }, ...fit.map((c) => row(c, true))),
-        h("h3", {}, "The rest of your crate"),
-        h("ul", { class: "tracks pickable", "aria-label": "The rest of your crate" }, ...rest.map((c) => row(c, false))),
-      );
-      show("borrow-wrap", true);
+      // Public data only: the crate on the table and what has been heard.
+      const spent = mine.every((c) => played.has(c.trackId));
+      const lenders = state!.members.filter((m) => m.name !== myName && m.crate?.some((c) => !played.has(c.trackId)));
+      const canBorrow = !used && lenders.length > 0;
+      if (spent) {
+        $("pick-lists").replaceChildren(
+          h("p", { class: "empty-crate" },
+            `Your crate is empty: every song has been heard. ${used ? "You've used your borrow; sit this one out." : canBorrow ? "You can still borrow once." : "There is nothing left to borrow either; sit this one out."}`),
+        );
+      } else {
+        $("pick-lists").replaceChildren(
+          h("h3", {}, `Fits the mood: ${slotLabel(slot)}`),
+          h("ul", { class: "tracks pickable", "aria-label": "Songs that fit the mood" }, ...fit.map((c) => row(c, true))),
+          h("h3", {}, "The rest of your crate"),
+          h("ul", { class: "tracks pickable", "aria-label": "The rest of your crate" }, ...rest.map((c) => row(c, false))),
+        );
+      }
+      show("borrow-wrap", !used || !spent);
       const bt = $<HTMLButtonElement>("borrow-toggle");
-      bt.hidden = used;
+      bt.hidden = used || !canBorrow;
       bt.textContent = borrowOpen ? "Close borrowing" : "Borrow instead";
       bt.setAttribute("aria-expanded", String(borrowOpen));
-      $("borrow-note").textContent = used ? "You have used your borrow this game." : "One borrow a game, from anyone's crate. It will say whose.";
-      show("borrow-panel", borrowOpen && !used);
-      if (borrowOpen && !used) {
+      $("borrow-note").textContent = used ? "You have used your borrow this game." : !canBorrow ? "Nobody has a song left to borrow." : "One borrow a game, from anyone's crate. It will say whose.";
+      show("borrow-panel", borrowOpen && canBorrow);
+      if (borrowOpen && canBorrow) {
         const others = state!.members.filter((m) => m.name !== myName && m.crate);
         $("borrow-panel").replaceChildren(
           ...others.map((m) => {
@@ -786,7 +803,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     const g = state!.game!;
     const voter = active();
     $("vote-note").textContent = voter
-      ? ""
+      ? g.alive.length === 3 ? "Three left: if nobody is voted out, the moles win." : ""
       : me.role === "ghost" ? "You're out, so you can't vote. You can still watch the count." : "You're watching this game, so you can't vote.";
     const mine = me.vote;
     const myName_ = "name" in (mine ?? {}) ? (mine as { name: string }).name : null;
@@ -850,7 +867,11 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
 
   function renderSteal(on: boolean) {
     show("steal", on);
-    if (!on) return;
+    if (!on) {
+      // The steal is over: no decoy prompts stay in the page.
+      if (sigs.has("steal")) { sigs.delete("steal"); $("steal-options").replaceChildren(); }
+      return;
+    }
     const g = state!.game!;
     const accused = g.accused ?? "";
     const mineToGuess = !!me?.steal;
@@ -937,6 +958,8 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
         parts.push(`${r.ejected} was voted out. ${r.wasMole ? "They were a mole." : "They were not a mole."}`);
         if (r.wasMole) parts.push("They missed the steal.");
       } else parts.push("Nobody was voted out.");
+      if (g.ending === "final-vote") parts[parts.length - 1] = "Nobody was voted out with three left: the moles win.";
+      else if (g.ending === "round-cap") parts.push("Round 12 is over and the moles are still in: the moles win.");
       eject.textContent = parts.join(" ");
       // The stamp repeats what the sentence says: colour is never the only signal.
       if (r.wasMole || r.stole) eject.append(h("span", { class: "stamp mole" }, "Mole"));
@@ -1379,12 +1402,12 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           : "Listen.",
         );
       }
-      else if (g?.winner) announce(g.winner === "players" ? "Game over. The players caught every mole." : "Game over. The moles took over.");
+      else if (g?.winner) announce(g.winner === "players" ? "Game over. The players caught every mole." : g.winner === "none" ? "Game abandoned: nobody picked." : "Game over. The moles took over.");
       void refreshMe();
       pendingEnter = true;
       // Keyboard and screen-reader users follow the game: land on the new phase's heading.
       // Not on the first frame of a page load, and not on later frames of the same phase.
-      pendingFocus = prev && (g && next.status === "playing" || g?.winner) ? (g!.winner ? "reveal-h" : `${g!.phase}-h`) : "";
+      pendingFocus = prev && (g && next.status === "playing" || (g?.winner && g.winner !== "none")) ? (g!.winner ? "reveal-h" : `${g!.phase}-h`) : "";
     }
     render();
     if (pendingEnter) {

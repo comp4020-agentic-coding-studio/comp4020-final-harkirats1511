@@ -25,9 +25,14 @@ const games = historyFor(me.id);
               <p class="hist-code">BOOTH {g.code}</p>
               <p class="hist-meta"><time datetime={new Date(g.finishedAt).toISOString()} data-ts={g.finishedAt}>{new Date(g.finishedAt).toISOString().slice(0, 10)}</time></p>
             </div>
-            <span class={`stamp ${g.winner === "moles" ? "moles" : "win"}`}>{g.winner === "moles" ? "Moles won" : "Players won"}</span>
+            <span class={`stamp ${g.winner === "moles" ? "moles" : "win"}`}>{g.winner === "moles" ? "Moles won" : g.winner === "none" ? "No winner" : "Players won"}</span>
           </div>
           <p class="hist-players"><strong>Players:</strong> {g.players.join(", ")}</p>
+          {g.winner === "none" && (
+            <p class="hint">{g.ending === "nobody-picked" ? "Game abandoned: nobody picked." : "This game was left unfinished and ended with no winner."}</p>
+          )}
+          {g.winner === "moles" && g.ending === "final-vote" && <p class="hint">Nobody was voted out with three left, so the moles won.</p>}
+          {g.winner === "moles" && g.ending === "round-cap" && <p class="hint">The moles were still in after round 12, so they won.</p>}
           <ol class="hist-rounds">
             {g.rounds.map((r) => {
               const m = g.mine.find((x) => x.round === r.round);

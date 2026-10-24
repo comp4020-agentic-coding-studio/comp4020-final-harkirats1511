@@ -147,8 +147,11 @@ export const games = sqliteTable(
     // The anonymous slot the host has playing now, or null; public, it says
     // which number is playing and nothing about whose it is.
     nowPlaying: integer("now_playing"),
-    // "players" | "moles" once the game is over.
+    // "players" | "moles" once the game is over, or "none" for a game that ended
+    // with no winner (nobody picked, or an unfinished game a migration ended).
     winner: text("winner"),
+    // Why it ended when that isn't the plain win: "final-vote", "round-cap" or "nobody-picked".
+    endReason: text("end_reason"),
     // The four slots in this game's order (JSON array, shuffled at the start):
     // round n draws a prompt of slotOrder[(n - 1) % 4], so no slot repeats
     // before all four have come up.

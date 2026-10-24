@@ -1,0 +1,1 @@
+ALTER TABLE `games` ADD `end_reason` text;

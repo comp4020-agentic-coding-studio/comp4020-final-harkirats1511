@@ -44,7 +44,8 @@ type Game = {
     prompt: string; slot: string; cards: Card[]; deadAir: string[]; votes: { voter: string; choice: string | null }[];
     accused: string | null; ejected: string | null; wasMole: boolean; stole: boolean;
   };
-  winner?: "players" | "moles";
+  winner?: "players" | "moles" | "none";
+  ending?: "final-vote" | "round-cap" | "nobody-picked" | "update";
   moles?: string[];
   prompts?: { round: number; prompt: string; slot: string }[];
 };
@@ -187,9 +188,17 @@ it("refuses 2 players and a ninth seat, and starts with 3 to 8", async () => {
   expect(((await res.json()) as { error: string }).error).toMatch(/at least 3/);
   const more = await Promise.all([2, 3, 4, 5, 6, 7, 0].map((i) => player("lim", i)));
   for (const p of more) await p.s.call(at(code, "join"), { body: {} });
-  const nine = await host.s.call(at(code, "start"), { body: {} });
-  expect(nine.status).toBe(409);
-  expect(((await nine.json()) as { error: string }).error).toMatch(/at most 8/);
+  // The ninth person is turned away at the door, not at start: the table stays at 8.
+  const ninth = await player("lim", 1);
+  const door = await ninth.s.call(at(code, "join"), { body: {} });
+  expect(door.status).toBe(409);
+  expect(((await door.json()) as { error: string }).error).toMatch(/full.*8/);
+  expect((await state(code)).members.length).toBe(8);
+  // Someone already seated can still reopen the page.
+  expect((await more[0].s.call(at(code, "join"), { body: {} })).status).toBe(200);
+  const booth = ((await (await host.s.call("/api/shop/booths")).json()) as { code?: string; seated: number; max: number }[]).find((b) => b.code === code);
+  if (booth) expect(booth).toMatchObject({ seated: 8, max: 8 });
+  expect((await host.s.call(at(code, "start"), { body: {} })).status).toBeLessThan(300);
 });
 
 it("starts with 8 players and deals 2 moles", async () => {
@@ -1011,7 +1020,7 @@ it("steal decoys are never a prompt used earlier in the game", async () => {
 }, 120_000);
 
 it("moves the reveal on by itself after 30 seconds, and a game-over reveal has no deadline", async () => {
-  const g = await started(3, { voteSeconds: 2 });
+  const g = await started(4, { voteSeconds: 2 });
   await pickOwn(g.code, g.players);
   await toVote(g);
   const r = await waitFor(g.code, (s) => s.game?.phase === "reveal", 6000);
@@ -1025,3 +1034,98 @@ it("moves the reveal on by itself after 30 seconds, and a game-over reveal has n
   const end = await waitFor(g.code, (s) => s.status === "finished");
   expect(end.game!.deadline).toBeNull();
 }, 120_000);
+
+// ---- every game ends ----
+
+it("ends in a moles win when a vote with three left ejects nobody: a tie", async () => {
+  const g = await started(3, { voteSeconds: 60 });
+  await pickOwn(g.code, g.players);
+  await toVote(g);
+  const [a, b, c] = g.players;
+  const vote = (p: Player, name: string) => p.s.call(at(g.code, "vote"), { body: { name } });
+  await vote(a, b.name);
+  await vote(b, c.name);
+  await vote(c, a.name); // 1-1-1
+  const end = await waitFor(g.code, (s) => s.status === "finished", 12_000);
+  expect(end.game).toMatchObject({ winner: "moles", ending: "final-vote", round: 1, phase: "reveal", deadline: null });
+  expect(end.game!.reveal!.ejected).toBeNull();
+  expect(end.game!.reveal!.prompt).toBeTruthy();
+  expect(end.game!.reveal!.cards.length).toBe(3);
+  expect(end.game!.moles).toEqual(g.moles.map((m) => m.name));
+  expect(end.game!.ghosts).toEqual([]);
+});
+
+it("ends in a moles win when skip tops a vote with three left", async () => {
+  const g = await started(3, { voteSeconds: 60 });
+  await pickOwn(g.code, g.players);
+  await toVote(g);
+  const [a, b, c] = g.players;
+  await voteFor(g.code, [a, b], "skip");
+  await c.s.call(at(g.code, "vote"), { body: { name: a.name } });
+  const end = await waitFor(g.code, (s) => s.status === "finished", 12_000);
+  expect(end.game).toMatchObject({ winner: "moles", ending: "final-vote" });
+});
+
+it("still lets a vote with three left eject someone and carry on (a tie with four is not the last chance)", async () => {
+  const g = await started(4, { voteSeconds: 60 });
+  await pickOwn(g.code, g.players);
+  await toVote(g);
+  await voteFor(g.code, g.players, "skip");
+  const s = await waitFor(g.code, (x) => x.game?.phase === "reveal", 12_000);
+  expect(s.game!.winner).toBeUndefined();
+  expect(s.status).toBe("playing");
+});
+
+it("gives the moles the game if they are still in after round 12's reveal", async () => {
+  const g = await started(4, { pickSeconds: 15, voteSeconds: 2 });
+  for (let round = 1; round <= 12; round++) {
+    await pickOwn(g.code, g.players, round);
+    await waitFor(g.code, (s) => s.game?.round === round && s.game?.phase === "listen");
+    await g.host.s.call(at(g.code, "advance"), { body: {} });
+    // Nobody votes: the vote runs out and nobody is ejected.
+    const s = await waitFor(g.code, (x) => x.game?.phase === "reveal" && x.game.round === round, 9000);
+    if (round < 12) {
+      expect(s.game!.winner).toBeUndefined();
+      await nextRound(g, round + 1);
+    } else {
+      expect(s.game).toMatchObject({ winner: "moles", ending: "round-cap", round: 12, deadline: null });
+      expect(s.status).toBe("finished");
+      expect(s.game!.prompts!.length).toBe(12);
+    }
+  }
+}, 150_000);
+
+it("abandons a game nobody picks in: no winner, the table back in the lobby, crates unlocked", async () => {
+  const g = await started(3, { pickSeconds: 2 });
+  const p = g.players[1];
+  const taste = (await (await p.s.call("/api/taste")).json()) as { id: number }[];
+  expect((await p.s.call(`/api/taste/${taste[0].id}`, { method: "DELETE" })).status).toBe(409);
+  const end = await waitFor(g.code, (s) => s.game?.winner === "none", 8000);
+  expect(end.status).toBe("open");
+  expect(end.game).toMatchObject({ winner: "none", ending: "nobody-picked" });
+  expect(end.game!.moles).toBeUndefined();
+  expect(end.members.length).toBe(3);
+  // Crates open again, and the same table can start again.
+  expect((await p.s.call(`/api/taste/${taste[0].id}`, { method: "DELETE" })).status).toBeLessThan(300);
+  expect((await p.s.call("/api/taste", { body: { trackId: taste[0].id, slot: "up" } })).status).toBe(201);
+  expect((await g.host.s.call(at(g.code, "start"), { body: {} })).status).toBeLessThan(300);
+  // History shows it as a game with no winner.
+  const hist = (await (await p.s.call("/api/history")).json()) as { code: string; winner: string; ending?: string }[];
+  expect(hist.find((h) => h.code === g.code)).toMatchObject({ winner: "none", ending: "nobody-picked" });
+});
+
+it("clears the steal options once the steal is over", async () => {
+  const g = await started(5, { voteSeconds: 60 });
+  await pickOwn(g.code, g.players);
+  await toVote(g);
+  await voteFor(g.code, g.players, g.moles[0].name);
+  await waitFor(g.code, (s) => s.game?.phase === "steal", 9000);
+  expect((await me(g.moles[0], g.code)).steal?.options.length).toBe(4);
+  const { wrong } = await stealOptions(g, g.moles[0]);
+  await g.moles[0].s.call(at(g.code, "steal"), { body: { promptId: wrong.id } });
+  await waitFor(g.code, (s) => s.game?.phase === "reveal");
+  const after = await me(g.moles[0], g.code);
+  expect(after.role).toBe("ghost");
+  expect(after.steal).toBeUndefined();
+  expect(textOf(after)).not.toContain(wrong.text);
+});

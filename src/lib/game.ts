@@ -4,7 +4,7 @@ import { db } from "./db.ts";
 import { gamePlayers, gamePrompts, games, people, picks, tableMembers, tableRemovals, tables, votes } from "./schema.ts";
 import { log, personTag, tableScope } from "./log.ts";
 import { PROMPTS, SLOTS, type Slot } from "./prompts.ts";
-import { crateComplete, crateTrack } from "./taste.ts";
+import { crateComplete, crateTrack, TASTE_MAX } from "./taste.ts";
 import {
   currentGame, defaultMoles, MAX_PLAYERS, MIN_PLAYERS, notifyTable, playedTrackIds, promptById, SECONDS_PER_TRACK, tableOptions,
 } from "./tables.ts";
@@ -23,7 +23,13 @@ export const STEAL_SECONDS = 15;
 // A reveal moves on to the next round by itself after this; the host can move it sooner.
 export const REVEAL_SECONDS = 30;
 export const LAST_CALL_MS = 5000;
+// How many prompts the voted-out mole chooses from (the real one and the rest decoys).
 export const STEAL_OPTIONS = 4;
+// A game never runs past this round: a crate has 12 songs, so by round 12 the
+// crates are nearly spent. The moles win if they are still in after its reveal.
+export const MAX_ROUNDS = TASTE_MAX;
+// The seats the moles win at: with this many left, a vote that ejects nobody ends the game.
+const FINAL_VOTE_ALIVE = 3;
 // Listening that the host doesn't move on gets this much slack past the tracks.
 const LISTEN_SLACK_MS = 5_000;
 
@@ -143,17 +149,24 @@ function assignOrder(d: Tx, g: Game): number {
   return rows.length;
 }
 
-function finish(d: Tx, g: Game, winner: "players" | "moles") {
+export type Winner = "players" | "moles" | "none";
+// Why a game ended when it was not simply "every mole out" or "moles at parity":
+// the public state carries it so the screen can say so.
+export type Ending = "final-vote" | "round-cap" | "nobody-picked" | "update";
+
+function finish(d: Tx, g: Game, winner: Winner, ending: Ending | null = null) {
   // A game cut short while picking never closed that round: its hidden picks are
   // neither ordered nor logged.
   if (g.phase !== "pick") assignOrder(d, g);
-  d.update(games).set({ winner, phase: "reveal", deadline: null, finishedAt: Date.now() }).where(eq(games.id, g.id)).run();
-  d.update(tables).set({ status: "finished" }).where(eq(tables.code, g.tableCode)).run();
+  d.update(games).set({ winner, endReason: ending, phase: "reveal", deadline: null, finishedAt: Date.now() }).where(eq(games.id, g.id)).run();
+  // An abandoned game puts the table back in the lobby; any other ending leaves
+  // the game-over screen up until the host plays again.
+  d.update(tables).set({ status: winner === "none" ? "open" : "finished" }).where(eq(tables.code, g.tableCode)).run();
   // The game-over screen shows the winner and every round's prompt to everyone.
   const rounds = d.select().from(gamePrompts).where(eq(gamePrompts.gameId, g.id)).orderBy(asc(gamePrompts.round)).all();
   log(
     tableScope(g.tableCode),
-    `game finished · winner: ${winner} · ${rounds.map((r) => `round ${r.round}: "${promptById(r.promptId)?.text ?? r.promptId}"`).join(" | ")}`,
+    `game finished · winner: ${winner}${ending ? ` (${ending})` : ""} · ${rounds.map((r) => `round ${r.round}: "${promptById(r.promptId)?.text ?? r.promptId}"`).join(" | ")}`,
   );
 }
 
@@ -199,16 +212,22 @@ function resolveVote(d: Tx, g: Game) {
 function settleVerdict(d: Tx, g: Game, accused: string | null, stole: boolean) {
   // A right steal ends the game for the moles; nobody is ejected.
   const out = accused && !stole ? accused : null;
+  const aliveBefore = aliveIn(d, g.id).length;
   if (out) {
     d.update(gamePlayers).set({ ejectedRound: g.round }).where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.personId, out))).run();
   }
   d.update(games)
-    .set({ phase: "reveal", deadline: Date.now() + REVEAL_SECONDS * 1000, ejectedPersonId: out, stealPersonId: stole ? accused : g.stealPersonId, stole: stole ? 1 : 0, lastCall: 0 })
+    // The steal is over: its options (decoys included) are cleared with it.
+    .set({ phase: "reveal", deadline: Date.now() + REVEAL_SECONDS * 1000, ejectedPersonId: out, stealPersonId: stole ? accused : g.stealPersonId, stealOptions: null, stole: stole ? 1 : 0, lastCall: 0 })
     .where(eq(games.id, g.id))
     .run();
   logReveal(d, g, accused, out, stole);
+  const done = { ...g, ejectedPersonId: out };
   const winner = stole ? "moles" : winnerOf(d, g.id);
-  if (winner) finish(d, { ...g, ejectedPersonId: out }, winner);
+  if (winner) return finish(d, done, winner);
+  // The last chance: with three left, a vote that ejects nobody hands it to the moles.
+  if (!out && aliveBefore === FINAL_VOTE_ALIVE) return finish(d, done, "moles", "final-vote");
+  if (g.round >= MAX_ROUNDS) return finish(d, done, "moles", "round-cap");
 }
 
 // A mole was voted out and has a steal: four prompts of the round's slot (the
@@ -261,6 +280,11 @@ function step(d: Tx, g: Game, cause: string) {
   const now = Date.now();
   if (g.phase === "pick") {
     const cards = assignOrder(d, g);
+    // Nobody picked: nobody is playing. End it so the crates unlock.
+    if (cards === 0) {
+      logPhase(g, "reveal", cause, " · nobody picked");
+      return finish(d, g, "none", "nobody-picked");
+    }
     logPhase(g, "listen", cause, ` · ${cards} track${cards === 1 ? "" : "s"}`);
     if (t.autoplay && cards > 0) {
       log(tableScope(g.tableCode), `autoplay · track 1 of ${cards} playing · round ${g.round}`);
@@ -293,6 +317,8 @@ function step(d: Tx, g: Game, cause: string) {
     logPhase(g, "reveal", cause);
     resolveSteal(d, g);
   } else if (g.phase === "reveal") {
+    // Normally the round cap already ended the game at this reveal; this is the net.
+    if (g.round >= MAX_ROUNDS) return finish(d, g, "moles", "round-cap");
     logPhase(g, "pick", cause, ` (next round ${g.round + 1})`);
     d.update(games)
       .set({
@@ -395,7 +421,36 @@ function fire(code: string, round: number, phase: string) {
 export function resumeGames() {
   const running = db.select({ code: tables.code }).from(tables).where(eq(tables.status, "playing")).all();
   log("server", `started · resuming ${running.length} running game${running.length === 1 ? "" : "s"}`);
-  for (const { code } of running) schedule(code);
+  for (const { code } of running) {
+    // A game this engine can't carry on (one begun by an older version: no slot
+    // order, or no prompt for its round) is ended with no winner, not resumed broken.
+    const g = currentGame(code);
+    if (g && !g.winner && !resumable(g)) {
+      db.transaction((tx) => finish(tx, g, "none", "update"));
+      log(tableScope(code), `game ended with no winner at boot · it can't be resumed (round ${g.round}, ${g.phase})`);
+      notifyTable(code);
+      continue;
+    }
+    // A table marked playing with no running game has nothing to wait on: reopen it.
+    if (!g || g.winner) {
+      db.update(tables).set({ status: g?.winner === "none" ? "open" : "finished" }).where(eq(tables.code, code)).run();
+      log(tableScope(code), "table was marked playing with no running game · closed at boot");
+      continue;
+    }
+    schedule(code);
+  }
+}
+
+// What the engine needs to carry a game on: this round's prompt, and the slot
+// cycle the next rounds draw from.
+function resumable(g: Game): boolean {
+  if (!g.slotOrder) return false;
+  try {
+    if ((JSON.parse(g.slotOrder) as unknown[]).length !== SLOTS.length) return false;
+  } catch {
+    return false;
+  }
+  return !!promptOf(db, g.id, g.round);
 }
 
 // ---- what a player does ----

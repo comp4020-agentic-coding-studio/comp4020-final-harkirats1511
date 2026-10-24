@@ -92,6 +92,20 @@
       "when": 1792823013026,
       "tag": "0012_dizzy_shadow_king",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1792843244559,
+      "tag": "0013_sloppy_pride",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1792843245658,
+      "tag": "0014_end_unfinished_games",
+      "breakpoints": true
     }
   ]
 }
