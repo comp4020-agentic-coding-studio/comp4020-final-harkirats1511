@@ -134,3 +134,41 @@ it("serves the crate builder with the four slot dividers, and a home page with n
   expect(home).not.toMatch(/id="moles"/);
   expect(home).toContain("/ 12");
 });
+
+// Old rows from before slots have no slot. They can't be made over the API, so this
+// plants them in the app's own database: it runs where DATABASE_PATH points at that file
+// (a local run), and is skipped against a remote or containerised app.
+it.skipIf(!process.env.DATABASE_PATH)("doesn't let unsorted legacy songs fill the crate, and counts only sorted songs as ready", async () => {
+  const { default: Database } = await import("better-sqlite3");
+  const { s, name } = await signedIn();
+  const me = (await (await s.call("/api/me")).json()) as { id: string };
+  const db = new Database(process.env.DATABASE_PATH!);
+  const plant = db.prepare("insert into taste_tracks (person_id, track_id, title, artist, added_at, slot) values (?, ?, ?, ?, ?, null)");
+  // Fourteen old songs: more than the whole crate.
+  for (let i = 0; i < 14; i++) plant.run(me.id, 900000000 + i, `Old ${i}`, "Old", Date.now() + i);
+  db.close();
+  expect(((await (await s.call("/api/taste")).json()) as Track[]).filter((t) => !t.slot)).toHaveLength(14);
+  // A full, sorted crate still goes in beside them, and then is complete.
+  await fillCrate(s, 5);
+  const taste = (await (await s.call("/api/taste")).json()) as Track[];
+  for (const slot of ["up", "down", "out", "in"]) expect(taste.filter((t) => t.slot === slot)).toHaveLength(3);
+  const { code } = (await (await s.call("/api/tables", { body: {} })).json()) as { code: string };
+  const pub = (await (await s.call(`/api/tables/${code}`)).json()) as { members: { name: string; crateReady: boolean }[] };
+  expect(pub.members.find((m) => m.name === name)?.crateReady).toBe(true);
+});
+
+it.skipIf(!process.env.DATABASE_PATH)("a person with only unsorted songs isn't ready, however many they have", async () => {
+  const { default: Database } = await import("better-sqlite3");
+  const { s, name } = await signedIn();
+  const me = (await (await s.call("/api/me")).json()) as { id: string };
+  const db = new Database(process.env.DATABASE_PATH!);
+  const plant = db.prepare("insert into taste_tracks (person_id, track_id, title, artist, added_at, slot) values (?, ?, ?, ?, ?, null)");
+  for (let i = 0; i < 12; i++) plant.run(me.id, 910000000 + i, `Old ${i}`, "Old", Date.now() + i);
+  db.close();
+  const { code } = (await (await s.call("/api/tables", { body: {} })).json()) as { code: string };
+  const pub = (await (await s.call(`/api/tables/${code}`)).json()) as { members: { name: string; crateReady: boolean }[] };
+  expect(pub.members.find((m) => m.name === name)?.crateReady).toBe(false);
+  // And one sorted song still goes in.
+  const [first] = await search(s, "radiohead");
+  expect((await s.call("/api/taste", { body: { trackId: first.id, slot: "up" } })).status).toBe(201);
+});

@@ -42,6 +42,18 @@ export function crateLocked(personId: string): boolean {
     .get();
 }
 
+// The code of the table whose running game holds this person's crate, or "".
+export function lockedTable(personId: string): string {
+  return (
+    db
+      .select({ c: games.tableCode })
+      .from(gamePlayers)
+      .innerJoin(games, eq(games.id, gamePlayers.gameId))
+      .where(and(eq(gamePlayers.personId, personId), eq(gamePlayers.left, 0), isNull(games.winner)))
+      .get()?.c ?? ""
+  );
+}
+
 // The track, if it is in this person's own crate right now.
 export function crateTrack(personId: string, trackId: number) {
   return db
@@ -79,7 +91,8 @@ export function addTaste(personId: string, t: Track, slot: Slot): "added" | "pre
     db.update(tasteTracks).set({ slot }).where(and(eq(tasteTracks.personId, personId), eq(tasteTracks.trackId, t.id))).run();
     return "added";
   }
-  if (here.length >= TASTE_MAX) return "full";
+  // Old rows with no slot don't count toward the cap: only slotted songs make a crate.
+  if (here.filter((r) => r.slot !== null).length >= TASTE_MAX) return "full";
   db.insert(tasteTracks)
     .values({ personId, trackId: t.id, title: t.title, artist: t.artist, album: t.album ?? null, cover: t.cover ?? null, slot, addedAt: Date.now() })
     .run();
