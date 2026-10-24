@@ -1,6 +1,6 @@
 import { randomInt } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { type Avatar, defaultAvatar, PARTS } from "./avatar.ts";
 import type { Person } from "./auth.ts";
@@ -41,10 +41,8 @@ function randomCode(): string {
   return code;
 }
 
-// Moles when the host doesn't say: 1 for 3 to 5 players, 2 for 6 to 8.
+// The number of moles is a rule, not a setting: 1 for 3 to 5 players, 2 for 6 to 8.
 export const defaultMoles = (players: number) => (players <= 5 ? 1 : 2);
-// The most moles a table of n can hold: strictly fewer than everyone else.
-export const maxMoles = (players: number) => Math.floor((players - 1) / 2);
 
 export function createTable(hostId: string, opts: TableOptions): string {
   for (let attempt = 0; attempt < 50; attempt++) {
@@ -160,6 +158,13 @@ export function setStatus(code: string, status: string) {
 // name, never who cast them.
 export type PublicCard = {
   order: number; picker: string; lender?: string; trackId: number; title: string; artist: string; cover?: string;
+  // True when another card of the same round is the same song (picked blind, so it can happen).
+  clash?: true;
+};
+// A round whose reveal has happened. The picker of a card, or the one ejected,
+// may have left the table since; their name still shows.
+export type PastRound = {
+  round: number; prompt: string; slot: Slot; cards: PublicCard[]; ejected: string | null; wasMole: boolean;
 };
 export type PublicGame = {
   round: number;
@@ -194,8 +199,15 @@ export type PublicGame = {
     wasMole: boolean;
     stole: boolean;
   };
+  // Rounds already revealed, oldest first, never the round in play before its
+  // reveal. At game over, every round.
+  past: PastRound[];
+  // Who has used their borrow, as it became public at listen (never during a pick).
+  borrowed: string[];
+  // Track ids heard in earlier rounds (this round's too once its picks are public).
+  played: number[];
   winner?: string;
-  // Who the moles were, only once the game is over.
+  // Who the moles were, only once the game is over; includes any who left.
   moles?: string[];
   // Every round's prompt, only once the game is over.
   prompts?: { round: number; prompt: string; slot: Slot }[];
@@ -228,10 +240,30 @@ function cardsOf(gameId: string, round: number): PublicCard[] {
     .where(and(eq(picks.gameId, gameId), eq(picks.round, round), isNotNull(picks.slot)))
     .orderBy(asc(picks.slot))
     .all()
-    .map((r) => ({
+    .map((r, _i, all) => ({
       order: r.order!, picker: r.picker, ...(r.lender ? { lender: r.lender } : {}), trackId: r.trackId, title: r.title, artist: r.artist,
       ...(r.cover ? { cover: r.cover } : {}),
+      ...(all.filter((o) => o.trackId === r.trackId).length > 1 ? { clash: true as const } : {}),
     }));
+}
+
+type Q = Pick<typeof db, "select">;
+
+// Every track heard in this game: earlier rounds, and this round once its picks
+// are closed (they have a play order). Picks of the round still being picked
+// don't count, so a refused pick can never reveal what someone else chose.
+export function playedTrackIds(d: Q, g: { id: string; round: number; phase: string }): number[] {
+  const rows = d
+    .select({ id: picks.trackId })
+    .from(picks)
+    .where(
+      and(
+        eq(picks.gameId, g.id),
+        g.phase === "pick" ? lt(picks.round, g.round) : sql`(${picks.round} < ${g.round} or (${picks.round} = ${g.round} and ${picks.slot} is not null))`,
+      ),
+    )
+    .all();
+  return [...new Set(rows.map((r) => r.id))];
 }
 
 function publicGame(code: string): PublicGame | undefined {
@@ -254,7 +286,23 @@ function publicGame(code: string): PublicGame | undefined {
     autoplay: tableOptions(code)?.autoplay ?? false,
     alive: inGame.filter((p) => p.ejected === null).map((p) => p.name),
     ghosts: inGame.filter((p) => p.ejected !== null).map((p) => p.name),
+    past: [],
+    borrowed: [],
+    played: playedTrackIds(db, g),
   };
+  // Borrows are public once their round's picks are closed; this round's, while
+  // picking, are not.
+  out.borrowed = [
+    ...new Set(
+      db
+        .select({ n: people.name })
+        .from(picks)
+        .innerJoin(people, eq(people.id, picks.personId))
+        .where(and(eq(picks.gameId, g.id), isNotNull(picks.lenderPersonId), sql`(${picks.round} < ${g.round} or ${picks.slot} is not null)`))
+        .all()
+        .map((r) => r.n),
+    ),
+  ];
   const nameOf = (id: string | null) => (id ? inGame.find((p) => p.id === id)?.name ?? personName(id) : null);
   // Who the round's pick phase was waiting on and didn't get: alive then, no pick.
   const deadAir = () => {
@@ -263,7 +311,15 @@ function publicGame(code: string): PublicGame | undefined {
   };
   if (g.winner) {
     out.winner = g.winner;
-    out.moles = inGame.filter((p) => p.role === "mole").map((p) => p.name);
+    // From the game's own players, seated or not: a mole who left is still named.
+    out.moles = db
+      .select({ name: people.name })
+      .from(gamePlayers)
+      .innerJoin(people, eq(people.id, gamePlayers.personId))
+      .where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.role, "mole")))
+      .orderBy(asc(people.name))
+      .all()
+      .map((r) => r.name);
     out.prompts = db
       .select({ round: gamePrompts.round, promptId: gamePrompts.promptId, slot: gamePrompts.slot })
       .from(gamePrompts)
@@ -288,6 +344,38 @@ function publicGame(code: string): PublicGame | undefined {
     out.tally = inGame.filter((p) => p.ejected === null).map((p) => ({ name: p.name, votes: cast.filter((v) => v.choice === p.id).length }));
     out.skips = cast.filter((v) => v.choice === "skip").length;
     if (g.lastCall) out.lastCall = true;
+  }
+  {
+    // Finished rounds: every earlier one, and this one only once its reveal is
+    // here (or the game is over). The round in play is never in `past`: its
+    // prompt and picks are not public yet.
+    const revealed = g.phase === "reveal" || !!g.winner;
+    const everyone = db
+      .select({ id: gamePlayers.personId, name: people.name, role: gamePlayers.role, ejected: gamePlayers.ejectedRound })
+      .from(gamePlayers)
+      .innerJoin(people, eq(people.id, gamePlayers.personId))
+      .where(eq(gamePlayers.gameId, g.id))
+      .all();
+    out.past = db
+      .select()
+      .from(gamePrompts)
+      .where(eq(gamePrompts.gameId, g.id))
+      .orderBy(asc(gamePrompts.round))
+      .all()
+      .filter((r) => r.round < g.round || (revealed && r.round === g.round))
+      .map((r) => {
+        const ejected = everyone.find((p) => p.ejected === r.round);
+        // A right steal ejects nobody, but the mole it names was the room's choice.
+        const stoleIt = r.round === g.round && g.stole ? everyone.find((p) => p.id === g.stealPersonId) : undefined;
+        return {
+          round: r.round,
+          prompt: promptById(r.promptId)?.text ?? "",
+          slot: r.slot as Slot,
+          cards: cardsOf(g.id, r.round),
+          ejected: ejected?.name ?? null,
+          wasMole: (ejected ?? stoleIt)?.role === "mole",
+        };
+      });
   }
   if (g.phase === "reveal" || g.winner) {
     const prompt = db.select().from(gamePrompts).where(and(eq(gamePrompts.gameId, g.id), eq(gamePrompts.round, g.round))).get();

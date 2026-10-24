@@ -62,7 +62,7 @@ it("lists only finished games the person played, with their own picks, newest fi
   await waitFor(code, (s) => s.game?.phase === "listen");
   await host.s.call(`/api/tables/${code}/advance`, { body: {} });
   await waitFor(code, (s) => s.game?.phase === "vote");
-  for (const p of ps) await p.s.call(`/api/tables/${code}/vote`, { body: { name: mole.name } });
+  for (const p of ps) await p.s.call(`/api/tables/${code}/vote`, { body: p === mole ? { skip: true } : { name: mole.name } });
   // The mole's one steal: a wrong guess ends the game.
   await waitFor(code, (s) => s.game?.phase === "steal" || s.status === "finished");
   const steal = ((await (await mole.s.call(`/api/tables/${code}/me`)).json()) as { steal?: { options: { id: string; text: string }[] } }).steal;

@@ -1,12 +1,12 @@
 import { randomInt, randomUUID } from "node:crypto";
-import { and, asc, eq, lt, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "./db.ts";
 import { gamePlayers, gamePrompts, games, people, picks, tableMembers, tableRemovals, tables, votes } from "./schema.ts";
 import { log, personTag, tableScope } from "./log.ts";
 import { PROMPTS, SLOTS, type Slot } from "./prompts.ts";
 import { crateComplete, crateTrack } from "./taste.ts";
 import {
-  currentGame, defaultMoles, MAX_PLAYERS, maxMoles, MIN_PLAYERS, notifyTable, promptById, SECONDS_PER_TRACK, tableOptions,
+  currentGame, defaultMoles, MAX_PLAYERS, MIN_PLAYERS, notifyTable, playedTrackIds, promptById, SECONDS_PER_TRACK, tableOptions,
 } from "./tables.ts";
 
 // The game engine. Every piece of state is a row in SQLite; the only thing held
@@ -20,6 +20,8 @@ import {
 // Dials for playtests. A table's own pick/vote/track seconds override the first three.
 export { PICK_SECONDS, SECONDS_PER_TRACK, VOTE_SECONDS } from "./tables.ts";
 export const STEAL_SECONDS = 15;
+// A reveal moves on to the next round by itself after this; the host can move it sooner.
+export const REVEAL_SECONDS = 30;
 export const LAST_CALL_MS = 5000;
 export const STEAL_OPTIONS = 4;
 // Listening that the host doesn't move on gets this much slack past the tracks.
@@ -90,10 +92,8 @@ export function startGame(code: string, by?: string): StartResult {
     // Everyone who would play needs a complete crate: nobody is quietly made a spectator.
     const short = members.filter((m) => !crateComplete(m.id));
     if (short.length) return fail(409, `Waiting on crates: ${short.map((m) => m.name).join(", ")}`);
-    const moleCount = t.moles ?? defaultMoles(members.length);
-    if (moleCount > maxMoles(members.length)) {
-      return fail(409, `${members.length} players can hold at most ${maxMoles(members.length)} moles.`);
-    }
+    // The rule, not a dial: 1 mole for 3 to 5 players, 2 for 6 to 8.
+    const moleCount = defaultMoles(members.length);
     const id = randomUUID();
     const now = Date.now();
     const slotOrder = JSON.stringify(shuffle([...SLOTS]));
@@ -117,17 +117,7 @@ export function startGame(code: string, by?: string): StartResult {
 
 // ---- phase transitions (all inside a transaction) ----
 
-// Every track played in this game so far: earlier rounds, and this round once
-// its picks are public. Picks of the round still being picked don't count, so
-// a refused pick can never reveal what someone else chose.
-function playedIds(d: Tx | typeof db, g: Game): number[] {
-  const rows = d
-    .select({ id: picks.trackId })
-    .from(picks)
-    .where(and(eq(picks.gameId, g.id), g.phase === "pick" ? lt(picks.round, g.round) : sql`${picks.round} <= ${g.round}`))
-    .all();
-  return [...new Set(rows.map((r) => r.id))];
-}
+const playedIds = (d: Tx | typeof db, g: Game): number[] => playedTrackIds(d, g);
 
 // Give this round's picks their play order, once, when picking closes. Returns
 // the number of cards. The log line lists them with their pickers: the listen
@@ -154,7 +144,9 @@ function assignOrder(d: Tx, g: Game): number {
 }
 
 function finish(d: Tx, g: Game, winner: "players" | "moles") {
-  assignOrder(d, g);
+  // A game cut short while picking never closed that round: its hidden picks are
+  // neither ordered nor logged.
+  if (g.phase !== "pick") assignOrder(d, g);
   d.update(games).set({ winner, phase: "reveal", deadline: null, finishedAt: Date.now() }).where(eq(games.id, g.id)).run();
   d.update(tables).set({ status: "finished" }).where(eq(tables.code, g.tableCode)).run();
   // The game-over screen shows the winner and every round's prompt to everyone.
@@ -166,7 +158,7 @@ function finish(d: Tx, g: Game, winner: "players" | "moles") {
 }
 
 // What the reveal screen shows everyone: the prompt, who was ejected (and
-// whether they were a mole), and whether a steal kept the accused in. Who voted
+// whether they were a mole), and whether a steal won it for the moles. Who voted
 // for whom is on the screen but never in the logs.
 function logReveal(d: Tx, g: Game, accused: string | null, out: string | null, stole: boolean) {
   const scope = tableScope(g.tableCode);
@@ -176,7 +168,7 @@ function logReveal(d: Tx, g: Game, accused: string | null, out: string | null, s
     ? d.select({ r: gamePlayers.role }).from(gamePlayers).where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.personId, accused))).get()?.r
     : undefined;
   const what = stole && accused
-    ? `${personTag(accused)} was a mole and stole it, so stays in`
+    ? `${personTag(accused)} was a mole and stole it, so the moles win`
     : out
       ? `ejected ${personTag(out)}, ${role === "mole" ? "was a mole" : "was not a mole"}`
       : "nobody ejected";
@@ -205,16 +197,17 @@ function resolveVote(d: Tx, g: Game) {
 
 // The verdict is in (steal over, or none to make): eject, reveal, check the win.
 function settleVerdict(d: Tx, g: Game, accused: string | null, stole: boolean) {
+  // A right steal ends the game for the moles; nobody is ejected.
   const out = accused && !stole ? accused : null;
   if (out) {
     d.update(gamePlayers).set({ ejectedRound: g.round }).where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.personId, out))).run();
   }
   d.update(games)
-    .set({ phase: "reveal", deadline: null, ejectedPersonId: out, stealPersonId: stole ? accused : g.stealPersonId, stole: stole ? 1 : 0, lastCall: 0 })
+    .set({ phase: "reveal", deadline: Date.now() + REVEAL_SECONDS * 1000, ejectedPersonId: out, stealPersonId: stole ? accused : g.stealPersonId, stole: stole ? 1 : 0, lastCall: 0 })
     .where(eq(games.id, g.id))
     .run();
   logReveal(d, g, accused, out, stole);
-  const winner = winnerOf(d, g.id);
+  const winner = stole ? "moles" : winnerOf(d, g.id);
   if (winner) finish(d, { ...g, ejectedPersonId: out }, winner);
 }
 
@@ -222,7 +215,12 @@ function settleVerdict(d: Tx, g: Game, accused: string | null, stole: boolean) {
 // real one and three others), shuffled, in a column only /me reads for them.
 function toSteal(d: Tx, g: Game, mole: string) {
   const prompt = promptOf(d, g.id, g.round)!;
-  const others = shuffle(PROMPTS.filter((p) => p.slot === prompt.slot && p.id !== prompt.promptId)).slice(0, STEAL_OPTIONS - 1);
+  // Decoys are prompts this game hasn't used: every used one was shown at its
+  // reveal, so a used decoy could be struck out. A slot has far more prompts than
+  // a game has rounds of it; the fallback to used ones only keeps this total.
+  const used = new Set(d.select({ id: gamePrompts.promptId }).from(gamePrompts).where(eq(gamePrompts.gameId, g.id)).all().map((r) => r.id));
+  const ofSlot = PROMPTS.filter((p) => p.slot === prompt.slot && p.id !== prompt.promptId);
+  const others = [...shuffle(ofSlot.filter((p) => !used.has(p.id))), ...shuffle(ofSlot.filter((p) => used.has(p.id)))].slice(0, STEAL_OPTIONS - 1);
   const options = shuffle([prompt.promptId, ...others.map((p) => p.id)]);
   d.update(gamePlayers).set({ stealUsed: 1 }).where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.personId, mole))).run();
   d.update(games)
@@ -233,7 +231,8 @@ function toSteal(d: Tx, g: Game, mole: string) {
 }
 
 // The steal ended, by a guess, the clock, or the mole leaving. A guess that was
-// the real prompt keeps them in; anything else ejects them as the vote said.
+// the real prompt wins the game for the moles; anything else (a leaver misses
+// it) ejects them as the vote said and the game goes on, or ends on the count.
 function resolveSteal(d: Tx, g: Game) {
   const mole = g.stealPersonId!;
   const right = !!g.stealGuess && g.stealGuess === promptOf(d, g.id, g.round)?.promptId;
@@ -331,6 +330,12 @@ function complete(d: Tx, g: Game): boolean {
 function settle(d: Tx, code: string, why: string) {
   const g = currentGame(code);
   if (!g || g.winner) return;
+  // A steal in progress settles first (the guess, or a missed steal if the mole
+  // has gone), so a leaving mole is named and ejected before the win is checked.
+  if (g.phase === "steal") {
+    if (complete(d, g)) step(d, g, why);
+    return;
+  }
   const winner = winnerOf(d, g.id);
   if (winner) return finish(d, g, winner);
   if (!complete(d, g)) return;
@@ -435,6 +440,7 @@ export function advance(code: string, by = "the host"): { ok: true } | Fail {
 // per game. Either way the song must not have been played yet; this round's
 // hidden picks don't count, so a refusal never says what someone else chose.
 export function pickTrack(code: string, personId: string, trackId: number, from?: string): { ok: true } | Fail {
+  let moved = false;
   const res = db.transaction((tx): { ok: true } | Fail => {
     const game = currentGame(code);
     if (!game || game.winner) return fail(409, "No round is running.");
@@ -467,12 +473,19 @@ export function pickTrack(code: string, personId: string, trackId: number, from?
       })
       .run();
     if (lender) tx.update(gamePlayers).set({ borrowUsed: 1 }).where(and(eq(gamePlayers.gameId, game.id), eq(gamePlayers.personId, personId))).run();
-    // Who picked, never what: the pick stays hidden until picking closes.
-    log(tableScope(code), `${personTag(personId)} picked a track${lender ? " (a borrow)" : ""} · round ${game.round}`);
+    // Who picked, never what or how: the pick stays hidden until picking closes.
+    log(tableScope(code), `${personTag(personId)} picked a track · round ${game.round}`);
     settle(tx, code, "everyone picked");
+    const now = currentGame(code);
+    moved = !now || !!now.winner || now.phase !== game.phase;
     return { ok: true };
   });
-  if (res.ok) changed(code);
+  // A pick sends nothing on any stream unless the phase moved: the public state
+  // is the same, and even an identical frame would show how many have picked.
+  if (res.ok) {
+    if (moved) changed(code);
+    else schedule(code);
+  }
   return res;
 }
 
@@ -492,6 +505,7 @@ export function castVote(code: string, personId: string, choice: { name: string 
     if (choice !== "skip") {
       const who = playerByName(tx, game, choice.name);
       if (!who || who.ejected !== null) return fail(400, "Vote for someone still in the game, or skip.");
+      if (who.id === personId) return fail(400, "You can't vote for yourself.");
       target = who.id;
     }
     const before = tx
@@ -591,8 +605,7 @@ export function myView(code: string, personId: string): MyView {
   const g = currentGame(code);
   const me = g && playerRow(g, personId);
   if (!g || !me) {
-    const prompt = g && promptOf(db, g.id, g.round);
-    return { role: "spectator", ...(prompt ? { slot: prompt.slot as Slot } : {}), picked: false, borrowUsed: false, played: g ? playedIds(db, g) : [] };
+    return { role: "spectator", picked: false, borrowUsed: false, played: g ? playedIds(db, g) : [] };
   }
   const ghost = me.ejectedRound !== null;
   const prompt = promptOf(db, g.id, g.round);

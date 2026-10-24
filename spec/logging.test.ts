@@ -122,7 +122,7 @@ withToken("logs a round without the prompt, moles, picks or votes before they're
     if (s.game?.phase === "vote") break;
     await sleep(250);
   }
-  for (const p of ps) await p.s.call(`/api/tables/${code}/vote`, { body: { name: mole.name } });
+  for (const p of ps) await p.s.call(`/api/tables/${code}/vote`, { body: p === mole ? { skip: true } : { name: mole.name } });
   // The mole is voted out and gets a steal; the options are theirs alone, and the guess isn't logged until it resolves.
   for (let i = 0; i < 40; i++) {
     const s = (await (await fetch(new URL(`/api/tables/${code}`, baseUrl))).json()) as { game?: { phase: string } };
@@ -146,4 +146,35 @@ withToken("logs a round without the prompt, moles, picks or votes before they're
   expect(linesWith(after, "reveal").some((l) => l.includes(prompt) && l.includes(mole.name) && /was a mole/.test(l))).toBe(true);
   // Who voted for whom is never logged.
   for (const p of ps) expect(linesWith(after, p.name).some((l) => l.includes(`voted for ${mole.name}`))).toBe(false);
+});
+
+withToken("doesn't say a pick was a borrow, or log a round cut short by a leaver, before picks are public", async () => {
+  const ps: { s: Session; name: string; ids: number[] }[] = [];
+  for (let i = 0; i < 3; i++) {
+    const s = session();
+    const name = uniqueName(`bw${i}`);
+    await s.call("/api/join", { body: { name, pin: "4680" } });
+    ps.push({ s, name, ids: await fillCrate(s, i) });
+  }
+  const { code } = (await (await ps[0].s.call("/api/tables", { body: { pickSeconds: 60, voteSeconds: 30 } })).json()) as { code: string };
+  for (const p of ps.slice(1)) await p.s.call(`/api/tables/${code}/join`, { body: {} });
+  await ps[0].s.call(`/api/tables/${code}/start`, { body: {} });
+  const views = await Promise.all(ps.map(async (p) => (await (await p.s.call(`/api/tables/${code}/me`)).json()) as { role: string }));
+  const mole = ps[views.findIndex((v) => v.role === "mole")];
+  const [first, second] = ps.filter((p) => p !== mole);
+  // One borrow, one own pick; the mole hasn't picked, so picking is open.
+  expect((await first.s.call(`/api/tables/${code}/pick`, { body: { trackId: second.ids[0], from: second.name } })).status).toBe(200);
+  await second.s.call(`/api/tables/${code}/pick`, { body: { trackId: second.ids[1] } });
+  await sleep(400);
+  const during = linesWith(await logs(), code).join("\n");
+  expect(linesWith(during, first.name).some((l) => /picked a track/.test(l))).toBe(true);
+  expect(during).not.toMatch(/borrow/i);
+
+  // The mole walks out mid-pick: the game ends, and the round's hidden picks are never logged.
+  await mole.s.call(`/api/tables/${code}/leave`, { body: {} });
+  await sleep(600);
+  const after = linesWith(await logs(), code).join("\n");
+  expect(after).toMatch(/game finished/);
+  expect(after).not.toMatch(/picks closed/);
+  expect(after).not.toMatch(/borrow/i);
 });

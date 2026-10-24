@@ -18,9 +18,16 @@ export const GET: APIRoute = ({ params, request }) => {
       const send = (text: string) => {
         if (!closed) controller.enqueue(encoder.encode(text));
       };
+      // A frame identical to the last one on this connection is never sent: it
+      // would only tell the viewer that something (a pick) happened.
+      let last = "";
       const sendState = () => {
         const state = publicState(code);
-        if (state) send(`event: state\ndata: ${JSON.stringify(state)}\n\n`);
+        if (!state) return;
+        const data = JSON.stringify(state);
+        if (data === last) return;
+        last = data;
+        send(`event: state\ndata: ${data}\n\n`);
       };
       const unwatch = watchTable(code, sendState);
       const beat = setInterval(() => send(": heartbeat\n\n"), HEARTBEAT_MS);
