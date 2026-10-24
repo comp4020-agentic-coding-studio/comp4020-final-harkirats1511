@@ -1,12 +1,14 @@
 import { expect, it, vi } from "vitest";
-import { baseUrl, fillCrate, session, slotMap, uniqueName } from "./helpers";
+import { baseUrl, fillCrate, session, uniqueName } from "./helpers";
 
 // Contract: a person can look back at the games they played, which is what the
 // persistence is for. Only finished games, only ones they were in.
 //   GET /api/history -> [{code, finishedAt, winner, mine: {theme, wasMole, title,
-//        artist}[] per round, rounds: {round, majority, mole}[], players: string[]}]
-//   newest first. `mine` is this person's own pick and theme per round. Nothing
-//   about a game still running.
+//        artist, lender?}[] per round, rounds: {round, prompt, slot}[] (old games:
+//        {round, majority, mole}), players: string[]}]
+//   newest first. `mine` is this person's own pick per round (theme is the
+//   round's prompt). Nothing about a game still running, and a mole's history
+//   only shows a prompt once the game is over.
 
 vi.setConfig({ testTimeout: 90_000 });
 
@@ -46,31 +48,32 @@ it("lists only finished games the person played, with their own picks, newest fi
     code: string;
   };
   for (const p of ps.slice(1)) await p.s.call(`/api/tables/${code}/join`, { body: {} });
-  const ids = await fillCrate(host.s);
-  for (const p of ps.slice(1)) await fillCrate(p.s);
+  const crates = [await fillCrate(host.s, 0)];
+  for (const [i, p] of ps.slice(1).entries()) crates.push(await fillCrate(p.s, i + 1));
   await host.s.call(`/api/tables/${code}/start`, { body: {} });
 
-  // While the game runs, it isn't history yet.
+  // While the game runs, it isn't history yet, and history never carries a prompt.
   expect(((await (await host.s.call("/api/history")).json()) as unknown[]).some((g) => (g as { code: string }).code === code)).toBe(false);
 
-  for (const [i, p] of ps.entries()) await p.s.call(`/api/tables/${code}/pick`, { body: { trackId: ids[i] } });
+  const views = await Promise.all(ps.map(async (p) => ((await (await p.s.call(`/api/tables/${code}/me`)).json()) as { role: string; prompt?: string })));
+  const mole = ps[views.findIndex((v) => v.role === "mole")];
+  const prompt = views.find((v) => v.prompt)!.prompt!;
+  for (const [i, p] of ps.entries()) await p.s.call(`/api/tables/${code}/pick`, { body: { trackId: crates[i][0] } });
   await waitFor(code, (s) => s.game?.phase === "listen");
   await host.s.call(`/api/tables/${code}/advance`, { body: {} });
   await waitFor(code, (s) => s.game?.phase === "vote");
-
-  // Find the mole by theme (the odd one out), then vote them out to end the game.
-  const themes = await Promise.all(ps.map(async (p) => ((await (await p.s.call(`/api/tables/${code}/me`)).json()) as { theme: string }).theme));
-  const mole = ps[themes.findIndex((t) => themes.filter((x) => x === t).length === 1)];
-  const { byTrack } = await slotMap(host.s, code, ids.slice(0, 3));
-  const slot = byTrack.get(ids[ps.indexOf(mole)])!;
-  for (const p of ps) await p.s.call(`/api/tables/${code}/vote`, { body: { slot } });
+  for (const p of ps) await p.s.call(`/api/tables/${code}/vote`, { body: { name: mole.name } });
+  // The mole's one steal: a wrong guess ends the game.
+  await waitFor(code, (s) => s.game?.phase === "steal" || s.status === "finished");
+  const steal = ((await (await mole.s.call(`/api/tables/${code}/me`)).json()) as { steal?: { options: { id: string; text: string }[] } }).steal;
+  if (steal) await mole.s.call(`/api/tables/${code}/steal`, { body: { promptId: steal.options.find((o) => o.text !== prompt)!.id } });
   await waitFor(code, (s) => s.status === "finished");
 
   const history = (await (await host.s.call("/api/history")).json()) as {
     code: string;
     winner: string;
     mine: { theme: string; wasMole: boolean; title: string }[];
-    rounds: { majority: string; mole: string }[];
+    rounds: { prompt?: string; slot?: string }[];
     players: string[];
   }[];
   const game = history.find((g) => g.code === code)!;
@@ -79,7 +82,8 @@ it("lists only finished games the person played, with their own picks, newest fi
   expect(game.players.sort()).toEqual(ps.map((p) => p.name).sort());
   expect(game.rounds).toHaveLength(1);
   expect(game.mine).toHaveLength(1);
-  expect(game.mine[0].theme).toBe(themes[0]);
+  expect(game.rounds[0].prompt).toBe(prompt);
+  expect(game.mine[0].theme).toBe(prompt);
   expect(game.mine[0].wasMole).toBe(host === mole);
   expect(game.mine[0].title).toBeTruthy();
 

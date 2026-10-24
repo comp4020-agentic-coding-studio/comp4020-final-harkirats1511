@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
-import { baseUrl, fillCrate, session, slotMap, uniqueName } from "./helpers";
+import { baseUrl, fillCrate, session, uniqueName } from "./helpers";
+import { PROMPTS } from "../src/lib/prompts";
 
 // Contract (CLAUDE.md "Logging"): the server logs who did what, one line per
 // action, and keeps the recent lines for GET /api/logs, which answers only to
@@ -72,58 +73,77 @@ withToken("logs refused attempts with the person and the reason, and never a PIN
   expect(text).not.toMatch(/mole_session|pin_?hash|pinSalt/i);
 });
 
-withToken("logs a round without leaking themes, moles or who picked what until it's public", async () => {
-  const ps: { s: Session; name: string }[] = [];
+withToken("logs a round without the prompt, moles, picks or votes before they're public", async () => {
+  const ps: { s: Session; name: string; ids: number[] }[] = [];
   for (let i = 0; i < 3; i++) {
     const s = session();
     const name = uniqueName(`lg${i}`);
     await s.call("/api/join", { body: { name, pin: "4680" } });
-    ps.push({ s, name });
+    ps.push({ s, name, ids: await fillCrate(s, i) });
   }
-  for (const p of ps) await fillCrate(p.s);
-  const found = (await (await ps[0].s.call("/api/taste")).json()) as { id: number; title: string }[];
+  const titles = (await (await ps[0].s.call("/api/taste")).json()) as { id: number; title: string }[];
   const { code } = (await (await ps[0].s.call("/api/tables", { body: { pickSeconds: 30, voteSeconds: 30 } })).json()) as {
     code: string;
   };
   for (const p of ps.slice(1)) await p.s.call(`/api/tables/${code}/join`, { body: {} });
   await ps[0].s.call(`/api/tables/${code}/start`, { body: {} });
-  const themes = await Promise.all(
-    ps.map(async (p) => ((await (await p.s.call(`/api/tables/${code}/me`)).json()) as { theme: string }).theme),
+  const views = await Promise.all(
+    ps.map(async (p) => (await (await p.s.call(`/api/tables/${code}/me`)).json()) as { role: string; prompt?: string }),
   );
-  for (const [i, p] of ps.entries()) await p.s.call(`/api/tables/${code}/pick`, { body: { trackId: found[i].id } });
+  const prompt = views.find((v) => v.prompt)!.prompt!;
+  const mole = ps[views.findIndex((v) => v.role === "mole")];
+  // Two players pick; the third hasn't, so picking is still open.
+  for (const p of ps.slice(0, 2)) await p.s.call(`/api/tables/${code}/pick`, { body: { trackId: p.ids[0] } });
   await sleep(500);
 
-  // Mid-round: picks are logged as actions, but nothing that decides the round.
+  // Mid-pick: picks are logged as actions, but not what, and nothing that decides the round.
   const during = linesWith(await logs(), code).join("\n");
-  for (const p of ps) expect(linesWith(during, p.name).some((l) => /pick/i.test(l))).toBe(true);
-  for (const t of new Set(themes)) expect(during).not.toContain(t);
-  for (const t of found.slice(0, 3)) expect(during).not.toContain(t.title);
+  for (const p of ps.slice(0, 2)) expect(linesWith(during, p.name).some((l) => /picked a track/i.test(l))).toBe(true);
+  expect(during).not.toContain(prompt);
+  for (const x of PROMPTS) expect(during).not.toContain(x.text);
+  for (const t of titles.slice(0, 3)) expect(during).not.toContain(t.title);
   expect(during).not.toMatch(/\bmole\b/i);
 
-  // Finish the game by voting out whoever had the odd theme.
+  // The last pick closes picking: now the picks may be logged with their pickers.
+  await ps[2].s.call(`/api/tables/${code}/pick`, { body: { trackId: ps[2].ids[0] } });
   for (let i = 0; i < 40; i++) {
     const s = (await (await fetch(new URL(`/api/tables/${code}`, baseUrl))).json()) as { game?: { phase: string } };
     if (s.game?.phase === "listen") break;
     await sleep(250);
   }
+  const listening = linesWith(await logs(), code).join("\n");
+  expect(linesWith(listening, "picks closed").some((l) => l.includes(ps[0].name) && l.includes(titles[0].title))).toBe(true);
+  expect(listening).not.toContain(prompt);
+  expect(listening).not.toMatch(/\bmole\b/i);
+
   await ps[0].s.call(`/api/tables/${code}/advance`, { body: {} });
-  const mole = ps[themes.findIndex((t) => themes.filter((x) => x === t).length === 1)];
   for (let i = 0; i < 40; i++) {
     const s = (await (await fetch(new URL(`/api/tables/${code}`, baseUrl))).json()) as { game?: { phase: string } };
     if (s.game?.phase === "vote") break;
     await sleep(250);
   }
-  const { byTrack } = await slotMap(ps[0].s, code, found.slice(0, 3).map((t) => t.id));
-  const slot = byTrack.get(found[ps.indexOf(mole)].id)!;
-  for (const p of ps) await p.s.call(`/api/tables/${code}/vote`, { body: { slot } });
+  for (const p of ps) await p.s.call(`/api/tables/${code}/vote`, { body: { name: mole.name } });
+  // The mole is voted out and gets a steal; the options are theirs alone, and the guess isn't logged until it resolves.
+  for (let i = 0; i < 40; i++) {
+    const s = (await (await fetch(new URL(`/api/tables/${code}`, baseUrl))).json()) as { game?: { phase: string } };
+    if (s.game?.phase === "steal") break;
+    await sleep(250);
+  }
+  const stealing = linesWith(await logs(), code).join("\n");
+  expect(linesWith(stealing, mole.name).some((l) => /gets a steal/.test(l))).toBe(true);
+  expect(stealing).not.toContain(prompt);
+  expect(stealing).not.toMatch(/stole it|missed the steal/);
+  for (const p of ps) expect(linesWith(stealing, p.name).some((l) => /voted for/.test(l))).toBe(false);
+  const options = ((await (await mole.s.call(`/api/tables/${code}/me`)).json()) as { steal: { options: { id: string; text: string }[] } }).steal.options;
+  const wrong = options.find((o) => o.text !== prompt)!;
+  await mole.s.call(`/api/tables/${code}/steal`, { body: { promptId: wrong.id } });
   await sleep(800);
-  // The house record is logged as added, never by title or artist.
-  expect(linesWith(await logs(), code).join("\n")).not.toMatch(/house record · in the style|the house record: /);
 
-  // Once over, the end can be logged: who was ejected, and the themes.
+  // Once it resolves, the reveal may name the prompt, and the steal's outcome.
   const after = linesWith(await logs(), code).join("\n");
   expect(after).toMatch(/finish|over|won|winner/i);
-  expect(linesWith(after, mole.name).some((l) => /eject|voted out|out/i.test(l))).toBe(true);
+  expect(linesWith(after, mole.name).some((l) => /missed the steal/.test(l))).toBe(true);
+  expect(linesWith(after, "reveal").some((l) => l.includes(prompt) && l.includes(mole.name) && /was a mole/.test(l))).toBe(true);
   // Who voted for whom is never logged.
   for (const p of ps) expect(linesWith(after, p.name).some((l) => l.includes(`voted for ${mole.name}`))).toBe(false);
 });

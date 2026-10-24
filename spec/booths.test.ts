@@ -49,7 +49,7 @@ it("lists a public booth with its code and a private one without", async () => {
   const booths = await list(watcher);
 
   const a = booths.find((b) => b.code === open)!;
-  expect(a).toMatchObject({ private: false, host: pub.name, seated: 1, max: 10, status: "waiting" });
+  expect(a).toMatchObject({ private: false, host: pub.name, seated: 1, max: 8, status: "waiting" });
   const b = booths.find((b) => b.host === priv.name)!;
   expect(b).toMatchObject({ private: true, seated: 1 });
   expect(b.code).toBeUndefined();
@@ -86,7 +86,7 @@ it("never puts a private booth's code in a shop event", async () => {
 it("lets only the host change visibility, and not mid-game", async () => {
   const [host, guest, third] = await crowd(3, "vis");
   const code = await table(host, {}, [guest, third]);
-  for (const p of [host, guest, third]) await fillCrate(p.s);
+  for (const [i, p] of [host, guest, third].entries()) await fillCrate(p.s, i);
   expect((await guest.s.call(`/api/tables/${code}/visibility`, { body: { private: true } })).status).toBe(403);
   expect((await host.s.call(`/api/tables/${code}/visibility`, { body: { private: "yes" } })).status).toBe(400);
   const ok = await host.s.call(`/api/tables/${code}/visibility`, { body: { private: true } });
@@ -114,7 +114,7 @@ it("treats a player removed mid-game like one who left", async () => {
   const people = await crowd(4, "rmg");
   const [host, ...rest] = people;
   const code = await table(host, {}, rest);
-  for (const p of people) await fillCrate(p.s);
+  for (const [i, p] of people.entries()) await fillCrate(p.s, i);
   expect((await host.s.call(`/api/tables/${code}/start`, { body: {} })).status).toBe(202);
   await host.s.call(`/api/tables/${code}/remove`, { body: { name: rest[0].name } });
   const state = (await (await host.s.call(`/api/tables/${code}`)).json()) as {
@@ -142,7 +142,7 @@ it("quick seat picks the fullest public waiting booth and skips private, playing
   const priv = await table(guests[0], { private: true }, guests.slice(1, 7));
   const playHost = (await crowd(1, "qsp"))[0];
   const playing = await table(playHost, {}, [rest[5], rest[6], guests[1]]);
-  for (const p of [playHost, rest[5], rest[6], guests[1]]) await fillCrate(p.s);
+  for (const [i, p] of [playHost, rest[5], rest[6], guests[1]].entries()) await fillCrate(p.s, i);
   await playHost.s.call(`/api/tables/${playing}/start`, { body: {} });
 
   const seeker = await signedIn("qsk");

@@ -4,7 +4,7 @@ import { baseUrl, fillCrate, session, uniqueName } from "./helpers";
 // Contract: a table can let the server play the round's tracks in order, so the
 // room isn't waiting on the host's phone (which may lock or drop).
 //   POST /api/tables {autoplay: true, slotSeconds?} -> the listen phase plays
-//        slot 0, 1, ... in turn, `slotSeconds` each (default 30, the preview
+//        card 0, 1, ... in turn, `slotSeconds` each (default 30, the preview
 //        length; specs use short ones), then moves on to the vote by itself.
 // The host can still play a slot by hand, which takes over from there.
 
@@ -23,17 +23,17 @@ async function setup(opts: Record<string, unknown>) {
     await s.call("/api/join", { body: { name, pin: "7531" } });
     ps.push({ s, name });
   }
-  let ids: number[] = [];
-  for (const p of ps) ids = await fillCrate(p.s);
+  const crates: number[][] = [];
+  for (const [i, p] of ps.entries()) crates.push(await fillCrate(p.s, i));
   const res = await ps[0].s.call("/api/tables", { body: { pickSeconds: 30, voteSeconds: 30, ...opts } });
   const { code } = (await res.json()) as { code: string };
   for (const p of ps.slice(1)) await p.s.call(`/api/tables/${code}/join`, { body: {} });
   await ps[0].s.call(`/api/tables/${code}/start`, { body: {} });
-  for (const [i, p] of ps.entries()) await p.s.call(`/api/tables/${code}/pick`, { body: { trackId: ids[i] } });
+  for (const [i, p] of ps.entries()) await p.s.call(`/api/tables/${code}/pick`, { body: { trackId: crates[i][0] } });
   return { code, ps, status: res.status };
 }
 
-it("plays every slot in turn on its own, then opens the vote", async () => {
+it("plays every card in turn on its own, then opens the vote", async () => {
   const { code } = await setup({ autoplay: true, slotSeconds: 2 });
   const seen: (number | null)[] = [];
   const until = Date.now() + 20_000;
@@ -45,10 +45,9 @@ it("plays every slot in turn on its own, then opens the vote", async () => {
     if (phase === "vote") break;
     await sleep(200);
   }
-  // Three picks, plus the house record when Deezer found one in time.
+  // Three picks: cards 0, 1, 2 in turn.
   const played = seen.filter((x) => x !== null);
-  expect(played).toEqual([0, 1, 2, 3].slice(0, played.length));
-  expect([3, 4]).toContain(played.length);
+  expect(played).toEqual([0, 1, 2]);
   expect(phase).toBe("vote");
 });
 

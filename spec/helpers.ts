@@ -95,55 +95,37 @@ export const uniqueName = (prefix: string): string =>
 
 export { baseUrl };
 
-// Known-good Deezer ids: a crate needs 5 to play, and a pick must come from it.
-export const CRATE_IDS = [3512895311, 3512895281, 13159670, 2791780102, 1951194587, 1123844, 445960982, 84107655];
+// Known-good Deezer ids, all with previews. A crate is 12 songs, 3 in each of the
+// four slots: ids 0-2 are Up, 3-5 Down, 6-8 Out, 9-11 In. Each set is distinct,
+// because a song can be played only once per game by anyone, so people at one
+// table need different sets.
+export const SLOT_NAMES = ["up", "down", "out", "in"] as const;
+export const CRATES: number[][] = [
+  [13159670, 829306252, 1951194607, 684573392, 3099606, 1444366372, 1031007, 512466312, 2465911, 3512895311, 3512895281, 2791780102],
+  [1123844, 445960982, 84107655, 375959421, 1951194587, 5726092, 2791872372, 446028242, 980535512, 1733771197, 2562284362, 3512895331],
+  [67238732, 136889400, 136889434, 66609426, 3135563, 3135553, 67238735, 3129775, 67238733, 3135556, 67238730, 3129772],
+  [4091937401, 4092329741, 4091932171, 4092324041, 4092312801, 4091936611, 4091936641, 4092335521, 4092326741, 4092323401, 4091936691, 4092326601],
+  [8086130, 8086126, 8086135, 82715364, 8086136, 8086128, 1522223672, 138546009, 138545995, 8086127, 940355, 8086129],
+  [3128096, 3098840, 114811546, 3098841, 14299589, 142706538, 3106505, 3128097, 3128095, 3128092, 3289333851, 3024257751],
+  [124603270, 533609232, 4022917771, 124603286, 63565179, 608410332, 144572210, 118190298, 1484144902, 13529560, 17347964, 70697364],
+  [116348656, 116348464, 116348452, 116348632, 3886522131, 116348340, 116348252, 116348204, 116348264, 3567641811, 116348454, 116348272],
+];
+export const CRATE_IDS = CRATES[0];
+export const slotOfIndex = (i: number) => SLOT_NAMES[Math.floor(i / 3)];
 
-// Gives this session's person `n` tracks (default 5, the minimum to play).
-export async function fillCrate(s: ReturnType<typeof session>, n = 5): Promise<number[]> {
-  const ids = CRATE_IDS.slice(0, n);
-  for (const trackId of ids) {
-    const res = await s.call("/api/taste", { body: { trackId } });
-    if (res.status >= 300) throw new Error(`could not add ${trackId} to the crate: ${res.status}`);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Gives this session's person a complete crate (set `which`, default 0) and
+// returns its ids. Deezer rate-limits bursts, so a failed lookup is retried.
+export async function fillCrate(s: ReturnType<typeof session>, which = 0): Promise<number[]> {
+  const ids = CRATES[which];
+  for (const [i, trackId] of ids.entries()) {
+    for (let attempt = 0; ; attempt++) {
+      const res = await s.call("/api/taste", { body: { trackId, slot: slotOfIndex(i) } });
+      if (res.status < 300) break;
+      if (res.status < 500 && res.status !== 404 || attempt >= 6) throw new Error(`could not add ${trackId} to the crate: ${res.status}`);
+      await sleep(1500);
+    }
   }
   return ids;
-}
-
-// Slots are anonymous, so a spec that wants to vote for "that person's track"
-// matches each slot's audio URL (minus its signed query) against the preview
-// Deezer gives for the track ids that were picked. A slot that matches none of
-// them is the house record. Returns null if Deezer can't be asked.
-const previewPath = (url: string) => url.split("?")[0];
-const previewOf = new Map<number, string>();
-export async function slotMap(s: ReturnType<typeof session>, code: string, trackIds: number[]) {
-  for (const id of trackIds) {
-    if (previewOf.has(id)) continue;
-    // Deezer rate-limits bursts (an {error} body): wait and ask again.
-    for (let attempt = 0; ; attempt++) {
-      const body = (await (await fetch(`https://api.deezer.com/track/${id}`)).json().catch(() => ({}))) as { preview?: string };
-      if (body.preview) {
-        previewOf.set(id, previewPath(body.preview));
-        break;
-      }
-      if (attempt >= 6) throw new Error(`no preview for ${id}`);
-      await new Promise((r) => setTimeout(r, 1500));
-    }
-  }
-  const { slots } = (await (await s.call(`/api/tables/${code}/round`)).json()) as { slots: { slot: number }[] };
-  const byTrack = new Map<number, number>();
-  let house: number | null = null;
-  for (const { slot } of slots) {
-    // The audio route asks Deezer, which rate-limits bursts: ask again after a pause.
-    let url = "";
-    for (let attempt = 0; !url; attempt++) {
-      url = ((await (await s.call(`/api/tables/${code}/round/slots/${slot}/audio`)).json()) as { url?: string }).url ?? "";
-      if (!url) {
-        if (attempt >= 6) throw new Error(`no audio url for slot ${slot}`);
-        await new Promise((r) => setTimeout(r, 1500));
-      }
-    }
-    const hit = trackIds.find((id) => previewOf.get(id) === previewPath(url));
-    if (hit === undefined) house = slot;
-    else byTrack.set(hit, slot);
-  }
-  return { byTrack, house, count: slots.length };
 }
