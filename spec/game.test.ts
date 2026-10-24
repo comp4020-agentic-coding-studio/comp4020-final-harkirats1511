@@ -756,7 +756,7 @@ it("ejects a mole who guesses wrong, and one who runs out of time", async () => 
 // ---- the prompt cycle, the reveal and the end ----
 
 it("cycles the prompt through all four slots before repeating, never repeating a prompt", async () => {
-  const g = await started(3, { pickSeconds: 30, voteSeconds: 30 });
+  const g = await started(4, { pickSeconds: 30, voteSeconds: 30 });
   const slots: string[] = [];
   const prompts: string[] = [];
   for (let round = 1; round <= 4; round++) {
@@ -962,7 +962,7 @@ it("passes the host on when the host leaves mid-game, and the game carries on", 
 });
 
 it("cycles all four slots in every block of four rounds over eight rounds", async () => {
-  const g = await started(3, { voteSeconds: 2 });
+  const g = await started(4, { voteSeconds: 2 });
   const slots: string[] = [];
   const prompts: string[] = [];
   for (let round = 1; round <= 8; round++) {
@@ -984,7 +984,8 @@ it("cycles all four slots in every block of four rounds over eight rounds", asyn
 it("steal decoys are never a prompt used earlier in the game", async () => {
   // Several games at once, each taken to round 5 (the first repeat of a slot),
   // where a decoy drawn from every prompt in the slot would sometimes be round 1's.
-  const trio = await Promise.all([0, 1, 2].map((i) => player("dc", i)));
+  // Four players: with three left a no-eject vote would end the game.
+  const trio = await Promise.all([0, 1, 2, 3].map((i) => player("dc", i)));
   const run = async () => {
     const [host, ...others] = trio;
     const { code } = (await (await host.s.call("/api/tables", { body: { voteSeconds: 2 } })).json()) as { code: string };
