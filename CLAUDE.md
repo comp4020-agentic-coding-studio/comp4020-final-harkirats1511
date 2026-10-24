@@ -20,7 +20,8 @@ They are decisions, not defaults (see `docs/decisions/0009`).
   moles are not told about each other.
 - **Show a pick before the pick phase closes.** Nobody sees who has picked, what,
   or a count, until picking ends; then every pick is shown with its picker (and
-  lender, for a borrow). The public state must not change when someone picks.
+  lender, for a borrow). A pick must not send anything on any stream, not even
+  an identical frame, and the log line for a pick says only "picked a track".
 - **Let one person act as another.** A name is claimed with a PIN. Acting on
   someone's history needs their session.
 - **Expose more of a person than the app needs.** Crates are shown at the table
@@ -36,7 +37,9 @@ They are decisions, not defaults (see `docs/decisions/0009`).
   `/taste` before you sit down. Starting needs every player's crate complete
   (3 per slot), otherwise 409 "Waiting on crates: …". From start to game over,
   crates are locked (edits refused 409) and shown to everyone at the table.
-  Each song can be played once per game, by anyone.
+  A song can't be picked once it has been heard in an earlier round. Two players
+  picking the same song in the same round is allowed (refusing the second would
+  reveal the first's hidden pick); both cards play and are marked as a clash.
 - Roles are assigned when the game starts, after crates lock: 1 mole for 3 to 5
   players, 2 for 6 to 8. Moles don't know each other.
 - **Each round has one prompt from `src/lib/prompts.ts`**, tagged with a slot.
@@ -46,16 +49,19 @@ They are decisions, not defaults (see `docs/decisions/0009`).
   another player's crate (the mole has one too). Picks are hidden until the
   pick phase closes, then shown named: "Ben: song" or "Ben (borrowed from Tom):
   song". A player who misses the pick is "dead air" and can still vote.
-- **Vote on a name.** While the vote is open, everyone sees how many votes each
+- **Vote on a name** (not yourself). While the vote is open, everyone sees how many votes each
   player has, never who cast them, and may change their vote until it locks.
   Once everyone who can vote has voted, a 5-second last call runs, then it
   locks. The most votes ejects that player; a tie, or skip on top, ejects nobody.
 - **Steal.** When a mole is voted out, they get one guess from 4 prompts of that
-  round's slot (the real one and 3 others, in random order). Right: they stay
-  in, and the reveal says so. Wrong or out of time: they're out. Once per game
-  per mole.
+  round's slot: the real one and 3 decoys never used earlier in the game, in
+  random order. Right: **the moles win the game** (as in The Chameleon). Wrong
+  or out of time: they're out and the game goes on. The steal opening shows the
+  accused was a mole; that's the point of the moment.
 - Voted-out players are ghosts: they watch, don't pick and don't vote. Their crate
   can still be borrowed from.
+- The reveal moves on to the next round by itself after 30 seconds (the host
+  can move it sooner), so a quiet host never stalls a table.
 - Deadlines are fixed. A pick, vote or steal that arrives after its deadline does
   not count. A phase ends early once everyone eligible has submitted.
 - A change one person makes reaches every open session of that table within about
@@ -68,7 +74,10 @@ They are decisions, not defaults (see `docs/decisions/0009`).
   same way, and a host who leaves passes the host role on. A leaver's crate
   leaves with them.
 - The reveal after a vote shows the prompt, every pick with its picker, the votes
-  by name, and who was out and whether they were a mole.
+  by name, and who was out and whether they were a mole. The public state keeps
+  every finished round of the game (prompt, cards, ejected), who has used their
+  borrow, and which songs have been heard, so a page restores from the server
+  alone. At game over every mole is named, including any who left.
 - Each player chooses where they hear tracks: on their own phone, or from the
   host's. The host's phone always plays. The choice is per person, saved, and can
   be changed during a game.
