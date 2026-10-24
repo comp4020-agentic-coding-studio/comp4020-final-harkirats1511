@@ -2,7 +2,7 @@
 
 Chosen direction (the student's pick, replacing the earlier zine): the app is a
 record shop at night. The home page is the shopfront under a neon sign, tables
-are listening booths, your theme is a handwritten staff-pick card, tracks are
+are listening booths, your prompt is a handwritten staff-pick card, tracks are
 white-label records, and the reveal is the liner notes on a back cover. The
 approved reference is `docs/design/record-shop.html` (and `shop-floor-3d.html`
 for the later 3D shop). One theme, dark by design, native CSS, no framework.
@@ -28,7 +28,7 @@ for the later 3D shop). One theme, dark by design, native CSS, no framework.
 - **Bricolage Grotesque** (variable): all UI text and headings.
 - **IBM Plex Mono**: catalogue numbers and codes (`BOOTH KGZW`, `A1`), timers,
   small mono-caps labels (phase names, `h3`).
-- **Caveat**: handwriting only: the staff-pick theme and the pressing notes.
+- **Caveat**: handwriting only: the staff-pick prompt and the liner notes.
 
 ## Components
 
@@ -39,17 +39,28 @@ for the later 3D shop). One theme, dark by design, native CSS, no framework.
 - **Inputs**: dark well with a line border; on paper just a line to write on.
 - **Membership card**: the sign-in form, paper, tilted 1deg, perforated stripe.
 - **Hours card**: dashed mono box under the sign (static copy; no new queries).
-- **Staff pick**: your theme on a sleeve card with tape, handwritten, tilted;
-  Hide flips it to a wood back that is the same for everyone.
-- **Your crate**: the pick panel is a wooden crate; tracks are rows with a
-  record peeking from the cover.
+- **Staff pick**: the round's prompt on a sleeve card with tape, handwritten,
+  tilted, with its mood (`IN: alone, cosy`). A mole's card is neon on plum and
+  names only the mood. Hide flips either to a wood back with the same heading
+  and tape for everyone, so a glance at a phone tells nothing.
+- **Crate dividers** (`/taste`): four record-store dividers (a cream tab over a
+  wooden bin of three sleeves), one per mood: Up, Down, Out, In.
+- **The crates**: everyone's crate on the table, one collapsible row per player,
+  grouped by mood; a heard song is struck through and stamped PLAYED.
+- **Pick list**: your crate with the round's mood first ("fits the mood"), then
+  the rest; "Borrow instead" opens the other crates.
 - **Needle drop** (listen): sleeve, plinth, platter, record, tonearm in CSS.
-  A slot that starts playing replays the drop; the label shows only side and
-  track (A1, A2, B1...) derived from the slot number, never a title, artist,
-  owner or cover. Slots are sleeves (A1, B2...) the host can press.
+  The label shows the playing card's number, picker and title. Cards are named
+  sleeves ("Ben: song", "(borrowed from Tom)", a CLASH stamp for a song picked
+  twice) the host can press.
+- **Vote rows**: each player still in, with their song and a big live count;
+  your choice carries a YOUR VOTE tab. Skip is a row like the others.
+- **Steal**: a plum panel with the MOLE stamp and a huge countdown; only the
+  accused mole gets the four prompt buttons.
 - **Liner notes**: reveal and game over are a paper back cover: tracklist with
-  owners, a MOLE stamp when the ejected person was a mole, and at game end the
-  themes as handwritten pressing notes. Past games reuse it as record-shelf cards.
+  pickers, the prompt in handwriting, votes by name, a MOLE stamp when the
+  ejected person was a mole, and at game end every mole and every round. Past
+  games reuse it as record-shelf cards.
 - **Stamp**: mono caps, 2px border, rotated a few degrees: HOST, OUT, WATCHING,
   AUTO, MOLE. Colour is never the only signal; each carries words.
 - **Ticket**: the table code on a sleeve with punched notches, in mono.
