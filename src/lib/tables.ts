@@ -15,7 +15,7 @@ import {
 // No I or O: they read as 1 and 0 when a code is shouted across a room.
 const LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ";
 export const MIN_PLAYERS = 3;
-// More than this and a table is refused at start: 8 crates is already 96 songs on a phone.
+// A table seats at most this many (the join is refused past it): 8 crates is already 96 songs on a phone.
 export const MAX_PLAYERS = 8;
 // Tuning dials for playtests (game.ts re-exports them and has the steal ones).
 // A table's own pick/vote/track seconds still override these defaults.
@@ -95,6 +95,12 @@ export function joinTable(code: string, me: Person): { ok: true; state: PublicTa
   if (isRemoved(code, me.id)) {
     refused(tableScope(code), tag(me), "join", "removed from this table");
     return { ok: false, status: 403, error: "The host removed you from this table." };
+  }
+  // A table seats 8, in the lobby and mid-game alike (spectators count): the 9th is
+  // turned away at the door, not at start. Someone already seated is let through.
+  if (!isMember(code, me.id) && memberCount(code) >= MAX_PLAYERS) {
+    refused(tableScope(code), tag(me), "join", `table is full (${MAX_PLAYERS})`);
+    return { ok: false, status: 409, error: `This table is full: it seats ${MAX_PLAYERS}.` };
   }
   if (addMember(code, me.id)) {
     log(tableScope(code), `${tag(me)} joined the table`);
@@ -206,7 +212,10 @@ export type PublicGame = {
   borrowed: string[];
   // Track ids heard in earlier rounds (this round's too once its picks are public).
   played: number[];
+  // "players", "moles", or "none" (abandoned: nobody picked).
   winner?: string;
+  // Why it ended, when not the plain win: "final-vote" | "round-cap" | "nobody-picked".
+  ending?: string;
   // Who the moles were, only once the game is over; includes any who left.
   moles?: string[];
   // Every round's prompt, only once the game is over.
@@ -303,6 +312,12 @@ function publicGame(code: string): PublicGame | undefined {
         .map((r) => r.n),
     ),
   ];
+  // Abandoned (nobody picked): no winner, no moles, no prompts. The table is back in the lobby.
+  if (g.winner === "none") {
+    out.winner = "none";
+    if (g.endReason) out.ending = g.endReason;
+    return out;
+  }
   const nameOf = (id: string | null) => (id ? inGame.find((p) => p.id === id)?.name ?? personName(id) : null);
   // Who the round's pick phase was waiting on and didn't get: alive then, no pick.
   const deadAir = () => {
@@ -311,6 +326,7 @@ function publicGame(code: string): PublicGame | undefined {
   };
   if (g.winner) {
     out.winner = g.winner;
+    if (g.endReason) out.ending = g.endReason;
     // From the game's own players, seated or not: a mole who left is still named.
     out.moles = db
       .select({ name: people.name })
@@ -501,6 +517,8 @@ export type HistoryGame = {
   code: string;
   finishedAt: number;
   winner: string;
+  // Why it ended, when not the plain win (see PublicGame.ending).
+  ending?: string;
   players: string[];
   rounds: { round: number; majority?: string; mole?: string; prompt?: string; slot?: Slot }[];
   // theme is this person's own card: the old game's theme, or the new game's prompt.
@@ -516,7 +534,7 @@ export type HistoryGame = {
 export function historyFor(personId: string, limit = 20): HistoryGame[] {
   const finished = sql<number>`coalesce(${games.finishedAt}, ${games.startedAt})`;
   const mineGames = db
-    .select({ id: games.id, code: games.tableCode, winner: games.winner, finishedAt: finished, role: gamePlayers.role, ejected: gamePlayers.ejectedRound })
+    .select({ id: games.id, code: games.tableCode, winner: games.winner, ending: games.endReason, finishedAt: finished, role: gamePlayers.role, ejected: gamePlayers.ejectedRound })
     .from(gamePlayers)
     .innerJoin(games, eq(games.id, gamePlayers.gameId))
     .where(and(eq(gamePlayers.personId, personId), eq(gamePlayers.left, 0), isNotNull(games.winner)))
@@ -551,6 +569,7 @@ export function historyFor(personId: string, limit = 20): HistoryGame[] {
       code: g.code,
       finishedAt: g.finishedAt,
       winner: g.winner!,
+      ...(g.ending ? { ending: g.ending } : {}),
       players: names.filter((n) => n.gameId === g.id).map((n) => n.name),
       rounds,
       mine: myPicks
