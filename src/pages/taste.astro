@@ -1,7 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import { personFromCookies } from "../lib/auth.ts";
-import { crateLocked, listTaste, PER_SLOT, TASTE_MAX } from "../lib/taste.ts";
+import { crateLocked, listTaste, lockedTable, PER_SLOT, TASTE_MAX } from "../lib/taste.ts";
 import { SLOTS, SLOT_HINTS, SLOT_NAMES } from "../lib/prompts.ts";
 const me = personFromCookies(Astro.cookies);
 if (!me) return Astro.redirect("/?next=/taste");
@@ -10,6 +10,8 @@ const next = Astro.url.searchParams.get("next") ?? "";
 const back = /^\/t\/[A-Za-z]{4}$/.test(next) ? next : "";
 const initial = listTaste(me.id);
 const locked = crateLocked(me.id);
+// The table this person is locked into, if any: the banner links there when ?next did not.
+const activeTable = lockedTable(me.id);
 const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS[s] }));
 ---
 <Base title="Your crate · Mole" width="table">
@@ -20,7 +22,7 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
 
   <div class="locked" id="locked" role="status" hidden>
     <strong>Your crate is locked until the game ends.</strong>
-    <a href={back || "/"}>Back to the table</a>
+    <a id="locked-link" href={back || "/"}>{back ? "Back to the table" : "Back"}</a>
   </div>
 
   <section class="progress" aria-label="Crate progress">
@@ -112,7 +114,7 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
   .unsorted .sleeve .acts { flex-wrap: wrap; }
   .unsorted .sleeve .acts button { flex: 1 1 4rem; }
 </style>
-<script define:vars={{ initial, max: TASTE_MAX, per: PER_SLOT, slots, lockedAtLoad: locked, back }}>
+<script define:vars={{ initial, max: TASTE_MAX, per: PER_SLOT, slots, lockedAtLoad: locked, back, activeTable }}>
   const $ = (id) => document.getElementById(id);
   const msg = $("msg");
   const player = $("player");
@@ -146,6 +148,7 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
   }
   function mover(t) {
     const sel = el("select", { disabled: locked });
+    sel.dataset.fk = `move:${t.id}`;
     sel.setAttribute("aria-label", `Move ${t.title} to another slot`);
     sel.append(el("option", { value: "", textContent: "Move to...", disabled: true, selected: true }));
     for (const s of slots) {
@@ -200,6 +203,9 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
     $("need").hidden = done;
     $("done").hidden = !done;
     $("locked").hidden = !locked;
+    if (locked && !back && activeTable) { $("locked-link").href = `/t/${activeTable}`; $("locked-link").textContent = "Back to the table"; }
+    $("q").disabled = locked;
+    $("search").querySelector("button").disabled = locked;
 
     $("results").replaceChildren(...found.map((t) => {
       const have = taste.find((x) => x.id === t.id && names[x.slot]);
@@ -233,9 +239,11 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
   async function move(id, slot) {
     say("");
     const { res, data } = await api(`/api/taste/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ slot }) });
-    if (!res.ok) { failed(res, data, "Could not move that song."); return render(); }
+    if (!res.ok) { failed(res, data, "Could not move that song."); render(); return document.querySelector(`[data-fk="move:${id}"]`)?.focus(); }
     taste = data;
     render();
+    // The sleeve has moved bins: keep focus on its select, now in the new slot.
+    document.querySelector(`[data-fk="move:${id}"]`)?.focus();
   }
   async function remove(id) {
     say("");
