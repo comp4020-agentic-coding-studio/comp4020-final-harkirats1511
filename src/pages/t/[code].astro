@@ -43,14 +43,6 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
 
     <div class="table-grid" id="table-grid">
       <div class="game-col">
-        <!-- 3D scene: decoration only, loaded after the page is usable and only where WebGL 2
-             works and motion is welcome. Everything in it is also in the 2D page below. -->
-        <section id="scene-slot" aria-label="3D table view" hidden>
-          <div class="scene-stage" id="scene-stage"><div class="scene-skel" id="scene-skel" aria-hidden="true"></div></div>
-          <p class="sr-only" id="scene-desc"></p>
-          <button id="scene-toggle" type="button" class="secondary sm scene-toggle" aria-pressed="true">3D scene: on</button>
-        </section>
-
         <h1 id="title">Table</h1>
         <div id="lobby-code" class="ticket-wrap">
           <div class="code-line">
@@ -65,6 +57,8 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           <span class="status-label" id="status-label"></span>
           <span class="countdown" id="countdown" role="timer" aria-live="off"></span>
         </p>
+
+        <p class="watch-line" id="watch-line" hidden></p>
 
         <div id="v-lobby">
           <fieldset class="who-sits" id="vis-host" hidden>
@@ -90,7 +84,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
         <!-- Your card: the prompt for most of you; for the mole only its mood. Hide flips it face down. -->
         <section class="role phase" id="card" aria-labelledby="role-h" hidden>
           <div class="role-head">
-            <h2 id="role-h">Your card</h2>
+            <h2 id="role-h" tabindex="-1">Your card</h2>
             <button id="role-toggle" type="button" class="secondary sm" aria-controls="role-body" aria-expanded="true"><span id="role-toggle-text">Hide</span></button>
           </div>
           <div class="theme-card" id="theme-card">
@@ -110,7 +104,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
         </section>
 
         <section class="card phase" id="pick" aria-labelledby="pick-h" hidden>
-          <h2 id="pick-h">Pick a song</h2>
+          <h2 id="pick-h" tabindex="-1">Pick a song</h2>
           <p class="instr" id="pick-instr"></p>
           <p class="hint" id="pick-wait" hidden></p>
           <div id="pick-done" hidden>
@@ -129,7 +123,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
         </section>
 
         <section class="card phase" id="vote" aria-labelledby="vote-h" hidden>
-          <h2 id="vote-h">Vote someone out</h2>
+          <h2 id="vote-h" tabindex="-1">Vote someone out</h2>
           <p class="instr" id="vote-instr">Who is the mole? Vote for a player, or skip. You can change your vote until it locks.</p>
           <p class="hint" id="vote-note"></p>
           <ul class="ballot" id="vote-list" aria-label="Players to vote for"></ul>
@@ -139,7 +133,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
         </section>
 
         <section class="card phase" id="listen" aria-labelledby="listen-h" hidden>
-          <h2 id="listen-h">Listen</h2>
+          <h2 id="listen-h" tabindex="-1">Listen</h2>
           <p class="instr" id="listen-instr">Every song, with its picker. Whose song fits the card, and whose sounds like a bluff?</p>
           <div id="audio-choice" class="choice" hidden>
             <label><input type="checkbox" id="own-audio" /> Play the tracks on this phone</label>
@@ -169,7 +163,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
 
         <section class="card phase steal" id="steal" aria-labelledby="steal-h" hidden>
           <p class="steal-stamp" aria-hidden="true"><span class="stamp-big moles">Mole</span></p>
-          <h2 id="steal-h">Steal!</h2>
+          <h2 id="steal-h" tabindex="-1">Steal!</h2>
           <p class="instr" id="steal-line"></p>
           <p class="steal-clock mono" id="steal-clock" aria-hidden="true"></p>
           <div id="steal-options" class="steal-options" hidden></div>
@@ -179,7 +173,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
 
         <section class="card liner phase" id="reveal" aria-labelledby="reveal-h" hidden>
           <p class="liner-top mono" aria-hidden="true"><span>{code}</span><span id="reveal-side">Back cover</span></p>
-          <h2 id="reveal-h">Reveal</h2>
+          <h2 id="reveal-h" tabindex="-1">Reveal</h2>
           <p id="winner" class="stamp-big" hidden></p>
           <div id="moles-end" class="moles-end" hidden></div>
           <div id="reveal-prompt-wrap" hidden>
@@ -205,6 +199,14 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           <p class="hint" id="reveal-wait" hidden></p>
           <p id="see-games" hidden><a href="/history">See all your games</a></p>
           <p id="reveal-msg" class="error" role="alert"></p>
+        </section>
+
+        <!-- 3D scene: decoration only, loaded after the page is usable and only where WebGL 2
+             works and motion is welcome. Everything in it is also in the 2D page below. -->
+        <section id="scene-slot" aria-label="3D table view" hidden>
+          <div class="scene-stage" id="scene-stage"><div class="scene-skel" id="scene-skel" aria-hidden="true"></div></div>
+          <p class="sr-only" id="scene-desc"></p>
+          <button id="scene-toggle" type="button" class="secondary sm scene-toggle" aria-pressed="true">3D scene: on</button>
         </section>
 
         <!-- The crates on the table: the evidence the room reasons from. -->
@@ -334,8 +336,9 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     el.append(...kids);
     return el;
   }
-  function button(label: string, onClick: () => void, opts: { secondary?: boolean; aria?: string; disabled?: boolean } = {}) {
+  function button(label: string, onClick: () => void, opts: { secondary?: boolean; aria?: string; disabled?: boolean; key?: string } = {}) {
     const b = h("button", { type: "button" }, label) as HTMLButtonElement;
+    if (opts.key) b.dataset.fk = opts.key;
     if (opts.secondary) b.className = "secondary";
     if (opts.aria) b.setAttribute("aria-label", opts.aria);
     b.disabled = !!opts.disabled;
@@ -360,10 +363,14 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
   }
   // Drop a rebuild when nothing it draws has changed, so focus survives updates.
   const sigs = new Map<string, string>();
+  // A rebuild that does run puts focus back on the same control: anything that can
+  // hold focus in a redrawn list carries a stable data-fk (a name or a track id).
   function once(key: string, sig: string, draw: () => void) {
     if (sigs.get(key) === sig) return;
     sigs.set(key, sig);
+    const fk = (document.activeElement as HTMLElement | null)?.dataset?.fk;
     draw();
+    if (fk) document.querySelector<HTMLElement>(`[data-fk="${CSS.escape(fk)}"]`)?.focus({ preventScroll: true });
   }
 
   // Where this person hears tracks. Per person, per browser; a convenience, so
@@ -420,7 +427,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     }
     renderMembers();
     renderLobby();
-    renderCard(playing && (phase === "pick" || phase === "listen" || phase === "vote"));
+    renderCard(playing && (phase === "pick" || phase === "listen" || phase === "vote"), phase);
     renderPick(playing && phase === "pick");
     renderListen(playing && (phase === "listen" || phase === "vote"));
     renderVote(playing && phase === "vote");
@@ -429,6 +436,19 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     renderCrates(playing);
     tick();
     syncActions();
+    settleFocus();
+  }
+
+  // On a phase or round change focus moves to the new phase's heading, once it is
+  // on screen. Not on every stream frame: only a change sets pendingFocus.
+  let pendingFocus = "";
+  function settleFocus() {
+    if (!pendingFocus) return;
+    const el = document.getElementById(pendingFocus);
+    if (!el || el.closest("[hidden]")) return;
+    pendingFocus = "";
+    if (document.activeElement?.closest("#leave-confirm, #remove-confirm")) return;
+    el.focus({ preventScroll: true });
   }
 
   // A name's badge from the members list; someone who left gets a default.
@@ -494,37 +514,41 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
   }
 
   // Your card. A mole's comes from /me and holds the slot only: there is no other
-  // source of a prompt in this page.
-  function renderCard(on: boolean) {
-    show("card", on && !!me);
-    if (!on || !me) return;
-    const kind = me.role;
-    const hasCard = kind === "player" || kind === "mole";
-    show("role-toggle", hasCard);
-    const open = !hasCard || roleShown;
-    const mole = kind === "mole";
+  // source of a prompt in this page. Face down, a mole's card and a player's are the
+  // same: same heading, same tape, same back. Only the face differs.
+  function renderCard(on: boolean, phase?: Game["phase"]) {
+    const watching = !!me && !active();
+    // Someone out, or watching, has no card: just a plain line saying so.
+    show("watch-line", on && watching);
+    if (watching) $("watch-line").textContent = me!.role === "ghost" ? "You're out. You watch and listen." : "You're watching this game.";
+    show("card", on && !!me && !watching);
+    if (!on || !me || watching) return;
+    const mole = me.role === "mole";
+    const open = roleShown;
+    const card = $("card");
+    // While picking the card sits above the pick list, as it is needed to choose; later it is one line below the action.
+    const before = phase === "pick" ? $("pick") : $("scene-slot");
+    if (card.nextElementSibling !== before) before.before(card);
+    card.classList.toggle("compact", phase !== "pick");
+    card.classList.toggle("is-open", open);
     $("theme-card").classList.toggle("flipped", !open);
     $("theme-card").classList.toggle("is-mole", mole);
     $("role-body").setAttribute("aria-hidden", String(!open));
     $("role-back").setAttribute("aria-hidden", String(open));
     $("role-toggle-text").textContent = open ? "Hide" : "Show";
     $("role-toggle").setAttribute("aria-expanded", String(open));
-    $("role-h").textContent = mole ? "You're the mole" : kind === "player" ? "Your card" : kind === "ghost" ? "Out" : "Watching";
+    $("role-h").textContent = mole && open ? "You're the mole" : "Your card";
     const text = $("role-text");
-    text.classList.toggle("quiet", !hasCard || mole);
+    text.classList.toggle("quiet", mole);
     $("role-k").textContent = mole ? "Mole" : "Staff pick";
-    $("role-k").hidden = !hasCard;
     show("role-sub", mole);
     if (mole) {
       text.textContent = "You're the mole. You don't know the prompt, only its mood:";
       $("role-sub").textContent = `${slotName(me.slot).toUpperCase()} (${slotInfo.find((i) => i.slot === me!.slot)?.hint ?? ""}). Blend in.`;
       $("role-slot").textContent = "";
-    } else if (kind === "player") {
+    } else {
       text.textContent = me.prompt ?? "";
       $("role-slot").textContent = slotLabel(me.slot);
-    } else {
-      text.textContent = kind === "ghost" ? "You're out. Watch and listen." : "Watching this game.";
-      $("role-slot").textContent = "";
     }
   }
 
@@ -553,7 +577,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           const crate = m.crate!;
           const left = crate.filter((c) => !played.has(c.trackId)).length;
           const open = crateOpen.get(m.name) ?? (m.name === myName || wide());
-          const summary = h("summary", {},
+          const summary = h("summary", { "data-fk": `crate:${m.name}` },
             face(m.name), h("span", { class: "cname" }, m.name === myName ? `${m.name} (you)` : m.name),
             ...(g.ghosts.includes(m.name) ? [h("span", { class: "stamp out" }, "Out")] : []),
             ...(g.borrowed.includes(m.name) ? [h("span", { class: "stamp borrowed" }, "Borrowed")] : []),
@@ -582,12 +606,13 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     const watching = !active();
     const locked = me.picked === true;
     show("pick-wait", watching);
-    $("pick-wait").textContent = me.role === "ghost" ? "You're out. The room is picking songs." : "You're watching this game. The room is picking songs.";
+    $("pick-h").textContent = !watching ? "Pick a song" : me.role === "ghost" ? "You're out" : "You're watching";
+    $("pick-wait").textContent = me.role === "ghost" ? "You're out. The room is picking." : "You're watching. The room is picking.";
     show("pick-done", !watching && locked);
     show("pick-ui", !watching && !locked);
-    $("pick-instr").textContent = me.role === "mole"
-      ? "Bluff: pick a song that could answer the mood. Your pick is final once you tap it."
-      : "Pick a song from your crate that answers your card. Your pick is final once you tap it.";
+    // The same words for a mole and a player: a mole's screen must not read differently.
+    $("pick-instr").textContent = watching ? "" : "Pick a song from your crate that answers your card. Your pick is final once you tap it.";
+    $("pick-instr").hidden = watching;
     if (watching || locked) return;
     const mine = state!.members.find((m) => m.name === myName)?.crate ?? [];
     const played = new Set([...g.played, ...(me.played ?? [])]);
@@ -597,7 +622,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
       const row = (t: CrateTrack, fits: boolean, from?: string) => {
         const done = played.has(t.trackId);
         const act = h("div", { class: "acts" }, button(from ? "Borrow" : "Pick", () => pick(t.trackId, t, from), {
-          disabled: done, aria: `${from ? `Borrow from ${from}` : "Pick"}: ${t.title} by ${t.artist}`,
+          disabled: done, aria: `${from ? `Borrow from ${from}` : "Pick"}: ${t.title} by ${t.artist}`, key: `pick:${from ?? ""}:${t.trackId}`,
         }));
         const li = songLi(t, done, h("span", { class: "slot-tag mono" }, slotName(t.slot)), act);
         li.classList.add("prow");
@@ -626,7 +651,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
             const open = (borrowOpened.get(m.name) ?? false);
             const list = [...m.crate!.filter((c) => !played.has(c.trackId))].sort((a, b) => Number(b.slot === slot) - Number(a.slot === slot));
             const d = h("details", { class: "cplayer" },
-              h("summary", {}, face(m.name), h("span", { class: "cname" }, m.name), h("span", { class: "cleft mono" }, `${list.length} to borrow`)),
+              h("summary", { "data-fk": `borrow:${m.name}` }, face(m.name), h("span", { class: "cname" }, m.name), h("span", { class: "cleft mono" }, `${list.length} to borrow`)),
               h("ul", { class: "tracks pickable" }, ...list.map((c) => row(c, c.slot === slot, m.name)))) as HTMLDetailsElement;
             d.open = open;
             d.addEventListener("toggle", () => borrowOpened.set(m.name, d.open));
@@ -780,7 +805,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           ];
           if (!voter) return h("li", {}, h("div", { class: "brow ro", role: "group", "aria-label": `${t.name}: ${t.votes} vote${t.votes === 1 ? "" : "s"}` }, ...body));
           const b = h("button", {
-            type: "button", class: "brow" + (chosen ? " mine" : ""), "aria-pressed": String(chosen),
+            type: "button", class: "brow" + (chosen ? " mine" : ""), "aria-pressed": String(chosen), "data-fk": `vote:${t.name}`,
             "aria-label": `Vote ${t.name}. Their song: ${card ? `${card.title} by ${card.artist}` : "none, dead air"}. ${t.votes} vote${t.votes === 1 ? "" : "s"} so far${chosen ? ". Your vote" : ""}`,
           }, ...body) as HTMLButtonElement;
           if (chosen) b.append(h("span", { class: "your", "aria-hidden": "true" }, "your vote"));
@@ -793,7 +818,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
       $("vote-skip-wrap").replaceChildren(
         voter
           ? (() => {
-              const b = h("button", { type: "button", class: "skipbtn secondary" + (skipMine ? " mine" : ""), "aria-pressed": String(skipMine), "aria-label": `Skip: vote for nobody. ${sk} so far${skipMine ? ", your vote" : ""}` }, ...skipBody) as HTMLButtonElement;
+              const b = h("button", { type: "button", "data-fk": "vote:skip", class: "skipbtn secondary" + (skipMine ? " mine" : ""), "aria-pressed": String(skipMine), "aria-label": `Skip: vote for nobody. ${sk} so far${skipMine ? ", your vote" : ""}` }, ...skipBody) as HTMLButtonElement;
               b.addEventListener("click", () => vote("skip"));
               return b;
             })()
@@ -833,10 +858,12 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     show("steal-options", mineToGuess);
     show("steal-wait", !mineToGuess);
     $("steal-wait").textContent = `Waiting on ${accused}. Nothing for you to do but hold your breath.`;
-    once("steal", JSON.stringify([me?.steal?.options ?? null, stealGuessed]), () => {
+    once("steal", JSON.stringify([me?.steal?.options ?? null, stealGuessed, stealChoice]), () => {
       box.replaceChildren(
         ...(me?.steal?.options ?? []).map((o) => {
-          const b = h("button", { type: "button", class: "steal-opt" }, o.text) as HTMLButtonElement;
+          const mine = stealChoice === o.id;
+          const b = h("button", { type: "button", class: "steal-opt" + (mine ? " chosen" : ""), "data-fk": `steal:${o.id}`, "aria-pressed": String(mine) }, o.text,
+            ...(mine ? [h("span", { class: "your" }, "your guess")] : [])) as HTMLButtonElement;
           b.disabled = stealGuessed;
           b.addEventListener("click", () => steal(o.id));
           return b;
@@ -845,6 +872,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     });
   }
 
+  let stealChoice: string | null = null;
   let stealing = false;
   async function steal(id: string) {
     if (stealing || !state?.game) return;
@@ -854,6 +882,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     stealing = false;
     if (res.ok || res.status === 409) {
       stealGuessed = true;
+      if (res.ok) stealChoice = id;
       announce("Guess is in.");
       if (!res.ok) $("steal-msg").textContent = "Too late: the steal is over.";
       return render();
@@ -980,8 +1009,10 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
   // How many songs I have, for "Crate: 2/12". Others' counts are never sent.
   async function loadMyCrate() {
     const { res, data } = await api<unknown[]>("/api/taste");
-    if (res.ok && Array.isArray(data) && data.length !== myCrate) {
-      myCrate = data.length;
+    // Only songs sorted into a slot count toward the crate.
+    const sorted = Array.isArray(data) ? (data as { slot: Slot | null }[]).filter((t) => t.slot !== null).length : 0;
+    if (res.ok && Array.isArray(data) && sorted !== myCrate) {
+      myCrate = sorted;
       if (state) render();
     }
   }
@@ -1004,7 +1035,12 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
       if (me && state.game.round === round) { me.picked = true; if (from) me.borrowUsed = true; }
       borrowOpen = false;
       announce("Picked. Waiting for the others.");
-      return render();
+      render();
+      // The pick buttons are gone: land on the confirmation, not the top of the page.
+      const done = $("pick-done");
+      done.tabIndex = -1;
+      done.focus({ preventScroll: true });
+      return;
     }
     msg.textContent = res.status === 409 && !/borrow|played|heard/i.test(data.error ?? "") ? "Too late: picking is over for this round." : (data.error ?? `Could not pick ${t.title}.`);
   }
@@ -1327,7 +1363,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
       $("vote-msg").textContent = "";
       $("reveal-msg").textContent = "";
       if (g?.phase === "pick") borrowOpen = false;
-      if (g?.phase !== "steal") stealGuessed = false;
+      if (g?.phase !== "steal") { stealGuessed = false; stealChoice = null; }
       if (newRound) {
         me = null;
       }
@@ -1343,6 +1379,9 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
       else if (g?.winner) announce(g.winner === "players" ? "Game over. The players caught every mole." : "Game over. The moles took over.");
       void refreshMe();
       pendingEnter = true;
+      // Keyboard and screen-reader users follow the game: land on the new phase's heading.
+      // Not on the first frame of a page load, and not on later frames of the same phase.
+      pendingFocus = prev && (g && next.status === "playing" || g?.winner) ? (g!.winner ? "reveal-h" : `${g!.phase}-h`) : "";
     }
     render();
     if (pendingEnter) {
