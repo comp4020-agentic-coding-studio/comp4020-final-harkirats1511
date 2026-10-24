@@ -37,7 +37,10 @@ knows they're the mole gives the game a liar.
 - Everyone picks a song from their own crate (each song once per game), or uses
   their one borrow from someone else's crate. Picks are shown named.
 - The room votes on a name, with the live tally kept from 0008. A mole voted out
-  gets one steal per game: guess the prompt from 4 in that slot to stay in.
+  gets a steal: guess the prompt from 4 in that slot. A right guess wins the game
+  for the moles. (First planned as "stay in", but the steal opening shows
+  everyone who the mole is, so a mole who stayed in would just be voted out next
+  round: the review of the server phase caught it.)
 - Ghosts watch; Among Us parity decides the game; up to 8 players.
 
 ## Cost
