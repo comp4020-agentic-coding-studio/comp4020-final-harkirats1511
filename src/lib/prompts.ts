@@ -1,0 +1,73 @@
+// Prompts for the crate game (decision 0009). Each round draws one; non-moles see
+// it, the mole sees only its slot. Within a slot, prompts must be different
+// enough that a song can be heard to answer one and not another, and that the
+// steal (guess the prompt among 4 of the slot) is a real choice.
+//
+// First draft by Claude as candidates; curating them is the student's call.
+export type Slot = "up" | "down" | "out" | "in";
+export const SLOTS: readonly Slot[] = ["up", "down", "out", "in"];
+export const SLOT_NAMES: Record<Slot, string> = { up: "Up", down: "Down", out: "Out", in: "In" };
+export const SLOT_HINTS: Record<Slot, string> = { up: "energy, hype", down: "sad, slow", out: "going out, social", in: "alone, cosy" };
+export type Prompt = { id: string; slot: Slot; text: string };
+export const PROMPTS: readonly Prompt[] = [
+  { id: "up-01", slot: "up", text: "A song for sprinting to catch the last bus" },
+  { id: "up-02", slot: "up", text: "A song for the final lap of a race" },
+  { id: "up-03", slot: "up", text: "A song for cleaning the whole flat in one go" },
+  { id: "up-04", slot: "up", text: "A song for a goal in the last minute" },
+  { id: "up-05", slot: "up", text: "A song for the gym when you don't want to be there" },
+  { id: "up-06", slot: "up", text: "A song for the training montage in a film" },
+  { id: "up-07", slot: "up", text: "A song for getting ready to walk on stage" },
+  { id: "up-08", slot: "up", text: "A song for finishing an essay at 3am on caffeine" },
+  { id: "up-09", slot: "up", text: "A song for a road trip with the windows down" },
+  { id: "up-10", slot: "up", text: "A song for the first morning of a holiday" },
+  { id: "up-11", slot: "up", text: "A song for a heist going perfectly" },
+  { id: "up-12", slot: "up", text: "A song for jumping on a bed like a kid" },
+  { id: "up-13", slot: "up", text: "A song for handing in your last exam" },
+  { id: "up-14", slot: "up", text: "A song for stomping into a room like you own it" },
+  { id: "up-15", slot: "up", text: "A song for a victory dance after good news" },
+  { id: "down-01", slot: "down", text: "A song for the rain on a long train ride" },
+  { id: "down-02", slot: "down", text: "A song for an old photo that hits harder than expected" },
+  { id: "down-03", slot: "down", text: "A song for the end of a summer romance" },
+  { id: "down-04", slot: "down", text: "A song for the last scene before the credits" },
+  { id: "down-05", slot: "down", text: "A song for missing home" },
+  { id: "down-06", slot: "down", text: "A song for an empty street at 4am" },
+  { id: "down-07", slot: "down", text: "A song for rereading old messages" },
+  { id: "down-08", slot: "down", text: "A song for the bus home after a bad day" },
+  { id: "down-09", slot: "down", text: "A song for a goodbye at the airport" },
+  { id: "down-10", slot: "down", text: "A song for the slow-motion flashback in a film" },
+  { id: "down-11", slot: "down", text: "A song for a rough exam result" },
+  { id: "down-12", slot: "down", text: "A song for when the group chat goes quiet" },
+  { id: "down-13", slot: "down", text: "A song for packing up a childhood bedroom" },
+  { id: "down-14", slot: "down", text: "A song for staring out a window in winter" },
+  { id: "down-15", slot: "down", text: "A song for drifting apart from a close friend" },
+  { id: "out-01", slot: "out", text: "A song for getting ready together before a night out" },
+  { id: "out-02", slot: "out", text: "A song for the queue outside the club" },
+  { id: "out-03", slot: "out", text: "A song for a house party in the kitchen" },
+  { id: "out-04", slot: "out", text: "A song for a rooftop party at sunset" },
+  { id: "out-05", slot: "out", text: "A song for a car full of friends singing along" },
+  { id: "out-06", slot: "out", text: "A song for the walk home after a great night" },
+  { id: "out-07", slot: "out", text: "A song for dancing at a wedding" },
+  { id: "out-08", slot: "out", text: "A song for the first night of a festival" },
+  { id: "out-09", slot: "out", text: "A song for a barbecue in the park" },
+  { id: "out-10", slot: "out", text: "A song for a surprise birthday" },
+  { id: "out-11", slot: "out", text: "A song for splitting a taxi at 2am" },
+  { id: "out-12", slot: "out", text: "A song for arriving somewhere new with the crew" },
+  { id: "out-13", slot: "out", text: "A song for a karaoke night" },
+  { id: "out-14", slot: "out", text: "A song for a beach day with everyone" },
+  { id: "out-15", slot: "out", text: "A song for a games night that gets competitive" },
+  { id: "in-01", slot: "in", text: "A song for a rainy Sunday under a blanket" },
+  { id: "in-02", slot: "in", text: "A song for cooking dinner alone" },
+  { id: "in-03", slot: "in", text: "A song for studying in a quiet library" },
+  { id: "in-04", slot: "in", text: "A song for the first coffee of the morning" },
+  { id: "in-05", slot: "in", text: "A song for a long hot shower" },
+  { id: "in-06", slot: "in", text: "A song for baking on a slow afternoon" },
+  { id: "in-07", slot: "in", text: "A song for reading by a lamp" },
+  { id: "in-08", slot: "in", text: "A song for tidying your room slowly" },
+  { id: "in-09", slot: "in", text: "A song for drifting off to sleep" },
+  { id: "in-10", slot: "in", text: "A song for a cat asleep on your lap" },
+  { id: "in-11", slot: "in", text: "A song for watching snow fall from your bed" },
+  { id: "in-12", slot: "in", text: "A song for a late-night walk with headphones in" },
+  { id: "in-13", slot: "in", text: "A song for doodling in a notebook" },
+  { id: "in-14", slot: "in", text: "A song for a lazy sunrise on the balcony" },
+  { id: "in-15", slot: "in", text: "A song for a slow morning with pancakes" },
+];
