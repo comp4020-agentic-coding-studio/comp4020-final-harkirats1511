@@ -128,6 +128,16 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           <p id="pick-msg" class="error" role="alert"></p>
         </section>
 
+        <section class="card phase" id="vote" aria-labelledby="vote-h" hidden>
+          <h2 id="vote-h">Vote someone out</h2>
+          <p class="instr" id="vote-instr">Who is the mole? Vote for a player, or skip. You can change your vote until it locks.</p>
+          <p class="hint" id="vote-note"></p>
+          <ul class="ballot" id="vote-list" aria-label="Players to vote for"></ul>
+          <div class="skipbar" id="vote-skip-wrap"></div>
+          <p class="lastcall mono" id="last-call" role="status" hidden></p>
+          <p id="vote-msg" class="error" role="alert"></p>
+        </section>
+
         <section class="card phase" id="listen" aria-labelledby="listen-h" hidden>
           <h2 id="listen-h">Listen</h2>
           <p class="instr" id="listen-instr">Every song, with its picker. Whose song fits the card, and whose sounds like a bluff?</p>
@@ -155,16 +165,6 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           <p class="hint" id="audio-msg" role="status"></p>
           <audio id="audio" preload="none"></audio>
           <button id="to-vote" type="button" class="full" hidden>Go to voting</button>
-        </section>
-
-        <section class="card phase" id="vote" aria-labelledby="vote-h" hidden>
-          <h2 id="vote-h">Vote someone out</h2>
-          <p class="instr" id="vote-instr">Who is the mole? Vote for a player, or skip. You can change your vote until it locks.</p>
-          <p class="hint" id="vote-note"></p>
-          <ul class="ballot" id="vote-list" aria-label="Players to vote for"></ul>
-          <div class="skipbar" id="vote-skip-wrap"></div>
-          <p class="lastcall mono" id="last-call" role="status" hidden></p>
-          <p id="vote-msg" class="error" role="alert"></p>
         </section>
 
         <section class="card phase steal" id="steal" aria-labelledby="steal-h" hidden>
