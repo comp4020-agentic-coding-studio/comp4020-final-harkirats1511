@@ -1,7 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import { personFromCookies } from "../lib/auth.ts";
-import { listTaste, MIN_CRATE, TASTE_MAX } from "../lib/taste.ts";
+import { listTaste, TASTE_MAX } from "../lib/taste.ts";
 const me = personFromCookies(Astro.cookies);
 if (!me) return Astro.redirect("/?next=/taste");
 // Back to the table we came from; the same shape index.astro accepts for ?next.
@@ -13,7 +13,7 @@ const initial = listTaste(me.id);
   <a class="back-link" href={back || "/"}><span aria-hidden="true">&larr;</span>{back ? "Back to the table" : "Back"}</a>
   <p class="kicker">Your crate</p>
   <h1>Your taste file</h1>
-  <p class="hint">Up to {TASTE_MAX} tracks you would actually play, and at least {MIN_CRATE} to take part in a game. Every pick you make comes from here.</p>
+  <p class="hint">{TASTE_MAX} tracks you would actually play, in four slots of three, all full to take part in a game. Every pick you make comes from here.</p>
 
   <section class="card" aria-labelledby="mine-h">
     <div class="card-head"><h2 id="mine-h">Your tracks</h2><span class="counter stamp mono" id="counter" aria-live="polite"></span></div>
