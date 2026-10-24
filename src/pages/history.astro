@@ -2,6 +2,7 @@
 import Base from "../layouts/Base.astro";
 import { personFromCookies } from "../lib/auth.ts";
 import { historyFor } from "../lib/tables.ts";
+import { SLOT_HINTS, SLOT_NAMES } from "../lib/prompts.ts";
 const me = personFromCookies(Astro.cookies);
 if (!me) return Astro.redirect("/?next=/history");
 const games = historyFor(me.id);
@@ -17,7 +18,7 @@ const games = historyFor(me.id);
     </section>
   ) : (
     <>
-      <p class="hint">Newest first. The mole's theme is shown for every round, because the games are over.</p>
+      <p class="hint">Newest first. Every round's prompt is shown, because the games are over.</p>
       {games.map((g) => (
         <section class="card paper hist-game" aria-label={`Game ${g.code}`}>
           <div class="hist-head">
@@ -29,23 +30,31 @@ const games = historyFor(me.id);
           </div>
           <p class="hist-players"><strong>Players:</strong> {g.players.join(", ")}</p>
           {g.winner === "none" && (
-            <p class="hint">{g.ending === "nobody-picked" ? "Game abandoned: nobody picked." : "This game was left unfinished and ended with no winner."}</p>
+            <p class="hist-ending">{g.ending === "nobody-picked" ? "Game abandoned: nobody picked." : "This game was left unfinished and ended with no winner."}</p>
           )}
-          {g.winner === "moles" && g.ending === "final-vote" && <p class="hint">Nobody was voted out with three left, so the moles won.</p>}
-          {g.winner === "moles" && g.ending === "round-cap" && <p class="hint">The moles were still in after round 12, so they won.</p>}
+          {g.winner === "moles" && g.ending === "final-vote" && <p class="hist-ending">Nobody was voted out with three left, so the moles won.</p>}
+          {g.winner === "moles" && g.ending === "round-cap" && <p class="hist-ending">The moles were still in after round 12, so they won.</p>}
           <ol class="hist-rounds">
             {g.rounds.map((r) => {
               const m = g.mine.find((x) => x.round === r.round);
               return (
                 <li>
-                  <p class="pressed">Most of you were pressed for <span class="hand">{r.majority}</span> The mole's copy said <span class="hand odd">{r.mole}</span></p>
+                  {r.prompt !== undefined ? (
+                    <p class="pressed">The prompt{r.slot ? ` (${SLOT_NAMES[r.slot]}: ${SLOT_HINTS[r.slot]})` : ""} <span class="hand">{r.prompt}</span></p>
+                  ) : (
+                    <p class="pressed">Most of you were pressed for <span class="hand">{r.majority}</span> The mole's copy said <span class="hand odd">{r.mole}</span></p>
+                  )}
                   {m ? (
                     <>
-                      <p class="mine">
-                        <span>Your card said <strong>{m.theme}</strong></span>
-                        {m.wasMole && m.theme === r.mole && <span class="stamp moles">You were the mole</span>}
-                      </p>
-                      <p class="pick">Your pick: <strong>{m.title}</strong>, {m.artist}</p>
+                      {r.prompt !== undefined ? (
+                        m.wasMole && <p class="mine"><span class="stamp moles">You were the mole</span></p>
+                      ) : (
+                        <p class="mine">
+                          <span>Your card said <strong>{m.theme}</strong></span>
+                          {m.wasMole && m.theme === r.mole && <span class="stamp moles">You were the mole</span>}
+                        </p>
+                      )}
+                      <p class="pick">Your pick: <strong>{m.title}</strong>, {m.artist}{m.lender ? ` (borrowed from ${m.lender})` : ""}</p>
                     </>
                   ) : (
                     <p class="pick">You did not pick this round.</p>

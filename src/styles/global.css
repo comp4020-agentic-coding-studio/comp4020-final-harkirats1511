@@ -552,6 +552,7 @@ fieldset.part .chips { clear: both; }
 .hist-meta { font: 600 0.75rem/1.2 var(--cat); margin: 0.25rem 0 0; color: var(--ink-2); letter-spacing: 0.04em; }
 .hist-code { font: 600 var(--step-2)/1 var(--cat); letter-spacing: 0.12em; margin: 0; }
 .hist-players { padding: 0 1.1rem 0.8rem; margin: 0; font-size: var(--step--1); color: var(--ink-2); overflow-wrap: anywhere; }
+.hist-ending { padding: 0 1.1rem 0.8rem; margin: 0; font-size: var(--step--1); color: var(--ink); font-weight: 600; }
 .hist-rounds { list-style: none; margin: 0; padding: 0; border-top: 2px solid var(--ink); counter-reset: side; }
 .hist-rounds > li { counter-increment: side; padding: 0.8rem 1.1rem; border-bottom: 1px solid rgba(27, 20, 32, 0.18); overflow-wrap: anywhere; display: grid; grid-template-columns: 2.25rem minmax(0, 1fr); gap: 0.25rem 0.5rem; }
 .hist-rounds > li:last-child { border-bottom: 0; }

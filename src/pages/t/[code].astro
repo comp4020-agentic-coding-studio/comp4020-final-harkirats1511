@@ -644,6 +644,8 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
       const spent = mine.every((c) => played.has(c.trackId));
       const lenders = state!.members.filter((m) => m.name !== myName && m.crate?.some((c) => !played.has(c.trackId)));
       const canBorrow = !used && lenders.length > 0;
+      // Nothing to pick from your own crate: drop the "pick from your crate" line too.
+      $("pick-instr").hidden = spent;
       if (spent) {
         $("pick-lists").replaceChildren(
           h("p", { class: "empty-crate" },
