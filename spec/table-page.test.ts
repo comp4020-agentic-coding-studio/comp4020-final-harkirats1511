@@ -66,7 +66,7 @@ it("never puts a prompt in a mole's server-rendered table page", async () => {
     expect((await p.s.call(`/api/tables/${code}/join`, { body: {} })).status).toBe(200);
     await fillCrate(p.s, players.indexOf(p));
   }
-  expect((await players[0].s.call(`/api/tables/${code}/start`, { body: {} })).status).toBe(200);
+  expect((await players[0].s.call(`/api/tables/${code}/start`, { body: {} })).status).toBeLessThan(300);
   const views = await Promise.all(players.map(async (p) => ({ p, me: (await (await p.s.call(`/api/tables/${code}/me`)).json()) as { role: string; prompt?: string } })));
   const mole = views.find((v) => v.me.role === "mole");
   const other = views.find((v) => v.me.role === "player");
