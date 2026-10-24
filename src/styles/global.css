@@ -69,6 +69,8 @@ a:hover { color: var(--text); }
 
 :focus-visible { outline: 3px solid var(--lamp); outline-offset: 3px; }
 .paper :focus-visible, .liner :focus-visible, .talker :focus-visible { outline-color: var(--ink); }
+/* Headings take focus on a phase change so screen readers land there; they are not controls. */
+[tabindex="-1"]:focus { outline: none; }
 
 /* ---- layout ---- */
 .site-head {

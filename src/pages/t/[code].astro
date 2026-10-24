@@ -449,6 +449,9 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     pendingFocus = "";
     if (document.activeElement?.closest("#leave-confirm, #remove-confirm")) return;
     el.focus({ preventScroll: true });
+    // The host taps "vote" at the foot of the replay; bring the new phase into view.
+    const top = el.getBoundingClientRect().top;
+    if (top < 0 || top > innerHeight - 120) el.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   }
 
   // A name's badge from the members list; someone who left gets a default.
