@@ -80,33 +80,3 @@ export async function getPreviewUrl(id: number): Promise<string | null> {
   const body = (await get(`/track/${id}`)) as Raw | null;
   return body?.preview || null;
 }
-
-// An artist's top tracks that have a preview, for the house record (decision
-// 0008). The artist id comes from a search by name, taking the first result
-// whose name matches exactly (ignoring case). One shared time limit covers both
-// requests; any failure, or no exact match, is an empty list.
-export async function topTracksWithPreview(artistName: string, ms: number): Promise<Track[]> {
-  const until = Date.now() + ms;
-  const left = () => Math.max(1, until - Date.now());
-  try {
-    const found = await get(`/search/artist?q=${encodeURIComponent(artistName)}&limit=5`, left());
-    const wanted = artistName.trim().toLowerCase();
-    const artist = ((found?.data as { id?: number; name?: string }[] | undefined) ?? []).find(
-      (a) => typeof a.id === "number" && a.name?.trim().toLowerCase() === wanted,
-    );
-    if (!artist) return [];
-    const top = await get(`/artist/${artist.id}/top?limit=25`, left());
-    const rows = (top?.data as Raw[] | undefined) ?? [];
-    // Nobody chose this track, and its title is shown to the whole table (often
-    // strangers): never one Deezer marks explicit, nor a title with a slur in it.
-    return rows
-      .filter((r) => !!r.preview && !r.explicit_lyrics && !(r.title && UNSAYABLE.test(r.title)))
-      .map(toTrack)
-      .filter((t): t is Track => t !== null);
-  } catch {
-    return [];
-  }
-}
-
-// A last net under Deezer's explicit flag, which some catalogue entries lack.
-const UNSAYABLE = /n[i1]gg|f[a@]gg|retard|c[u\*]nt|wh[o0]re|sl[u\*]t\b/i;
