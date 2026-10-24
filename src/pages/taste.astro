@@ -60,7 +60,7 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
   </section>
   <audio id="player" hidden></audio>
 </Base>
-<style>
+<style is:global>
   h1 { margin: 0.2rem 0 0.4rem; }
   .locked { background: var(--wall-3); border-left: 4px solid var(--lamp); padding: 0.8rem 1rem; border-radius: 8px; margin: 0 0 1rem; display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; align-items: center; }
   .progress { margin: 0 0 1rem; }
