@@ -16,7 +16,7 @@ export type PublicState = {
   members: { name: string; avatar: Avatar }[];
   game?: {
     round: number;
-    phase: "pick" | "listen" | "vote" | "reveal";
+    phase: "pick" | "listen" | "vote" | "steal" | "reveal";
     nowPlaying: number | null;
     alive: string[];
     ghosts: string[];

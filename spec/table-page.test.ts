@@ -40,3 +40,49 @@ it("asks who can sit down on the home page when signed in", async () => {
   expect(text).toContain("Anyone in the shop");
   expect(text).toContain("Only people with the code");
 });
+
+// Contract (decision 0009): the page shell holds the crate game's sections, and a
+// mole's server-rendered page never carries a prompt.
+it("renders the crate game's sections in the page shell", async () => {
+  const host = await signedIn("tblsec");
+  const { code } = (await (await host.s.call("/api/tables", { body: {} })).json()) as { code: string };
+  const text = await html(host.s, `/t/${code}`);
+  for (const id of ["crates", "card", "pick", "listen", "vote", "steal", "reveal"]) expect(text).toContain(`id="${id}"`);
+  expect(text).toContain("3 each for Up, Down, Out and In");
+  // The old game is gone from the page.
+  expect(text).not.toContain("Your theme");
+  expect(text).not.toContain("house record");
+});
+
+const CRATES: Record<string, number[]> = {
+  up: [13159670, 829306252, 1951194607],
+  down: [684573392, 3099606, 1444366372],
+  out: [1031007, 512466312, 2465911],
+  in: [3512895311, 3512895281, 2791780102],
+};
+
+it("never puts a prompt in a mole's server-rendered table page", async () => {
+  const fs = await import("node:fs");
+  const source = fs.readFileSync(new URL("../src/lib/prompts.ts", import.meta.url), "utf8");
+  const texts = [...source.matchAll(/text:\s*"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1].replace(/\\"/g, '"'));
+  expect(texts.length).toBeGreaterThan(40);
+  const players = [];
+  for (const prefix of ["pgm1", "pgm2", "pgm3"]) players.push(await signedIn(prefix));
+  const { code } = (await (await players[0].s.call("/api/tables", { body: { private: true } })).json()) as { code: string };
+  for (const p of players) {
+    expect((await p.s.call(`/api/tables/${code}/join`, { body: {} })).status).toBe(200);
+    for (const [slot, ids] of Object.entries(CRATES)) for (const trackId of ids) await p.s.call("/api/taste", { body: { trackId, slot } });
+  }
+  expect((await players[0].s.call(`/api/tables/${code}/start`, { body: {} })).status).toBe(200);
+  const views = await Promise.all(players.map(async (p) => ({ p, me: (await (await p.s.call(`/api/tables/${code}/me`)).json()) as { role: string; prompt?: string } })));
+  const mole = views.find((v) => v.me.role === "mole");
+  const other = views.find((v) => v.me.role === "player");
+  expect(mole && other).toBeTruthy();
+  expect(mole!.me.prompt).toBeUndefined();
+  const page = await html(mole!.p.s, `/t/${code}`);
+  const found = texts.filter((t) => page.includes(t) || page.includes(t.replace(/'/g, "&#39;")));
+  expect(found).toEqual([]);
+  // The prompt is fetched from /me, never rendered into anyone's shell.
+  expect(other!.me.prompt).toBeTruthy();
+  expect(await html(other!.p.s, `/t/${code}`)).not.toContain(other!.me.prompt!);
+});

@@ -295,8 +295,8 @@ ul.tracks > li {
 .acts button { flex: 1 1 7rem; min-height: 44px; padding: 0.4rem 0.8rem; font-size: var(--step--1); }
 
 /* Your crate: the pick panel is a wooden crate */
-#v-pick { background: linear-gradient(#3a2a1e, #2a1f17); box-shadow: inset 0 0 0 2px var(--wood), var(--lift); }
-#v-pick h3 { color: var(--lamp); }
+#pick { background: linear-gradient(#3a2a1e, #2a1f17); box-shadow: inset 0 0 0 2px var(--wood), var(--lift); }
+#pick h3 { color: var(--lamp); }
 
 audio { width: 100%; margin: 0 0 1rem; }
 .choice label { display: flex; align-items: center; gap: 0.7rem; min-height: 48px; font-weight: 600; font-size: var(--step-0); margin: 0; }
@@ -348,22 +348,6 @@ audio { width: 100%; margin: 0 0 1rem; }
 .np { text-align: center; font: 600 var(--step-0)/1.35 var(--ui); min-height: 3rem; margin: 0 0 1rem; }
 #np { font-weight: 600; }
 
-/* The crate of sides: A1, A2, B1... Each is a sleeve you can press (the host) or just look at. */
-ol.slots { list-style: none; padding: 0; margin: 0 0 1rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(4.5rem, 1fr)); gap: 0.6rem; }
-.slots li { position: relative; }
-.slots button, .slots .slot {
-  position: relative; display: grid; place-items: center; width: 100%; aspect-ratio: 1; min-height: 4.5rem; padding: 0;
-  background: var(--sleeve-2); color: var(--ink); border-radius: 6px; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
-  font: 800 1.375rem/1 var(--ui);
-}
-.slots .slot { cursor: default; }
-.slots .num { position: relative; }
-.slots .cat { position: absolute; bottom: 5px; left: 0; right: 0; text-align: center; font: 600 0.5625rem/1 var(--cat); color: var(--ink-2); }
-.slots .playing-stamp { position: absolute; top: 5px; left: 0; right: 0; text-align: center; display: none; font: 600 0.5625rem/1 var(--cat); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink); }
-.slots li.playing button, .slots li.playing .slot { background: var(--lamp); }
-.slots li.playing .cat { color: var(--ink); }
-.slots li.playing .playing-stamp { display: block; }
-
 /* Autoplay: one groove per track */
 .auto { margin: 0 0 1rem; }
 .auto-line { display: flex; align-items: center; gap: 0.6rem; font-weight: 600; margin: 0 0 0.5rem; }
@@ -373,16 +357,6 @@ ol.slots { list-style: none; padding: 0; margin: 0 0 1rem; display: grid; grid-t
 .auto-bar > span.on { background: var(--lamp); }
 .auto-n { flex: none; margin-left: 0.4rem; font: 600 var(--step--1)/1 var(--cat); }
 
-/* Vote: the sleeves are the options, each with its live count. Counts only, never who. */
-.slots.votes button { cursor: pointer; }
-.slots.votes button:disabled { cursor: default; opacity: 0.75; }
-.slots.votes .num { position: absolute; top: 6px; left: 8px; font: 800 0.9375rem/1 var(--ui); }
-.slots.votes .count { font: 600 2rem/1 var(--cat); margin-top: 0.6rem; }
-.slots.votes button.mine { background: var(--lamp); box-shadow: 0 0 0 3px var(--text), 0 4px 10px rgba(0, 0, 0, 0.35); }
-.slots.votes button.mine .cat { color: var(--ink); font-weight: 700; }
-.skipbar button { width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; }
-.skipbar button .count { font: 600 1.5rem/1 var(--cat); }
-.skipbar button.mine { background: var(--lamp); color: var(--ink); box-shadow: 0 0 0 3px var(--text); }
 .lastcall { margin: 0.75rem 0 0; padding: 0.5rem 0.75rem; border-radius: 6px; background: var(--neon-ink); color: var(--text); font: 600 var(--step-0)/1.2 var(--cat); }
 .votes-note h3 { color: var(--ink-2); margin-top: 0.5rem; }
 .votelist { list-style: none; padding: 0; margin: 0 0 1rem; display: grid; gap: 0.4rem; }
@@ -550,7 +524,8 @@ fieldset.part .chips { clear: both; }
   .game-col { display: flex; flex-direction: column; }
   .game-col > #scene-slot { order: 0; margin-bottom: 0.75rem; }
   .game-col > #scene-slot .scene-stage { height: clamp(160px, 26vh, 240px); }
-  .game-col[data-phase="pick"] > h1, .game-col[data-phase="pick"] > .status, .game-col[data-phase="pick"] > #v-role { order: -1; }
+  .game-col[data-phase="pick"] > h1, .game-col[data-phase="pick"] > .status, .game-col[data-phase="pick"] > #card { order: -1; }
+  .game-col > #crates { order: 20; }
   .game-col[data-phase="pick"] > #scene-slot { margin-top: 0.5rem; }
 }
 @media (min-width: 52rem) { .scene-stage { height: 360px; } }
@@ -611,3 +586,143 @@ details.report select { margin-bottom: 0.75rem; }
 .removed .row { gap: 0.75rem; flex-wrap: wrap; }
 .bar { flex-wrap: wrap; }
 input[type="radio"] { border-radius: 50%; }
+
+/* ---- Crate game table (decision 0009) ---- */
+
+/* Your card: the mole's is neon, the only neon besides the sign and the stamp. */
+.slot-tag { font: 600 0.75rem/1.2 var(--cat); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); margin: 0.75rem 0 0; }
+.theme.quiet { font: 800 1.25rem/1.25 var(--ui); }
+.mole-line { font: 800 1.5rem/1.15 var(--ui); margin: 0.5rem 0 0; }
+.theme-card.is-mole .front { background: var(--wall); color: var(--neon); box-shadow: inset 0 0 0 3px var(--neon), 0 0 22px rgba(255, 79, 139, 0.35); }
+.theme-card.is-mole .talker-k { color: var(--neon); border: 2px solid var(--neon); display: inline-block; align-self: flex-start; padding: 0.25rem 0.4rem; border-radius: 4px; transform: rotate(-3deg); font-family: var(--cat); }
+.theme-card.is-mole .tape { background: var(--neon); }
+.theme-card.is-mole :focus-visible { outline-color: var(--lamp); }
+.theme-card.is-mole .mole-line { color: var(--text); }
+
+/* Crates on the table */
+.crates .hint { margin-bottom: 0.75rem; }
+#crates-list { display: grid; gap: 0.6rem; }
+details.cplayer { border-radius: 10px; background: rgba(239, 231, 215, 0.06); }
+details.cplayer > summary { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; padding: 0.55rem 0.75rem; min-height: 52px; cursor: pointer; font-weight: 700; list-style: none; }
+details.cplayer > summary::-webkit-details-marker { display: none; }
+details.cplayer > summary::after { content: "+"; font: 600 1.25rem/1 var(--cat); color: var(--lamp); margin-left: 0.15rem; }
+details.cplayer[open] > summary::after { content: "\2212"; }
+details.cplayer .avatar { --s: 2rem; }
+.cname { flex: 1; min-width: 6rem; overflow-wrap: anywhere; }
+.cleft { font: 600 0.75rem/1 var(--cat); color: var(--muted); order: 5; }
+.stamp.borrowed { color: var(--lamp); transform: rotate(2deg); }
+.cslot { padding: 0 0.75rem 0.6rem; }
+.cslot h4 { display: flex; align-items: baseline; gap: 0.5rem; margin: 0.35rem 0 0.3rem; font: 600 0.75rem/1.2 var(--cat); letter-spacing: 0.1em; text-transform: uppercase; color: var(--lamp); }
+.cslot .chint { color: var(--muted); letter-spacing: 0; text-transform: none; }
+.cslot ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; }
+.csong { display: grid; grid-template-columns: 2.25rem minmax(0, 1fr) auto; gap: 0.6rem; align-items: center; }
+.csong .sleeve-art { width: 2.25rem; height: 2.25rem; }
+.csong .sleeve-art::after { display: none; }
+.csong .sleeve-art img, .csong .sleeve-art .nocover { width: 2.25rem; height: 2.25rem; }
+.csong .meta strong { font-size: var(--step--1); }
+.csong .meta span { font-size: 0.75rem; }
+.csong.is-played .meta strong { text-decoration: line-through; text-decoration-thickness: 2px; }
+.csong.is-played .sleeve-art img, .csong.is-played .sleeve-art .nocover { filter: grayscale(1); opacity: 0.5; }
+.csong.is-played .meta span { opacity: 0.8; }
+.played-tag { font: 600 0.625rem/1 var(--cat); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); border: 1.5px solid var(--line); border-radius: 3px; padding: 0.2rem 0.3rem; }
+@media (min-width: 1024px) { #crates-list { grid-template-columns: 1fr 1fr; align-items: start; } }
+
+/* Pick */
+ul.tracks.pickable > li.prow { grid-template-columns: 3.5rem minmax(0, 1fr) auto; }
+li.prow .sleeve-art { width: 3.5rem; height: 3.5rem; }
+li.prow .sleeve-art img, li.prow .sleeve-art .nocover { width: 3.5rem; height: 3.5rem; }
+li.prow .sleeve-art::after { display: block; }
+li.prow .meta strong { font-size: var(--step-0); }
+li.prow .meta span { font-size: var(--step--1); }
+li.prow .slot-tag { grid-column: 2; margin: 0; color: var(--muted); order: 3; }
+li.prow .played-tag { grid-column: 3; }
+li.prow .acts { grid-column: 1 / -1; order: 4; }
+li.prow.fits { background: rgba(244, 184, 96, 0.14); box-shadow: inset 4px 0 0 var(--lamp); }
+li.prow.fits .slot-tag::after { content: " \00b7 fits the mood"; color: var(--lamp); }
+#pick h3 { margin-top: 1.25rem; }
+#pick h3:first-child { margin-top: 0; }
+#borrow-wrap { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px dashed var(--wood); }
+#borrow-wrap .hint { margin: 0.5rem 0 0.75rem; }
+#borrow-panel { display: grid; gap: 0.6rem; }
+#borrow-panel ul.tracks { padding: 0 0.4rem 0.4rem; margin: 0; }
+
+/* Listen: named cards in play order */
+ol.plays { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; gap: 0.6rem; }
+.pcard {
+  position: relative; display: grid; grid-template-columns: 1.75rem 3.5rem minmax(0, 1fr); gap: 0.35rem 0.75rem; align-items: center;
+  padding: 0.6rem 0.75rem; border-radius: 10px; background: rgba(239, 231, 215, 0.06);
+}
+.pcard .n { font: 600 0.9375rem/1 var(--cat); color: var(--muted); text-align: center; }
+.pcard .who { grid-column: 2 / -1; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; font-weight: 600; }
+.pcard .who .avatar { --s: 1.75rem; }
+.pcard .lent { color: var(--muted); font-size: var(--step--1); font-weight: 500; }
+.pcard > button { grid-column: 2 / -1; min-height: 44px; padding: 0.35rem 1rem; font-size: var(--step--1); justify-self: start; }
+.pcard .playing-stamp { display: none; position: absolute; top: 0.5rem; right: 0.6rem; font: 600 0.625rem/1 var(--cat); letter-spacing: 0.08em; text-transform: uppercase; padding: 0.25rem 0.4rem; border-radius: 3px; background: var(--lamp); color: var(--ink); }
+.pcard.playing { background: rgba(244, 184, 96, 0.16); box-shadow: inset 0 0 0 2px var(--lamp); }
+.pcard.playing .playing-stamp { display: block; }
+.pcard.playing .n { color: var(--lamp); }
+.stamp.clash { color: var(--lamp); transform: rotate(2deg); }
+.deadair { font: 600 var(--step--1)/1.4 var(--cat); color: var(--muted); margin: 0 0 1rem; }
+.stage .sl-t { font-size: 17px; line-height: 1.1; overflow-wrap: anywhere; }
+.stage .labelc { width: 62px; height: 62px; }
+.stage .labelc i { font-size: 6px; max-width: 54px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stage .labelc b { font-size: 15px; }
+.stage .sleeve::before { content: attr(data-title); position: absolute; left: 10px; right: 10px; top: 10px; font: 600 11px/1.2 var(--ui); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+
+/* Vote on players */
+ul.ballot { list-style: none; margin: 0 0 0.75rem; padding: 0; display: grid; gap: 0.6rem; }
+.brow {
+  position: relative; width: 100%; display: grid; grid-template-columns: 2.5rem minmax(0, 1fr) auto; gap: 0.75rem; align-items: center; text-align: left;
+  min-height: 64px; padding: 0.6rem 0.9rem; border-radius: 12px; background: var(--wall-3); color: var(--text); box-shadow: inset 0 0 0 1.5px var(--line); font-weight: 600;
+}
+button.brow:hover:not(:disabled) { background: #3f3248; color: var(--text); filter: none; }
+.brow.ro { cursor: default; }
+.bname { display: grid; min-width: 0; }
+.bname strong { font-size: var(--step-1); overflow-wrap: anywhere; }
+.bcard { color: var(--muted); font-size: var(--step--1); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brow .count { font: 600 2.25rem/1 var(--cat); font-variant-numeric: tabular-nums; color: var(--lamp); min-width: 2ch; text-align: right; }
+.brow.mine { background: var(--lamp); color: var(--ink); box-shadow: 0 0 0 3px var(--text); }
+.brow.mine .bcard, .brow.mine .count { color: var(--ink); }
+.brow .your { position: absolute; top: -0.55rem; right: 0.8rem; font: 600 0.625rem/1 var(--cat); letter-spacing: 0.08em; text-transform: uppercase; padding: 0.25rem 0.4rem; border-radius: 3px; background: var(--ink); color: var(--lamp); box-shadow: inset 0 0 0 1.5px var(--lamp); }
+.skipbtn { width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 0.7rem 1rem; min-height: 56px; }
+.skipbtn .count { font: 600 1.75rem/1 var(--cat); color: var(--lamp); }
+.skipbtn.mine { background: var(--lamp); color: var(--ink); box-shadow: 0 0 0 3px var(--text); }
+.skipbtn.mine .count { color: var(--ink); }
+div.skipbtn.ro { border-radius: 999px; box-shadow: inset 0 0 0 1.5px var(--line); font-weight: 800; }
+.lastcall { font-size: var(--step-1); text-align: center; }
+
+/* Steal: the tense one */
+.steal { box-shadow: inset 0 0 0 2px var(--neon), var(--lift); text-align: center; }
+.steal-stamp { margin: 0; }
+.steal h2 { font: 400 clamp(2rem, 11vw, 3rem)/1 var(--sign); text-transform: uppercase; margin: 0 0 0.5rem; }
+.steal .instr { margin-inline: auto; }
+.steal-clock { font: 600 clamp(4.5rem, 26vw, 7rem)/1 var(--cat); font-variant-numeric: tabular-nums; color: var(--lamp); margin: 0 0 1rem; }
+.steal-clock.low { color: var(--bad); }
+.steal-options { display: grid; gap: 0.75rem; text-align: left; }
+.steal-opt { justify-content: flex-start; text-align: left; font: 600 1.125rem/1.25 var(--ui); padding: 1rem 1.1rem; min-height: 64px; border-radius: 14px; }
+.steal-opt:disabled { opacity: 0.8; }
+
+/* Reveal and game over */
+.reveal-prompt { margin: 0 0 1rem; font-size: clamp(1.9rem, 8vw, 2.4rem); }
+.liner .kicker { color: var(--ink-2); }
+.liner .stamp-big { margin-top: 0.25rem; }
+ol.plays.reveal .pcard { background: none; border-bottom: 1px solid rgba(27, 20, 32, 0.18); border-radius: 0; animation: deal 450ms var(--pop) backwards; animation-delay: calc(var(--i, 0) * 140ms); }
+.liner .pcard .n, .liner .pcard .lent { color: var(--ink-2); }
+.liner .stamp.clash { color: var(--ink); }
+.liner .deadair { color: var(--ink-2); }
+.liner .votelist li span:last-child { font: 600 var(--step--1)/1.2 var(--cat); }
+.mole-names { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; gap: 0.5rem; }
+.mole-names li { display: flex; align-items: center; gap: 0.6rem; font-size: var(--step-1); flex-wrap: wrap; }
+.next-in { font-weight: 600; text-align: center; color: var(--ink-2); margin: 0.5rem 0; }
+ol.past { list-style: none; margin: 0 0 1rem; padding: 0; }
+ol.past > li { display: grid; gap: 0.2rem; padding: 0.7rem 0; border-bottom: 1px solid rgba(27, 20, 32, 0.18); }
+ol.past > li:last-child { border-bottom: 0; }
+ol.past .t { font: 600 0.75rem/1.3 var(--cat); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); }
+ol.past .hand { font: 600 1.5rem/1.1 var(--hand); color: var(--ink); }
+ol.past .pcards { list-style: none; margin: 0.2rem 0; padding: 0; font-size: var(--step--1); display: grid; gap: 0.1rem; }
+ol.past .t.out { color: var(--neon-ink); }
+.moles-end .kicker { margin-bottom: 0.4rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .phase.enter, ol.plays.reveal .pcard { animation: none; }
+}

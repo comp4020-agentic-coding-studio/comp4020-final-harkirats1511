@@ -1,17 +1,20 @@
 ---
 import Base from "../../layouts/Base.astro";
 import { personFromCookies } from "../../lib/auth.ts";
+import { SLOT_HINTS, SLOT_NAMES } from "../../lib/prompts.ts";
 import { MIN_PLAYERS, normaliseCode, publicState } from "../../lib/tables.ts";
-import { TASTE_MAX as MIN_CRATE } from "../../lib/taste.ts";
+import { PER_SLOT, TASTE_MAX as MIN_CRATE } from "../../lib/taste.ts";
 
 const code = normaliseCode(Astro.params.code);
 const state = publicState(code);
 if (!state) return new Response("No such table.", { status: 404 });
 const me = personFromCookies(Astro.cookies);
 if (!me) return Astro.redirect(`/?next=/t/${code}`);
+// Slot names and moods only (never a prompt): the client needs them to label a crate and a mole's card.
+const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, name: SLOT_NAMES[s as keyof typeof SLOT_NAMES], hint: SLOT_HINTS[s as keyof typeof SLOT_HINTS] })));
 ---
 <Base title={`Table ${code}`} width="table">
-  <div id="app" data-code={code} data-me={me.name} data-min={MIN_PLAYERS} data-crate={MIN_CRATE}>
+  <div id="app" data-code={code} data-me={me.name} data-min={MIN_PLAYERS} data-crate={MIN_CRATE} data-per={PER_SLOT} data-slots={slotInfo}>
     <p class="sr-only" id="announce" role="status" aria-live="polite"></p>
     <p class="conn" id="conn" role="status" aria-live="polite" hidden></p>
 
@@ -76,6 +79,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
             </div>
             <p class="hint" id="vis-msg" role="status"></p>
           </fieldset>
+          <p class="hint">Everyone brings a crate of {MIN_CRATE} songs: {PER_SLOT} each for Up, Down, Out and In. Once the game starts the crates sit on the table for all to see.</p>
           <p class="hint"><a href="/me">Change your character</a></p>
           <p class="nudge" id="crate-me" hidden><a id="crate-me-link" href={`/taste?next=/t/${code}`}>Fill your crate</a></p>
           <button id="start" type="button" class="full" disabled hidden>Start game</button>
@@ -83,55 +87,60 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
           <p id="msg" class="error" role="alert"></p>
         </div>
 
-        <section class="role phase" id="v-role" aria-labelledby="role-h" hidden>
+        <!-- Your card: the prompt for most of you; for the mole only its mood. Hide flips it face down. -->
+        <section class="role phase" id="card" aria-labelledby="role-h" hidden>
           <div class="role-head">
-            <h2 id="role-h">Your theme</h2>
+            <h2 id="role-h">Your card</h2>
             <button id="role-toggle" type="button" class="secondary sm" aria-controls="role-body" aria-expanded="true"><span id="role-toggle-text">Hide</span></button>
           </div>
           <div class="theme-card" id="theme-card">
             <span class="tape" aria-hidden="true"></span>
             <div class="flip">
               <div class="face front" id="role-body">
-                <p class="talker-k" aria-hidden="true">Staff pick</p>
+                <p class="talker-k" id="role-k">Staff pick</p>
                 <p class="theme" id="role-text"></p>
+                <p class="slot-tag mono" id="role-slot"></p>
+                <p class="mole-line" id="role-sub" hidden></p>
               </div>
               <div class="face back" id="role-back" aria-hidden="true">
-                <p class="back-note" id="role-hidden">Your theme is hidden. Show it when nobody is looking.</p>
+                <p class="back-note" id="role-hidden">Your card is hidden. Show it when nobody is looking.</p>
               </div>
             </div>
           </div>
         </section>
 
-        <section class="card phase" id="v-pick" aria-labelledby="pick-h" hidden>
+        <section class="card phase" id="pick" aria-labelledby="pick-h" hidden>
           <h2 id="pick-h">Pick a song</h2>
-          <p class="instr" id="pick-instr">Pick a song that fits your theme. Your pick is final once you tap it.</p>
-          <p class="hint" id="pick-wait" hidden>You're watching this game. The room is picking songs.</p>
+          <p class="instr" id="pick-instr"></p>
+          <p class="hint" id="pick-wait" hidden></p>
           <div id="pick-done" hidden>
             <p><span class="stamp">Picked</span></p>
-            <p><strong>Your pick is in.</strong> It is final. Wait for the others.</p>
+            <p><strong>Picked.</strong> Waiting for the others.</p>
           </div>
           <div id="pick-ui" hidden>
-            <h3>Your crate</h3>
-            <p class="hint" id="quick-empty" hidden>Your crate is empty. Add some tracks, then pick one.</p>
-            <ul class="tracks" id="quick" aria-label="Your crate"></ul>
-            <p class="hint"><a href={`/taste?next=/t/${code}`}>Add to your crate</a>. The pick timer keeps running while you are away.</p>
+            <div id="pick-lists"></div>
+            <div id="borrow-wrap">
+              <button id="borrow-toggle" type="button" class="secondary" aria-expanded="false" aria-controls="borrow-panel">Borrow instead</button>
+              <p class="hint" id="borrow-note"></p>
+              <div id="borrow-panel" hidden></div>
+            </div>
           </div>
           <p id="pick-msg" class="error" role="alert"></p>
         </section>
 
-        <section class="card phase" id="v-listen" aria-labelledby="listen-h" hidden>
+        <section class="card phase" id="listen" aria-labelledby="listen-h" hidden>
           <h2 id="listen-h">Listen</h2>
-          <p class="instr">Listen to every track, then talk it over: whose song sounds like it answered a slightly different theme? You might be the odd one out yourself.</p>
+          <p class="instr" id="listen-instr">Every song, with its picker. Whose song fits the card, and whose sounds like a bluff?</p>
           <div id="audio-choice" class="choice" hidden>
             <label><input type="checkbox" id="own-audio" /> Play the tracks on this phone</label>
             <p class="hint" id="audio-choice-note"></p>
           </div>
           <div class="stage-wrap" aria-hidden="true">
             <div class="stage" id="stage">
-              <div class="sleeve"><span class="sl-k">{code}</span><span class="sl-t" id="stage-side">A1</span></div>
+              <div class="sleeve" id="stage-sleeve"><span class="sl-k">{code}</span><span class="sl-t" id="stage-side">&#9835;</span></div>
               <div class="plinth"></div>
               <div class="platter"></div>
-              <div class="record"><div class="disc"><div class="labelc"><div><i>{code}</i><b id="stage-label">A1</b><i>33&#8531; RPM</i></div></div></div></div>
+              <div class="record"><div class="disc"><div class="labelc"><div><i id="stage-who">{code}</i><b id="stage-label">A1</b><i id="stage-title">33&#8531; RPM</i></div></div></div></div>
               <div class="arm"><div class="rod"></div><div class="head"></div></div>
             </div>
           </div>
@@ -141,45 +150,68 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
             <div class="auto-bar" id="auto-bar" role="img"></div>
           </div>
           <button id="unlock" type="button" class="full" hidden>Tap to let this phone play</button>
-          <ol class="slots" id="slots" aria-label="Tracks"></ol>
+          <ol class="plays" id="cards" aria-label="The songs this round"></ol>
+          <p class="deadair" id="dead-air" hidden></p>
           <p class="hint" id="audio-msg" role="status"></p>
           <audio id="audio" preload="none"></audio>
           <button id="to-vote" type="button" class="full" hidden>Go to voting</button>
         </section>
 
-        <section class="card phase" id="v-vote" aria-labelledby="vote-h" hidden>
-          <h2 id="vote-h">Vote a track out</h2>
-          <p class="instr">Vote for the track that doesn't fit, or skip. One of them isn't anyone's pick. You might be the mole without knowing it.</p>
+        <section class="card phase" id="vote" aria-labelledby="vote-h" hidden>
+          <h2 id="vote-h">Vote someone out</h2>
+          <p class="instr" id="vote-instr">Who is the mole? Vote for a player, or skip. You can change your vote until it locks.</p>
           <p class="hint" id="vote-note"></p>
-          <ol class="slots votes" id="vote-slots" aria-label="Tracks to vote for"></ol>
+          <ul class="ballot" id="vote-list" aria-label="Players to vote for"></ul>
           <div class="skipbar" id="vote-skip-wrap"></div>
-          <p class="hint" id="vote-change"></p>
           <p class="lastcall mono" id="last-call" role="status" hidden></p>
           <p id="vote-msg" class="error" role="alert"></p>
         </section>
 
-        <section class="card liner phase" id="v-reveal" aria-labelledby="reveal-h" hidden>
+        <section class="card phase steal" id="steal" aria-labelledby="steal-h" hidden>
+          <p class="steal-stamp" aria-hidden="true"><span class="stamp-big moles">Mole</span></p>
+          <h2 id="steal-h">Steal!</h2>
+          <p class="instr" id="steal-line"></p>
+          <p class="steal-clock mono" id="steal-clock" aria-hidden="true"></p>
+          <div id="steal-options" class="steal-options" hidden></div>
+          <p class="hint" id="steal-wait" hidden></p>
+          <p id="steal-msg" class="error" role="alert"></p>
+        </section>
+
+        <section class="card liner phase" id="reveal" aria-labelledby="reveal-h" hidden>
           <p class="liner-top mono" aria-hidden="true"><span>{code}</span><span id="reveal-side">Back cover</span></p>
           <h2 id="reveal-h">Reveal</h2>
-          <p class="instr" id="reveal-instr"></p>
+          <p id="winner" class="stamp-big" hidden></p>
+          <div id="moles-end" class="moles-end" hidden></div>
+          <div id="reveal-prompt-wrap" hidden>
+            <p class="kicker" id="reveal-slot"></p>
+            <p class="theme reveal-prompt" id="reveal-prompt"></p>
+          </div>
           <p id="eject" class="eject"></p>
-          <ul class="tracks reveal" id="reveal-slots" aria-label="Who picked what"></ul>
+          <ol class="plays reveal" id="reveal-cards" aria-label="Who picked what"></ol>
+          <p class="deadair" id="reveal-dead" hidden></p>
           <div id="reveal-votes-wrap" class="votes-note" hidden>
             <h3>Votes</h3>
             <ul class="votelist" id="reveal-votes"></ul>
           </div>
-          <p id="winner" class="stamp-big" hidden></p>
-          <div id="themes-end" hidden>
+          <div id="past-end" hidden>
             <div class="pressing">
-              <h3>Pressing notes</h3>
-              <ol class="pairs" id="themes-list"></ol>
+              <h3>The whole game</h3>
+              <ol class="past" id="past-list"></ol>
             </div>
           </div>
+          <p class="mono next-in" id="next-in" hidden></p>
           <button id="next" type="button" class="full" hidden>Next round</button>
           <button id="again" type="button" class="full" hidden>Play again</button>
           <p class="hint" id="reveal-wait" hidden></p>
           <p id="see-games" hidden><a href="/history">See all your games</a></p>
           <p id="reveal-msg" class="error" role="alert"></p>
+        </section>
+
+        <!-- The crates on the table: the evidence the room reasons from. -->
+        <section class="card crates" id="crates" aria-labelledby="crates-h" hidden>
+          <h2 id="crates-h">The crates</h2>
+          <p class="hint">Everyone's songs, in the open. A heard song is struck out and marked played.</p>
+          <div id="crates-list"></div>
         </section>
       </div>
 
@@ -227,12 +259,12 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
         <details class="card howto" id="howto" hidden>
           <summary>How to play</summary>
           <ol>
-            <li>Everyone gets a secret theme, like "a song for crying in the car".</li>
-            <li>One or two people get a slightly different theme, and they are not told. It might be you.</li>
-            <li>Pick a song that fits your theme.</li>
-            <li>Every song plays without a name on it, plus one house record that is nobody's pick. Listen, then talk it over.</li>
-            <li>Vote for the track that doesn't fit, and change your vote until it locks. Its picker is out; if it was the house record, nobody is.</li>
-            <li>The game ends when the moles are all out, or when they are as many as everyone else.</li>
+            <li>Bring a crate of 12 songs, 3 each for Up, Down, Out and In. Everyone sees every crate.</li>
+            <li>Each round has a prompt. You all get it except one or two moles, who only get its mood.</li>
+            <li>Pick a song from your crate that answers the prompt. You can borrow one song from someone else's crate, once.</li>
+            <li>Every pick plays with its picker's name. A song can only be heard once a game.</li>
+            <li>Vote out the player whose song doesn't fit. A mole who is caught can steal the win by guessing the prompt.</li>
+            <li>Players win when every mole is out. Moles win when they are as many as everyone left, or when a steal lands.</li>
           </ol>
         </details>
       </aside>
@@ -242,26 +274,41 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
 <script>
   import { avatar } from "../../ui/avatar.ts";
   import type { Avatar } from "../../lib/avatar.ts";
-  type Track = { title: string; artist: string; cover?: string };
-  type Found = Track & { id: number };
-  type RevealSlot = Track & { slot: number; owner?: string; house?: true; inspiredBy?: string };
+  type Slot = "up" | "down" | "out" | "in";
+  type CrateTrack = { trackId: number; title: string; artist: string; cover?: string; slot: Slot | null };
+  type Card = { order: number; picker: string; lender?: string; trackId: number; title: string; artist: string; cover?: string; clash?: true };
+  type Past = { round: number; prompt: string; slot: Slot; cards: Card[]; ejected: string | null; wasMole: boolean };
+  type Reveal = {
+    prompt: string; slot: Slot; cards: Card[]; deadAir: string[]; votes: { voter: string; choice: string | null }[];
+    accused: string | null; ejected: string | null; wasMole: boolean; stole: boolean;
+  };
   type Game = {
     round: number;
     autoplay?: boolean;
-    phase: "pick" | "listen" | "vote" | "reveal";
+    phase: "pick" | "listen" | "vote" | "steal" | "reveal";
     deadline: number | null;
     nowPlaying: number | null;
     alive: string[];
     ghosts: string[];
-    tally?: { slot: number; votes: number }[];
+    cards?: Card[];
+    deadAir?: string[];
+    tally?: { name: string; votes: number }[];
     skips?: number;
     lastCall?: boolean;
-    reveal?: { ejected: string | null; wasMole: boolean; ejectedHouse: boolean; slots: RevealSlot[]; votes: { voter: string; slot: number | null }[] };
+    accused?: string;
+    reveal?: Reveal;
+    past: Past[];
+    borrowed: string[];
+    played: number[];
     winner?: "players" | "moles";
-    themes?: { round: number; majority: string; mole: string }[];
+    moles?: string[];
   };
-  type State = { status: string; private: boolean; host: string; members: { name: string; avatar: Avatar; crateReady: boolean }[]; game?: Game };
-  type Me = { role: "player" | "ghost" | "spectator"; theme?: string; picked?: boolean; vote?: number | "skip" };
+  type Member = { name: string; avatar: Avatar; crateReady: boolean; crate?: CrateTrack[] };
+  type State = { status: string; private: boolean; host: string; members: Member[]; game?: Game };
+  type Me = {
+    role: "player" | "mole" | "ghost" | "spectator"; prompt?: string; slot?: Slot; picked?: boolean; borrowUsed?: boolean; played?: number[];
+    vote?: { name: string } | { skip: true }; steal?: { options: { id: string; text: string }[] };
+  };
 
   import type { TableScene } from "../../scene/table-scene.ts";
   import { createSfx } from "../../audio/sfx.ts";
@@ -270,6 +317,13 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
   const myName = app.dataset.me!;
   const minPlayers = Number(app.dataset.min);
   const minCrate = Number(app.dataset.crate);
+  // Slot names and moods only; the page never holds a prompt a mole must not see.
+  const slotInfo = JSON.parse(app.dataset.slots!) as { slot: Slot; name: string; hint: string }[];
+  const slotName = (s: Slot | null | undefined) => slotInfo.find((x) => x.slot === s)?.name ?? "";
+  const slotLabel = (s: Slot | null | undefined) => {
+    const x = slotInfo.find((i) => i.slot === s);
+    return x ? `${x.name}: ${x.hint}` : "";
+  };
   const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
   const show = (id: string, on: boolean) => { $(id).hidden = !on; };
 
@@ -288,23 +342,17 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     b.addEventListener("click", onClick);
     return b;
   }
-  // Side and track for a slot, like a record's label: with 4 tracks, A1 A2 B1 B2.
-  // Derived from the slot number and how many there are; it says nothing about who or what.
-  function sideOf(n: number, total: number) {
-    const half = Math.max(1, Math.ceil(total / 2));
-    return `${n < half ? "A" : "B"}${(n % half) + 1}`;
-  }
-  const sideWords = (n: number, total: number) => {
-    const s = sideOf(n, total);
-    return `Side ${s[0]}, track ${s[1]}`;
-  };
-  // A record sleeve row: cover art with a record peeking out, title and artist,
-  // then whatever the caller puts after (actions, or the owner on the reveal).
-  function trackRow(t: Track, ...extra: (Node | string)[]) {
-    const art = t.cover
-      ? Object.assign(document.createElement("img"), { src: t.cover, alt: "", width: 56, height: 56, loading: "lazy" })
+  type Track = { title: string; artist: string; cover?: string };
+  function art(t: Track, size = 56) {
+    const img = t.cover
+      ? Object.assign(document.createElement("img"), { src: t.cover, alt: "", width: size, height: size, loading: "lazy" })
       : h("div", { class: "nocover" });
-    return h("li", {}, h("div", { class: "sleeve-art" }, art), h("div", { class: "meta" }, h("strong", {}, t.title), h("span", {}, t.artist)), ...extra);
+    return h("div", { class: "sleeve-art" }, img);
+  }
+  // A record sleeve row: cover art with a record peeking out, title and artist,
+  // then whatever the caller puts after.
+  function trackRow(t: Track, ...extra: (Node | string)[]) {
+    return h("li", {}, art(t), h("div", { class: "meta" }, h("strong", {}, t.title), h("span", {}, t.artist)), ...extra);
   }
   async function api<T = Record<string, unknown>>(url: string, body?: unknown) {
     const res = await fetch(url, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -329,21 +377,24 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
 
   let state: State | null = null;
   let me: Me | null = null;
-  let slots: number[] = [];
-  let taste: Found[] | null = null;
   let myCrate: number | null = null;
   let roleShown = true;
   let howtoSet = false;
   let lastKey = "";
   let announcedLow = "";
   let clockSkew = 0;
-  const phaseWords = { pick: "Pick a song", listen: "Listen", vote: "Vote", reveal: "Reveal" };
+  const phaseWords = { pick: "Pick a song", listen: "Listen", vote: "Vote", steal: "Steal", reveal: "Reveal" };
   let dropKey = "";
+  let borrowOpen = false;
+  let stealGuessed = false;
 
   const announce = (t: string) => { $("announce").textContent = t; };
   const isHost = () => state?.host === myName;
   // Phones that make sound: the host's always, anyone's who chose their own phone.
   const speakerHere = () => !!state && (isHost() || audioChoice === "mine");
+  const secondsLeft = (g: Game | undefined) => (g?.deadline == null ? 0 : Math.max(0, Math.ceil((g.deadline - (Date.now() + clockSkew)) / 1000)));
+  // Someone who picks and votes this round (a mole too; a ghost or spectator doesn't).
+  const active = () => me?.role === "player" || me?.role === "mole";
 
   // ---- rendering ----
 
@@ -363,18 +414,19 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     show("to-shop", !inGame || over);
     // How to play: open until a game has been played here, then folded away.
     show("howto", !inGame || over);
-    // Folded away once a game is on, and for anyone who arrives after one.
     if (!howtoSet || playing) {
       howtoSet = true;
       ($("howto") as HTMLDetailsElement).open = !g;
     }
     renderMembers();
     renderLobby();
-    renderRole(playing && phase !== "reveal" && !over);
+    renderCard(playing && (phase === "pick" || phase === "listen" || phase === "vote"));
     renderPick(playing && phase === "pick");
     renderListen(playing && (phase === "listen" || phase === "vote"));
     renderVote(playing && phase === "vote");
+    renderSteal(playing && phase === "steal");
     renderReveal(inGame && (phase === "reveal" || over));
+    renderCrates(playing);
     tick();
     syncActions();
   }
@@ -388,14 +440,14 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     const s = state!;
     const g = s.game;
     const inGame = s.status === "playing" && !!g;
-    once("members", JSON.stringify([s.members, s.host, inGame, g?.alive, g?.ghosts, isHost(), myCrate]), () => {
+    once("members", JSON.stringify([s.members.map((m) => [m.name, m.avatar, m.crateReady]), s.host, inGame, g?.alive, g?.ghosts, isHost(), myCrate]), () => {
       $("members").replaceChildren(
         ...s.members.map(({ name, crateReady }) => {
           const stamps = h("span", { class: "stamps" });
           const stamp = (t: string, kind: string) => stamps.append(h("span", { class: `stamp ${kind}` }, t));
           if (name === s.host) stamp("Host", "host");
           const own = name === myName && myCrate !== null;
-          stamp(crateReady ? "Crate ready" : own ? `Crate: ${myCrate}/${minCrate}` : "Crate: not ready", crateReady ? "crate ready" : "crate");
+          if (!inGame) stamp(crateReady ? "Crate ready" : own ? `Crate: ${myCrate}/${minCrate}` : "Crate: not ready", crateReady ? "crate ready" : "crate");
           if (inGame && g!.ghosts.includes(name)) stamp("Out", "out");
           else if (inGame && !g!.alive.includes(name)) stamp("Watching", "watching");
           const li = h("li", {}, face(name), h("span", { class: "name" }, name), stamps);
@@ -432,7 +484,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     if (!mineReady) $("crate-me-link").textContent = `Fill your crate (${myCrate ?? 0}/${minCrate})`;
     $("start-note").textContent = isHost()
       ? notReady.length
-        ? `Waiting on crates: ${notReady.join(", ")} (${minCrate} tracks each).`
+        ? `Waiting on crates: ${notReady.join(", ")} (${minCrate} songs each).`
         : n < minPlayers
         ? `Needs at least ${minPlayers} players to start (${minPlayers - n} more). 4 or more is best.`
         : n < 4
@@ -441,83 +493,213 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
       : "Waiting for the host to start.";
   }
 
-  function renderRole(on: boolean) {
-    show("v-role", on && !!me);
+  // Your card. A mole's comes from /me and holds the slot only: there is no other
+  // source of a prompt in this page.
+  function renderCard(on: boolean) {
+    show("card", on && !!me);
     if (!on || !me) return;
-    const hasTheme = !!me.theme;
-    show("role-toggle", hasTheme);
-    const open = !hasTheme || roleShown;
-    // Face-down shows a back that is the same for everyone: it says nothing about roles.
+    const kind = me.role;
+    const hasCard = kind === "player" || kind === "mole";
+    show("role-toggle", hasCard);
+    const open = !hasCard || roleShown;
+    const mole = kind === "mole";
     $("theme-card").classList.toggle("flipped", !open);
+    $("theme-card").classList.toggle("is-mole", mole);
     $("role-body").setAttribute("aria-hidden", String(!open));
     $("role-back").setAttribute("aria-hidden", String(open));
     $("role-toggle-text").textContent = open ? "Hide" : "Show";
     $("role-toggle").setAttribute("aria-expanded", String(open));
-    $("role-text").textContent = me.theme ?? "You're watching this game.";
-    $("role-h").textContent = hasTheme ? "Your theme" : "Watching";
+    $("role-h").textContent = mole ? "You're the mole" : kind === "player" ? "Your card" : kind === "ghost" ? "Out" : "Watching";
+    const text = $("role-text");
+    text.classList.toggle("quiet", !hasCard || mole);
+    $("role-k").textContent = mole ? "Mole" : "Staff pick";
+    $("role-k").hidden = !hasCard;
+    show("role-sub", mole);
+    if (mole) {
+      text.textContent = "You're the mole. You don't know the prompt, only its mood:";
+      $("role-sub").textContent = `${slotName(me.slot).toUpperCase()} (${slotInfo.find((i) => i.slot === me!.slot)?.hint ?? ""}). Blend in.`;
+      $("role-slot").textContent = "";
+    } else if (kind === "player") {
+      text.textContent = me.prompt ?? "";
+      $("role-slot").textContent = slotLabel(me.slot);
+    } else {
+      text.textContent = kind === "ghost" ? "You're out. Watch and listen." : "Watching this game.";
+      $("role-slot").textContent = "";
+    }
   }
 
+  // ---- the crates on the table ----
+
+  const crateOpen = new Map<string, boolean>();
+  const wide = () => matchMedia("(min-width: 1024px)").matches;
+  function songLi(t: CrateTrack, played: boolean, ...extra: (Node | string)[]) {
+    const li = h("li", { class: "csong" + (played ? " is-played" : "") },
+      art(t, 36),
+      h("span", { class: "meta" }, h("strong", {}, t.title), h("span", {}, t.artist)),
+      ...(played ? [h("span", { class: "played-tag mono" }, "played")] : []),
+      ...extra);
+    return li;
+  }
+  function renderCrates(on: boolean) {
+    show("crates", on);
+    if (!on) return;
+    const s = state!;
+    const g = s.game!;
+    const played = new Set(g.played);
+    const sig = JSON.stringify([s.members.map((m) => [m.name, m.crate?.map((c) => c.trackId)]), g.played, g.borrowed, g.ghosts]);
+    once("crates", sig, () => {
+      $("crates-list").replaceChildren(
+        ...s.members.filter((m) => m.crate).map((m) => {
+          const crate = m.crate!;
+          const left = crate.filter((c) => !played.has(c.trackId)).length;
+          const open = crateOpen.get(m.name) ?? (m.name === myName || wide());
+          const summary = h("summary", {},
+            face(m.name), h("span", { class: "cname" }, m.name === myName ? `${m.name} (you)` : m.name),
+            ...(g.ghosts.includes(m.name) ? [h("span", { class: "stamp out" }, "Out")] : []),
+            ...(g.borrowed.includes(m.name) ? [h("span", { class: "stamp borrowed" }, "Borrowed")] : []),
+            h("span", { class: "cleft mono" }, `${left} left`));
+          const slots = slotInfo.map((si) => {
+            const mine = crate.filter((c) => c.slot === si.slot);
+            return h("div", { class: "cslot" },
+              h("h4", {}, h("span", {}, si.name), h("span", { class: "chint" }, si.hint)),
+              h("ul", {}, ...mine.map((c) => songLi(c, played.has(c.trackId)))));
+          });
+          const d = h("details", { class: "cplayer" }, summary, ...slots) as HTMLDetailsElement;
+          d.open = open;
+          d.addEventListener("toggle", () => crateOpen.set(m.name, d.open));
+          return d;
+        }),
+      );
+    });
+  }
+
+  // ---- pick ----
+
   function renderPick(on: boolean) {
-    show("v-pick", on && !!me);
+    show("pick", on && !!me);
     if (!on || !me) return;
     const g = state!.game!;
-    const watching = me.role === "spectator";
+    const watching = !active();
     const locked = me.picked === true;
     show("pick-wait", watching);
+    $("pick-wait").textContent = me.role === "ghost" ? "You're out. The room is picking songs." : "You're watching this game. The room is picking songs.";
     show("pick-done", !watching && locked);
     show("pick-ui", !watching && !locked);
-    if (!watching && !locked && !taste) loadTaste();
+    $("pick-instr").textContent = me.role === "mole"
+      ? "Bluff: pick a song that could answer the mood. Your pick is final once you tap it."
+      : "Pick a song from your crate that answers your card. Your pick is final once you tap it.";
+    if (watching || locked) return;
+    const mine = state!.members.find((m) => m.name === myName)?.crate ?? [];
+    const played = new Set([...g.played, ...(me.played ?? [])]);
+    const slot = me.slot;
+    const used = !!me.borrowUsed;
+    once("pick", JSON.stringify([mine.map((c) => c.trackId), [...played], slot, used, borrowOpen, state!.members.map((m) => [m.name, m.crate?.map((c) => c.trackId)])]), () => {
+      const row = (t: CrateTrack, fits: boolean, from?: string) => {
+        const done = played.has(t.trackId);
+        const act = h("div", { class: "acts" }, button(from ? "Borrow" : "Pick", () => pick(t.trackId, t, from), {
+          disabled: done, aria: `${from ? `Borrow from ${from}` : "Pick"}: ${t.title} by ${t.artist}`,
+        }));
+        const li = songLi(t, done, h("span", { class: "slot-tag mono" }, slotName(t.slot)), act);
+        li.classList.add("prow");
+        if (fits && !done) li.classList.add("fits");
+        return li;
+      };
+      const fit = mine.filter((c) => c.slot === slot);
+      const rest = mine.filter((c) => c.slot !== slot);
+      $("pick-lists").replaceChildren(
+        h("h3", {}, `Fits the mood: ${slotLabel(slot)}`),
+        h("ul", { class: "tracks pickable", "aria-label": "Songs that fit the mood" }, ...fit.map((c) => row(c, true))),
+        h("h3", {}, "The rest of your crate"),
+        h("ul", { class: "tracks pickable", "aria-label": "The rest of your crate" }, ...rest.map((c) => row(c, false))),
+      );
+      show("borrow-wrap", true);
+      const bt = $<HTMLButtonElement>("borrow-toggle");
+      bt.hidden = used;
+      bt.textContent = borrowOpen ? "Close borrowing" : "Borrow instead";
+      bt.setAttribute("aria-expanded", String(borrowOpen));
+      $("borrow-note").textContent = used ? "You have used your borrow this game." : "One borrow a game, from anyone's crate. It will say whose.";
+      show("borrow-panel", borrowOpen && !used);
+      if (borrowOpen && !used) {
+        const others = state!.members.filter((m) => m.name !== myName && m.crate);
+        $("borrow-panel").replaceChildren(
+          ...others.map((m) => {
+            const open = (borrowOpened.get(m.name) ?? false);
+            const list = [...m.crate!.filter((c) => !played.has(c.trackId))].sort((a, b) => Number(b.slot === slot) - Number(a.slot === slot));
+            const d = h("details", { class: "cplayer" },
+              h("summary", {}, face(m.name), h("span", { class: "cname" }, m.name), h("span", { class: "cleft mono" }, `${list.length} to borrow`)),
+              h("ul", { class: "tracks pickable" }, ...list.map((c) => row(c, c.slot === slot, m.name)))) as HTMLDetailsElement;
+            d.open = open;
+            d.addEventListener("toggle", () => borrowOpened.set(m.name, d.open));
+            return d;
+          }),
+        );
+      }
+    });
+  }
+  const borrowOpened = new Map<string, boolean>();
+
+  // ---- listen ----
+
+  function cardLine(c: Card) {
+    return h("span", { class: "who" }, face(c.picker), h("strong", {}, c.picker),
+      ...(c.lender ? [h("span", { class: "lent" }, `(borrowed from ${c.lender})`)] : []),
+      ...(c.clash ? [h("span", { class: "stamp clash" }, "Clash")] : []));
   }
 
   function renderListen(on: boolean) {
-    show("v-listen", on);
+    show("listen", on);
     if (!on) return;
     const g = state!.game!;
     const host = isHost();
     const np = g.nowPlaying;
-    const name = (n: number) => sideWords(n, slots.length);
+    const cards = g.cards ?? [];
+    const playing = np === null ? null : cards.find((c) => c.order === np) ?? null;
     $("listen-h").textContent = g.phase === "vote" ? "Listen again" : "Listen";
+    const what = playing ? `${playing.picker}: ${playing.title}` : "";
     $("np").textContent =
       np === null
         ? host
-          ? "Tap a sleeve to play it."
+          ? "Tap a card to play it."
           : `Waiting for ${state!.host} to play a track.`
         : speakerHere() && !host
-          ? `${name(np)} is playing on this phone.`
+          ? `${what} is playing on this phone.`
           : host
-            ? `${name(np)} is playing. Tap a sleeve to play another.`
-            : `${name(np)} is playing on ${state!.host}'s phone.`;
-    once("slots", JSON.stringify([slots, host]), () => {
-      $("slots").replaceChildren(
-        ...slots.map((n) => {
-          const inner = [
+            ? `${what} is playing. Tap another card to play it.`
+            : `${what} is playing on ${state!.host}'s phone.`;
+    once("cards", JSON.stringify([cards, host]), () => {
+      $("cards").replaceChildren(
+        ...cards.map((c) => {
+          const play = host ? button("Play", () => playByHost(c.order), { aria: `Play card ${c.order + 1}: ${c.title} by ${c.picker}` }) : null;
+          const li = h("li", { class: "pcard", "data-order": String(c.order) },
+            h("span", { class: "n mono", "aria-hidden": "true" }, String(c.order + 1)),
+            art(c, 56),
+            h("div", { class: "meta" }, h("strong", {}, c.title), h("span", {}, c.artist)),
+            cardLine(c),
             h("span", { class: "playing-stamp", "aria-hidden": "true" }, "Playing"),
-            h("span", { class: "num", "aria-hidden": "true" }, sideOf(n, slots.length)),
-            h("span", { class: "cat", "aria-hidden": "true" }, code),
-          ];
-          if (!host) return h("li", {}, h("span", { class: "slot", "aria-label": name(n) }, ...inner));
-          const b = h("button", { type: "button", "aria-label": `Play ${name(n)}` }, ...inner) as HTMLButtonElement;
-          b.addEventListener("click", () => playByHost(n));
-          return h("li", {}, b);
+            ...(play ? [play] : []));
+          return li;
         }),
       );
     });
-    dropNeedle(np === null ? null : sideOf(np, slots.length), `${g.round}:${np}`);
-    for (const [i, li] of [...$("slots").children].entries()) {
-      const active = slots[i] === np;
+    // Needle drop: the label carries the playing card's number, picker and title.
+    dropNeedle(playing, `${g.round}:${np}`);
+    for (const li of $("cards").children) {
+      const active = Number((li as HTMLElement).dataset.order) === np;
       li.classList.toggle("playing", active);
       if (active) li.setAttribute("aria-current", "true");
       else li.removeAttribute("aria-current");
     }
-    const auto = g.autoplay === true && g.phase === "listen" && slots.length > 0;
+    show("dead-air", !!g.deadAir?.length);
+    $("dead-air").textContent = g.deadAir?.length ? `Dead air (no pick): ${g.deadAir.join(", ")}` : "";
+    const auto = g.autoplay === true && g.phase === "listen" && cards.length > 0;
     show("auto", auto);
     if (auto) {
-      const at = np === null ? 0 : Math.max(0, slots.indexOf(np)) + 1;
-      $("auto-bar").setAttribute("aria-label", `Track ${at} of ${slots.length}`);
-      once("auto-bar", `${slots.length}|${at}`, () => {
+      const at = np === null ? 0 : np + 1;
+      $("auto-bar").setAttribute("aria-label", `Track ${at} of ${cards.length}`);
+      once("auto-bar", `${cards.length}|${at}`, () => {
         $("auto-bar").replaceChildren(
-          ...slots.map((_, i) => h("span", { class: i + 1 < at ? "done" : i + 1 === at ? "on" : "" })),
-          h("span", { class: "auto-n" }, `${at} of ${slots.length}`),
+          ...cards.map((_, i) => h("span", { class: i + 1 < at ? "done" : i + 1 === at ? "on" : "" })),
+          h("span", { class: "auto-n" }, `${at} of ${cards.length}`),
         );
       });
     }
@@ -534,10 +716,6 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
         : `Listening to ${state!.host}'s phone.`;
   }
 
-  // The needle drop. The label shows side and track only, never a title, artist,
-  // owner or cover. A slot that starts playing replays the drop; arriving to one
-  // already playing finds the record on the platter. CSS skips the motion under
-  // reduced motion and leaves the record resting.
   // The needle's thud and crackle, synthesised (decision 0006). Off when the
   // shop's Sound switch is off; silent until the first tap, as browsers require.
   const sfx = createSfx();
@@ -546,11 +724,18 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
   addEventListener("pointerdown", unlockSfx, true);
   addEventListener("keydown", unlockSfx, true);
 
-  function dropNeedle(label: string | null, key: string) {
+  // The needle drop. Picks are public by now, so the label shows the playing
+  // card's number, picker and title. A card that starts playing replays the drop;
+  // arriving to one already playing finds the record on the platter. CSS skips
+  // the motion under reduced motion and leaves the record resting.
+  function dropNeedle(c: Card | null, key: string) {
     const stage = $("stage");
-    $("stage-label").textContent = label ?? "A1";
-    $("stage-side").textContent = label ?? "A1";
-    if (label === null) {
+    $("stage-label").textContent = c ? String(c.order + 1) : "";
+    $("stage-who").textContent = c ? c.picker : code;
+    $("stage-title").textContent = c ? c.title : "33⅓ RPM";
+    $("stage-side").textContent = c ? c.picker : "♫";
+    $("stage-sleeve").dataset.title = c ? c.title : "";
+    if (!c) {
       stage.classList.remove("on", "go");
       dropKey = "";
       return;
@@ -565,113 +750,186 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     setTimeout(() => sfx.needle(), matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 2400);
   }
 
-  // The tracks are the options. Each shows its live count (never who voted);
-  // your own choice is marked. Rebuilt only when a count or your choice changes.
+  // ---- vote: on players ----
+
   function renderVote(on: boolean) {
-    show("v-vote", on && !!me);
+    show("vote", on && !!me);
     if (!on || !me) return;
     const g = state!.game!;
-    const inRound = me.role === "player";
-    const voter = inRound && me.picked !== false;
+    const voter = active();
     $("vote-note").textContent = voter
       ? ""
-      : inRound ? "You didn't pick this round, so you can't vote in it. You can still listen and talk."
-      : me.role === "ghost" ? "You were voted out, so you can't vote. You can still listen and talk." : "You're watching this game, so you can't vote.";
+      : me.role === "ghost" ? "You're out, so you can't vote. You can still watch the count." : "You're watching this game, so you can't vote.";
     const mine = me.vote;
+    const myName_ = "name" in (mine ?? {}) ? (mine as { name: string }).name : null;
+    const skipMine = !!mine && "skip" in mine;
     const tally = g.tally ?? [];
-    const total = tally.length;
-    once("votes", JSON.stringify([tally, g.skips, mine, voter]), () => {
-      const opt = (cls: string, aria: string, pick: () => void, chosen: boolean, kids: Node[]) => {
-        const b = h("button", { type: "button", "aria-label": aria, "aria-pressed": String(chosen), class: cls + (chosen ? " mine" : "") }, ...kids) as HTMLButtonElement;
-        b.disabled = !voter;
-        b.addEventListener("click", pick);
-        return b;
-      };
-      $("vote-slots").replaceChildren(
-        ...tally.map((t) => {
-          const n = t.votes;
-          return h("li", {}, opt("", `${sideWords(t.slot, total)}: ${n} vote${n === 1 ? "" : "s"}${mine === t.slot ? ", your vote" : ""}`, () => vote({ slot: t.slot }), mine === t.slot, [
-            h("span", { class: "num", "aria-hidden": "true" }, sideOf(t.slot, total)),
-            h("span", { class: "count", "aria-hidden": "true" }, String(n)),
-            h("span", { class: "cat", "aria-hidden": "true" }, mine === t.slot ? "your vote" : code),
-          ]));
+    const cards = g.cards ?? [];
+    once("votes", JSON.stringify([tally, g.skips, mine, voter, cards, g.alive]), () => {
+      const rows = tally.filter((t) => !(voter && t.name === myName));
+      $("vote-list").replaceChildren(
+        ...rows.map((t) => {
+          const card = cards.find((c) => c.picker === t.name);
+          const chosen = myName_ === t.name;
+          const body = [
+            face(t.name),
+            h("span", { class: "bname" },
+              h("strong", {}, t.name),
+              h("span", { class: "bcard" }, card ? `${card.title}, ${card.artist}${card.lender ? ` (from ${card.lender})` : ""}` : "Dead air: no song")),
+            h("span", { class: "count mono", "aria-hidden": "true" }, String(t.votes)),
+          ];
+          if (!voter) return h("li", {}, h("div", { class: "brow ro", role: "group", "aria-label": `${t.name}: ${t.votes} vote${t.votes === 1 ? "" : "s"}` }, ...body));
+          const b = h("button", {
+            type: "button", class: "brow" + (chosen ? " mine" : ""), "aria-pressed": String(chosen),
+            "aria-label": `Vote ${t.name}. Their song: ${card ? `${card.title} by ${card.artist}` : "none, dead air"}. ${t.votes} vote${t.votes === 1 ? "" : "s"} so far${chosen ? ". Your vote" : ""}`,
+          }, ...body) as HTMLButtonElement;
+          if (chosen) b.append(h("span", { class: "your", "aria-hidden": "true" }, "your vote"));
+          b.addEventListener("click", () => vote({ name: t.name }));
+          return h("li", {}, b);
         }),
       );
       const sk = g.skips ?? 0;
+      const skipBody = [h("span", {}, skipMine ? "Skip (your vote)" : "Skip: nobody"), h("span", { class: "count mono", "aria-hidden": "true" }, String(sk))];
       $("vote-skip-wrap").replaceChildren(
-        opt("skipbtn secondary", `Skip: vote for no track. ${sk} so far${mine === "skip" ? ", your vote" : ""}`, () => vote("skip"), mine === "skip", [
-          h("span", {}, mine === "skip" ? "Skip (your vote)" : "Skip"),
-          h("span", { class: "count", "aria-hidden": "true" }, String(sk)),
-        ]),
+        voter
+          ? (() => {
+              const b = h("button", { type: "button", class: "skipbtn secondary" + (skipMine ? " mine" : ""), "aria-pressed": String(skipMine), "aria-label": `Skip: vote for nobody. ${sk} so far${skipMine ? ", your vote" : ""}` }, ...skipBody) as HTMLButtonElement;
+              b.addEventListener("click", () => vote("skip"));
+              return b;
+            })()
+          : h("div", { class: "skipbtn ro" }, ...skipBody),
       );
     });
-    $("vote-change").textContent = voter ? "You can change your vote until it locks." : "";
     tickLastCall();
   }
 
   // "Last call: locks in 5 s", from the shortened deadline.
+  let lastCallSaid = "";
   function tickLastCall() {
     const g = state?.game;
     const el = $("last-call");
     const on = !!g && g.phase === "vote" && g.lastCall === true && g.deadline !== null;
     el.hidden = !on;
     if (!on) return;
-    const left = Math.max(0, Math.ceil((g!.deadline! - (Date.now() + clockSkew)) / 1000));
+    const left = secondsLeft(g);
     const text = `Last call: locks in ${left} s`;
     if (el.textContent !== text) el.textContent = text;
+    const key = `${g!.round}`;
+    if (lastCallSaid !== key) { lastCallSaid = key; announce("Last call. The vote locks in 5 seconds."); }
+  }
+
+  // ---- steal ----
+
+  function renderSteal(on: boolean) {
+    show("steal", on);
+    if (!on) return;
+    const g = state!.game!;
+    const accused = g.accused ?? "";
+    const mineToGuess = !!me?.steal;
+    $("steal-line").textContent = accused === myName
+      ? `You were voted out, and you were the mole. You have 15 s to guess the prompt and steal the game.`
+      : `${accused} was the mole. They have 15 s to guess the prompt and steal the game.`;
+    const box = $("steal-options");
+    show("steal-options", mineToGuess);
+    show("steal-wait", !mineToGuess);
+    $("steal-wait").textContent = `Waiting on ${accused}. Nothing for you to do but hold your breath.`;
+    once("steal", JSON.stringify([me?.steal?.options ?? null, stealGuessed]), () => {
+      box.replaceChildren(
+        ...(me?.steal?.options ?? []).map((o) => {
+          const b = h("button", { type: "button", class: "steal-opt" }, o.text) as HTMLButtonElement;
+          b.disabled = stealGuessed;
+          b.addEventListener("click", () => steal(o.id));
+          return b;
+        }),
+      );
+    });
+  }
+
+  let stealing = false;
+  async function steal(id: string) {
+    if (stealing || !state?.game) return;
+    stealing = true;
+    $("steal-msg").textContent = "";
+    const { res, data } = await api(`/api/tables/${code}/steal`, { promptId: id });
+    stealing = false;
+    if (res.ok || res.status === 409) {
+      stealGuessed = true;
+      announce("Guess is in.");
+      if (!res.ok) $("steal-msg").textContent = "Too late: the steal is over.";
+      return render();
+    }
+    $("steal-msg").textContent = data.error ?? "Could not send that guess.";
+  }
+
+  // ---- reveal and game over ----
+
+  function revealCard(c: Card, i: number) {
+    const li = h("li", { class: "pcard", style: `--i:${i}` },
+      h("span", { class: "n mono", "aria-hidden": "true" }, String(c.order + 1)),
+      art(c, 56),
+      h("div", { class: "meta" }, h("strong", {}, c.title), h("span", {}, c.artist)),
+      cardLine(c));
+    return li;
   }
 
   function renderReveal(on: boolean) {
-    show("v-reveal", on);
+    show("reveal", on);
     if (!on) return;
     const g = state!.game!;
     const r = g.reveal;
     const host = isHost();
-    $("reveal-h").textContent = g.winner ? "Game over" : "Reveal";
-    $("reveal-instr").textContent = g.winner
-      ? "The game is over. Here is who picked what, and the themes each round."
-      : "Here is who picked what. The themes stay secret until the game ends.";
-    show("themes-end", !!g.winner && !!g.themes?.length);
-    once("themes", JSON.stringify(g.themes ?? []), () => {
-      $("themes-list").replaceChildren(
-        ...(g.themes ?? []).map((t) =>
-          h("li", {}, h("span", {}, h("span", { class: "t" }, "Most of you were pressed for"), h("span", { class: "hand" }, t.majority), h("span", { class: "t" }, "The mole's copy said"), h("span", { class: "hand odd" }, t.mole))),
-        ),
-      );
-    });
-    $("eject").textContent = !r
-      ? ""
-      : r.ejected
-        ? `${r.ejected} was voted out. ${r.wasMole ? "They were a mole." : "They were not a mole."}`
-        : r.ejectedHouse
-          ? "The room voted out the house record. Nobody's out, the mole survives the round."
-          : "Nobody was voted out.";
-    // The stamp repeats what the sentence says (shown to everyone at the reveal): colour is never the only signal.
-    if (r?.ejected && r.wasMole) $("eject").append(h("span", { class: "stamp mole" }, "Mole"));
-    once("reveal", JSON.stringify([r?.slots ?? [], r?.votes ?? [], state!.members]), () => {
-      const total = r?.slots.length ?? 0;
-      show("reveal-votes-wrap", !!r?.votes.length);
-      $("reveal-votes").replaceChildren(
-        ...(r?.votes ?? []).map((v) =>
-          h("li", {}, face(v.voter), h("strong", {}, v.voter), h("span", {}, v.slot === null ? "skipped" : `voted ${sideOf(v.slot, total)}`)),
-        ),
-      );
-      $("reveal-slots").replaceChildren(
-        ...(r?.slots ?? []).map((t, i) => {
-          const who = t.house
-            ? h("span", { class: "owner house" }, h("span", { class: "hand" }, t.inspiredBy ? `House record · in the style of ${t.inspiredBy}'s crate` : "House record"))
-            : h("span", { class: "owner" }, face(t.owner ?? "?"), h("strong", {}, t.owner ?? "?"));
-          const li = trackRow(t, who);
-          li.prepend(h("span", { class: "n" }, sideOf(t.slot, total)));
-          li.style.setProperty("--i", String(i));
-          return li;
-        }),
-      );
-    });
+    $("reveal-h").textContent = g.winner ? "Game over" : `Round ${g.round}: the reveal`;
     const win = $("winner");
     win.hidden = !g.winner;
-    win.textContent = g.winner === "players" ? "The players caught every mole." : g.winner === "moles" ? "The moles took over." : "";
+    win.textContent = g.winner === "players" ? "Players win" : g.winner === "moles" ? "Moles win" : "";
     win.classList.toggle("moles", g.winner === "moles");
+    const moles = g.moles ?? [];
+    show("moles-end", !!g.winner);
+    once("moles", JSON.stringify([moles, g.winner]), () => {
+      $("moles-end").replaceChildren(
+        h("p", { class: "kicker" }, moles.length === 1 ? "The mole was" : "The moles were"),
+        h("ul", { class: "mole-names" }, ...moles.map((n) => h("li", {}, face(n), h("strong", {}, n), h("span", { class: "stamp mole" }, "Mole")))),
+      );
+    });
+    show("reveal-prompt-wrap", !!r);
+    if (r) {
+      $("reveal-slot").textContent = `The prompt, ${slotLabel(r.slot)}`;
+      $("reveal-prompt").textContent = r.prompt;
+    }
+    const eject = $("eject");
+    if (!r) eject.textContent = "";
+    else {
+      const parts: string[] = [];
+      if (r.stole && r.accused) parts.push(`${r.accused} was a mole and stole it. The moles win.`);
+      else if (r.ejected) {
+        parts.push(`${r.ejected} was voted out. ${r.wasMole ? "They were a mole." : "They were not a mole."}`);
+        if (r.wasMole) parts.push("They missed the steal.");
+      } else parts.push("Nobody was voted out.");
+      eject.textContent = parts.join(" ");
+      // The stamp repeats what the sentence says: colour is never the only signal.
+      if (r.wasMole || r.stole) eject.append(h("span", { class: "stamp mole" }, "Mole"));
+    }
+    once("reveal", JSON.stringify([r ?? null, state!.members.map((m) => m.name)]), () => {
+      $("reveal-cards").replaceChildren(...(r?.cards ?? []).map(revealCard));
+      show("reveal-dead", !!r?.deadAir.length);
+      $("reveal-dead").textContent = r?.deadAir.length ? `Dead air (no pick): ${r.deadAir.join(", ")}` : "";
+      show("reveal-votes-wrap", !!r?.votes.length);
+      $("reveal-votes").replaceChildren(
+        ...(r?.votes ?? []).map((v) => h("li", {}, face(v.voter), h("strong", {}, v.voter), h("span", {}, v.choice === null ? "skipped" : `voted ${v.choice}`))),
+      );
+    });
+    show("past-end", !!g.winner && g.past.length > 0);
+    once("past", JSON.stringify([g.winner, g.past]), () => {
+      $("past-list").replaceChildren(
+        ...g.past.map((p) =>
+          h("li", {},
+            h("span", { class: "t" }, `Round ${p.round}, ${slotLabel(p.slot)}`),
+            h("span", { class: "hand" }, p.prompt),
+            h("ul", { class: "pcards" }, ...p.cards.map((c) => h("li", {}, h("strong", {}, c.picker), ` ${c.title}, ${c.artist}`, c.lender ? ` (from ${c.lender})` : "", c.clash ? " (clash)" : ""))),
+            h("span", { class: "t out" }, p.ejected ? `Out: ${p.ejected}${p.wasMole ? " (a mole)" : " (not a mole)"}` : "Nobody out")),
+        ),
+      );
+    });
     show("next", host && !g.winner);
     show("again", host && !!g.winner);
     delete $("again").dataset.conn;
@@ -679,6 +937,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     show("see-games", !!g.winner);
     show("reveal-wait", !host);
     $("reveal-wait").textContent = g.winner ? "Waiting for the host to play again." : "Waiting for the host to start the next round.";
+    tick();
   }
 
   // ---- countdown ----
@@ -686,13 +945,18 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
   function tick() {
     const g = state?.game;
     const el = $("countdown");
+    const next = $("next-in");
+    next.hidden = !(g && g.phase === "reveal" && !g.winner && g.deadline !== null && state?.status === "playing");
+    if (!next.hidden) next.textContent = `Next round in ${secondsLeft(g)} s`;
+    if (g?.phase === "steal" && !g.winner) $("steal-clock").textContent = `${secondsLeft(g)}`;
     if (!state || !g || g.winner || g.deadline === null) {
       el.classList.remove("low");
       return void (el.textContent = "");
     }
-    const left = Math.max(0, Math.ceil((g.deadline - (Date.now() + clockSkew)) / 1000));
+    const left = secondsLeft(g);
     el.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
     el.classList.toggle("low", left < 10);
+    $("steal-clock").classList.toggle("low", left < 6);
     // Announce once per phase, not every second.
     const key = `${g.round}:${g.phase}`;
     if (left <= 10 && left > 0 && announcedLow !== key && (g.phase === "pick" || g.phase === "vote")) {
@@ -713,18 +977,9 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     render();
   }
 
-  let slotsSeq = 0;
-  async function refreshSlots() {
-    const n = ++slotsSeq;
-    const res = await fetch(`/api/tables/${code}/round`).catch(() => null);
-    if (!res?.ok || n !== slotsSeq) return;
-    slots = ((await res.json()) as { slots: { slot: number }[] }).slots.map((s) => s.slot);
-    render();
-  }
-
-  // How many tracks I have, for "Crate: 2/5". Others' counts are never sent.
+  // How many songs I have, for "Crate: 2/12". Others' counts are never sent.
   async function loadMyCrate() {
-    const { res, data } = await api<Found[]>("/api/taste");
+    const { res, data } = await api<unknown[]>("/api/taste");
     if (res.ok && Array.isArray(data) && data.length !== myCrate) {
       myCrate = data.length;
       if (state) render();
@@ -733,41 +988,35 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
   window.addEventListener("pageshow", () => void loadMyCrate());
   void loadMyCrate();
 
-  async function loadTaste() {
-    taste = [];
-    const { res, data } = await api<Found[]>("/api/taste");
-    taste = res.ok && Array.isArray(data) ? data : [];
-    $("quick-empty").hidden = taste.length > 0;
-    $("quick").replaceChildren(...taste.map((t) => pickRow(t)));
-    syncActions();
-  }
-
   // ---- picking, voting, hosting ----
 
-  function pickRow(t: Found) {
-    return trackRow(t, h("div", { class: "acts" }, button("Pick", () => pick(t.id, t), { aria: `Pick ${t.title} by ${t.artist}` })));
-  }
-
   let picking = false;
-  async function pick(id: number, t: Found) {
+  async function pick(id: number, t: Track, from?: string) {
     if (picking || !state?.game) return;
     picking = true;
     const round = state.game.round;
     const msg = $("pick-msg");
     msg.textContent = "";
-    const { res, data } = await api("/api/tables/" + code + "/pick", { trackId: id });
+    const { res, data } = await api("/api/tables/" + code + "/pick", from ? { trackId: id, from } : { trackId: id });
     picking = false;
     // Already picked (say, on another tab) is the same lock as just picking.
     if (res.ok || (res.status === 409 && /already picked/i.test(data.error ?? ""))) {
-      if (me && state.game.round === round) me.picked = true;
-      announce(`Your pick is in.`);
+      if (me && state.game.round === round) { me.picked = true; if (from) me.borrowUsed = true; }
+      borrowOpen = false;
+      announce("Picked. Waiting for the others.");
       return render();
     }
-    msg.textContent = res.status === 409 ? "Too late: picking is over for this round." : (data.error ?? `Could not pick ${t.title}.`);
+    msg.textContent = res.status === 409 && !/borrow|played|heard/i.test(data.error ?? "") ? "Too late: picking is over for this round." : (data.error ?? `Could not pick ${t.title}.`);
   }
 
+  $("borrow-toggle").addEventListener("click", () => {
+    borrowOpen = !borrowOpen;
+    sigs.delete("pick");
+    render();
+  });
+
   let voting = false;
-  async function vote(choice: { slot: number } | "skip") {
+  async function vote(choice: { name: string } | "skip") {
     if (voting || !state?.game || !me) return;
     voting = true;
     const round = state.game.round;
@@ -775,8 +1024,8 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     const { res, data } = await api("/api/tables/" + code + "/vote", choice === "skip" ? { skip: true } : choice);
     voting = false;
     if (res.ok) {
-      if (me && state?.game?.round === round) me.vote = choice === "skip" ? "skip" : choice.slot;
-      announce(choice === "skip" ? "Your vote: skip." : "Your vote is in. You can change it until it locks.");
+      if (me && state?.game?.round === round) me.vote = choice === "skip" ? { skip: true } : { name: choice.name };
+      announce(choice === "skip" ? "Your vote: skip." : `Your vote: ${choice.name}. You can change it until it locks.`);
       return render();
     }
     $("vote-msg").textContent = res.status === 409 ? "Too late: voting is over." : (data.error ?? "Could not vote.");
@@ -825,7 +1074,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     const seq = ++playSeq;
     playingSlot = n;
     $("audio-msg").textContent = "";
-    const { res, data } = await api<{ url: string }>(`/api/tables/${code}/round/slots/${n}/audio`);
+    const { res, data } = await api<{ url: string }>(`/api/tables/${code}/cards/${n}/audio`);
     if (seq !== playSeq) return;
     if (!res.ok) return void ($("audio-msg").textContent = data.error ?? "That track has no preview.");
     audio.src = data.url;
@@ -1077,15 +1326,23 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
       $("pick-msg").textContent = "";
       $("vote-msg").textContent = "";
       $("reveal-msg").textContent = "";
-      if (g?.phase === "pick") slots = [];
+      if (g?.phase === "pick") borrowOpen = false;
+      if (g?.phase !== "steal") stealGuessed = false;
       if (newRound) {
         me = null;
       }
-      if (g && next.status === "playing") announce(g.phase === "pick" ? `Round ${g.round}. Pick a song.` : `${phaseWords[g.phase]}.`);
+      if (g && next.status === "playing") {
+        announce(
+          g.phase === "pick" ? `Round ${g.round}. Picking: ${secondsLeft(g)} seconds.`
+          : g.phase === "vote" ? `Vote. ${secondsLeft(g)} seconds.`
+          : g.phase === "steal" ? "Steal! The mole has 15 seconds to guess the prompt."
+          : g.phase === "reveal" ? "Reveal."
+          : "Listen.",
+        );
+      }
       else if (g?.winner) announce(g.winner === "players" ? "Game over. The players caught every mole." : "Game over. The moles took over.");
       void refreshMe();
       pendingEnter = true;
-      if (g && (g.phase === "listen" || g.phase === "vote")) void refreshSlots();
     }
     render();
     if (pendingEnter) {
@@ -1128,7 +1385,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
   const conn = $("conn");
   // Anything that would fail while we can't reach the server. Buttons we turn off
   // are marked, so turning back on never touches one that was off for another reason.
-  const ACTIONS = "#start, #again, #next, #to-vote, #slots button, #quick button, #vote-slots button, #vote-skip-wrap button";
+  const ACTIONS = "#start, #again, #next, #to-vote, #cards button, #pick-lists button, #borrow-panel button, #borrow-toggle, #vote-list button, #vote-skip-wrap button, #steal-options button";
   function syncActions() {
     const down = !connected || !navigator.onLine;
     for (const b of document.querySelectorAll<HTMLButtonElement>(ACTIONS)) {
@@ -1182,7 +1439,7 @@ if (!me) return Astro.redirect(`/?next=/t/${code}`);
     lastHeard = Date.now();
     showConn();
     // Back after a gap: ask again who we are and which tracks there are.
-    if (reopened) { void refreshMe(); void refreshSlots(); }
+    if (reopened) void refreshMe();
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     let buf = "";
