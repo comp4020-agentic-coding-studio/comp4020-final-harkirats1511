@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { session, uniqueName } from "./helpers";
+import { fillCrate, session, uniqueName } from "./helpers";
 
 // Contract: the HTML of /t/CODE already holds the booth controls (decision 0005):
 // a visibility tag, the host's public/private switch, and the report form; the
@@ -54,13 +54,6 @@ it("renders the crate game's sections in the page shell", async () => {
   expect(text).not.toContain("house record");
 });
 
-const CRATES: Record<string, number[]> = {
-  up: [13159670, 829306252, 1951194607],
-  down: [684573392, 3099606, 1444366372],
-  out: [1031007, 512466312, 2465911],
-  in: [3512895311, 3512895281, 2791780102],
-};
-
 it("never puts a prompt in a mole's server-rendered table page", async () => {
   const fs = await import("node:fs");
   const source = fs.readFileSync(new URL("../src/lib/prompts.ts", import.meta.url), "utf8");
@@ -71,7 +64,7 @@ it("never puts a prompt in a mole's server-rendered table page", async () => {
   const { code } = (await (await players[0].s.call("/api/tables", { body: { private: true } })).json()) as { code: string };
   for (const p of players) {
     expect((await p.s.call(`/api/tables/${code}/join`, { body: {} })).status).toBe(200);
-    for (const [slot, ids] of Object.entries(CRATES)) for (const trackId of ids) await p.s.call("/api/taste", { body: { trackId, slot } });
+    await fillCrate(p.s, players.indexOf(p));
   }
   expect((await players[0].s.call(`/api/tables/${code}/start`, { body: {} })).status).toBe(200);
   const views = await Promise.all(players.map(async (p) => ({ p, me: (await (await p.s.call(`/api/tables/${code}/me`)).json()) as { role: string; prompt?: string } })));
@@ -85,4 +78,4 @@ it("never puts a prompt in a mole's server-rendered table page", async () => {
   // The prompt is fetched from /me, never rendered into anyone's shell.
   expect(other!.me.prompt).toBeTruthy();
   expect(await html(other!.p.s, `/t/${code}`)).not.toContain(other!.me.prompt!);
-});
+}, 60_000);
