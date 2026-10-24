@@ -1,21 +1,25 @@
 ---
 import Base from "../layouts/Base.astro";
 import { personFromCookies } from "../lib/auth.ts";
-import { listTaste, TASTE_MAX as MIN_CRATE } from "../lib/taste.ts";
+import { listTaste, PER_SLOT, TASTE_MAX as MIN_CRATE } from "../lib/taste.ts";
+import { SLOTS, SLOT_NAMES } from "../lib/prompts.ts";
 import { getAvatar } from "../lib/avatars.ts";
 const me = personFromCookies(Astro.cookies);
 const next = Astro.url.searchParams.get("next") ?? "";
 const safeNext = /^(\/t\/[A-Za-z]{4}|\/taste|\/me|\/shop)$/.test(next) ? next : "";
 if (me && safeNext) return Astro.redirect(safeNext);
 const mine = me ? getAvatar(me.id) : null;
-const tasteCount = me ? listTaste(me.id).length : 0;
+const crate = me ? listTaste(me.id) : [];
+const tasteCount = crate.length;
+const need = SLOTS.map((s) => ({ name: SLOT_NAMES[s], k: PER_SLOT - crate.filter((t) => t.slot === s).length })).filter((n) => n.k > 0);
+const sortedCount = crate.filter((t) => (SLOTS as readonly string[]).includes(t.slot ?? "")).length;
 ---
 <Base title="Mole Records" width="home">
   <div class="home">
     <div class="home-side">
       <h1 class="sign"><span class="sr-only">Mole Records</span><span class="big" aria-hidden="true">M<span class="disc-o"></span>LE</span><span class="small" aria-hidden="true">RECORDS</span></h1>
       <p class="hours">Open late <b>tonight</b><br />A party game for friends in one room</p>
-      <p class="pitch">Everyone picks a song. One of you got a slightly different theme.</p>
+      <p class="pitch">Everyone brings a crate of 12. One of you is the mole and only knows the mood.</p>
       <p class="enter-shop"><a class="btn ghost" href="/shop">Enter the shop</a></p>
     </div>
     <div class="home-main">
@@ -63,15 +67,6 @@ const tasteCount = me ? listTaste(me.id).length : 0;
             <option value="45" selected>45 seconds</option>
             <option value="60">60 seconds</option>
           </select>
-          <label for="moles">Moles</label>
-          <select id="moles" aria-describedby="moles-hint">
-            <option value="" selected>Auto (1 up to 5 players, 2 up to 10)</option>
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="4">4</option>
-          </select>
-          <p class="hint" id="moles-hint">Moles must stay fewer than everyone else: 2 need 5 players, 3 need 7, 4 need 9. Start tells you if the table is too small.</p>
         </details>
         <button id="create" type="button" class="full">Start a table</button>
       </section>
@@ -87,9 +82,11 @@ const tasteCount = me ? listTaste(me.id).length : 0;
       <div class="shelf-links">
         <section class="card" aria-labelledby="taste-h">
           <h2 id="taste-h">Your crate</h2>
-          <p class="hint">{tasteCount} / {MIN_CRATE} needed to play. 12 tracks in four slots.</p>
-          {tasteCount < MIN_CRATE && <p class="nudge">You pick every song from your crate, so you need {MIN_CRATE} tracks to play. Add a few you would actually play.</p>}
-          <p><a href="/taste">{tasteCount === 0 ? "Build your taste file" : "Edit your taste file"}</a></p>
+          <p class="count mono">{sortedCount} / {MIN_CRATE}</p>
+          {need.length === 0
+            ? <p class="hint">Complete: you can play.</p>
+            : <p class="nudge">{need.map((n) => `${n.name} needs ${n.k} more`).join(". ")}.</p>}
+          <p><a href="/taste">{tasteCount === 0 ? "Build your crate" : need.length === 0 ? "Edit your crate" : "Finish your crate"}</a></p>
         </section>
         <section class="card" aria-labelledby="hist-h">
           <h2 id="hist-h">Your shelf</h2>
@@ -123,6 +120,9 @@ const tasteCount = me ? listTaste(me.id).length : 0;
     </div>
   </div>
 </Base>
+<style>
+  .count { font-size: var(--step-2); font-weight: 600; color: var(--lamp); margin: 0 0 0.5rem; }
+</style>
 <script>
   import { avatar } from "../ui/avatar.ts";
   const badge = document.getElementById("who-badge");
@@ -160,7 +160,6 @@ const tasteCount = me ? listTaste(me.id).length : 0;
     const { res, data } = await post("/api/tables", {
       pickSeconds: Number(value("pick-s")),
       voteSeconds: Number(value("vote-s")),
-      moles: value("moles") ? Number(value("moles")) : null,
       autoplay: auto.checked,
       slotSeconds: Number(value("slot-s")),
       private: (document.getElementById("vis-private") as HTMLInputElement).checked,

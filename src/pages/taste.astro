@@ -1,141 +1,275 @@
 ---
 import Base from "../layouts/Base.astro";
 import { personFromCookies } from "../lib/auth.ts";
-import { listTaste, TASTE_MAX } from "../lib/taste.ts";
+import { crateLocked, listTaste, PER_SLOT, TASTE_MAX } from "../lib/taste.ts";
+import { SLOTS, SLOT_HINTS, SLOT_NAMES } from "../lib/prompts.ts";
 const me = personFromCookies(Astro.cookies);
 if (!me) return Astro.redirect("/?next=/taste");
 // Back to the table we came from; the same shape index.astro accepts for ?next.
 const next = Astro.url.searchParams.get("next") ?? "";
 const back = /^\/t\/[A-Za-z]{4}$/.test(next) ? next : "";
 const initial = listTaste(me.id);
+const locked = crateLocked(me.id);
+const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS[s] }));
 ---
-<Base title="Your taste file · Mole">
+<Base title="Your crate · Mole" width="table">
   <a class="back-link" href={back || "/"}><span aria-hidden="true">&larr;</span>{back ? "Back to the table" : "Back"}</a>
-  <p class="kicker">Your crate</p>
-  <h1>Your taste file</h1>
-  <p class="hint">{TASTE_MAX} tracks you would actually play, in four slots of three, all full to take part in a game. Every pick you make comes from here.</p>
+  <p class="kicker">Mole Records</p>
+  <h1>Your crate</h1>
+  <p class="hint">12 songs you would actually play: 3 in each of four slots. Every pick you make comes from here, and the table sees it all.</p>
 
-  <section class="card" aria-labelledby="mine-h">
-    <div class="card-head"><h2 id="mine-h">Your tracks</h2><span class="counter stamp mono" id="counter" aria-live="polite"></span></div>
-    <ul class="tracks" id="mine" aria-labelledby="mine-h"></ul>
-    <p class="hint" id="empty" hidden>Nothing yet. Search below and add a few.</p>
-    <audio id="player" controls hidden aria-label="Track preview"></audio>
+  <div class="locked" id="locked" role="status" hidden>
+    <strong>Your crate is locked until the game ends.</strong>
+    <a href={back || "/"}>Back to the table</a>
+  </div>
+
+  <section class="progress" aria-label="Crate progress">
+    <p class="count mono" id="count" aria-live="polite"></p>
+    <p class="need" id="need"></p>
+    <div class="done" id="done" hidden>
+      <p><strong>Complete: you can play.</strong></p>
+      {back ? <a class="btn big" href={back}>Back to the table</a> : <a class="btn ghost" href="/">Back home</a>}
+    </div>
+  </section>
+
+  <p id="msg" class="error" role="alert"></p>
+
+  <div class="dividers" id="dividers">
+    {slots.map((s) => (
+      <section class="slot" id={`slot-${s.slot}`} data-slot={s.slot} aria-labelledby={`slot-${s.slot}-h`}>
+        <div class="tab"><h2 id={`slot-${s.slot}-h`}>{s.name}</h2><span class="tab-hint">{s.hint}</span><span class="tab-n mono" data-n></span></div>
+        <ul class="bin" data-bin></ul>
+      </section>
+    ))}
+  </div>
+
+  <section class="slot unsorted" id="unsorted" aria-labelledby="unsorted-h" hidden>
+    <div class="tab"><h2 id="unsorted-h">Unsorted</h2><span class="tab-hint">From before slots. These don't count until you sort them.</span></div>
+    <ul class="bin plain" id="unsorted-bin"></ul>
   </section>
 
   <section class="card" aria-labelledby="find-h">
-    <h2 id="find-h">Add a track</h2>
+    <h2 id="find-h">Find a song</h2>
     <form id="search" role="search">
       <label for="q">Search songs or artists</label>
       <input id="q" name="q" type="search" autocomplete="off" required />
       <button type="submit">Search</button>
     </form>
-    <p class="hint" id="full" hidden>Your taste file is full. Remove a track to add another.</p>
-    <p id="msg" class="error" role="alert"></p>
     <p class="hint" id="status" role="status"></p>
-    <ul class="tracks" id="results"></ul>
+    <ul class="results" id="results"></ul>
   </section>
+  <audio id="player" hidden></audio>
 </Base>
-<script define:vars={{ initial, max: TASTE_MAX }}>
-  const mine = document.getElementById("mine");
-  const results = document.getElementById("results");
-  const msg = document.getElementById("msg");
-  const status = document.getElementById("status");
-  const player = document.getElementById("player");
+<style>
+  h1 { margin: 0.2rem 0 0.4rem; }
+  .locked { background: var(--wall-3); border-left: 4px solid var(--lamp); padding: 0.8rem 1rem; border-radius: 8px; margin: 0 0 1rem; display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; align-items: center; }
+  .progress { margin: 0 0 1rem; }
+  .count { font-size: var(--step-3); font-weight: 600; margin: 0; color: var(--lamp); letter-spacing: 0.04em; }
+  .need { margin: 0.15rem 0 0; color: var(--text); font-weight: 500; }
+  .done { margin-top: 0.5rem; border: 2px solid var(--ok); border-radius: 10px; padding: 0.7rem 1rem; display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1.2rem; color: var(--ok); }
+  .done p { margin: 0; }
+  .btn.big { min-height: 56px; padding-inline: 1.75rem; font-size: var(--step-1); }
+  /* A record-store divider: a tall cream tab over a wooden bin of three sleeves. */
+  .dividers { display: grid; gap: 1.5rem; margin: 0 0 1.5rem; }
+  @media (min-width: 52rem) { .dividers { grid-template-columns: 1fr 1fr; } }
+  .slot { position: relative; padding-top: 1.9rem; }
+  .tab {
+    position: absolute; top: 0; left: 0.75rem; z-index: 2; display: flex; align-items: baseline; gap: 0.6rem; max-width: calc(100% - 1.5rem);
+    background: var(--sleeve); color: var(--ink); border-radius: 8px 8px 0 0; padding: 0.35rem 0.9rem 0.3rem;
+  }
+  .tab h2 { margin: 0; font: 400 var(--step-1)/1.1 var(--sign); letter-spacing: 0.03em; text-transform: uppercase; }
+  .tab-hint { font-size: 0.8125rem; color: var(--ink-2); min-width: 0; }
+  .tab-n { font-size: 0.8125rem; font-weight: 600; margin-left: auto; padding-left: 0.4rem; }
+  .bin {
+    list-style: none; margin: 0; padding: 0.7rem; display: grid; gap: 0.5rem; border-radius: 6px 12px 12px 12px;
+    background: linear-gradient(#3a2a1e, #2a1f17); box-shadow: inset 0 0 0 2px var(--wood);
+  }
+  .bin.plain { background: var(--wall-2); box-shadow: inset 0 0 0 2px var(--rule); }
+  .sleeve { background: var(--sleeve); color: var(--ink); border-radius: 6px; padding: 0.5rem; display: grid; grid-template-columns: 3.5rem minmax(0, 1fr); gap: 0.4rem 0.7rem; align-items: center; }
+  .sleeve .cover { width: 3.5rem; height: 3.5rem; border-radius: 3px; object-fit: cover; background: var(--sleeve-2); display: block; }
+  .sleeve .nocover { background: repeating-linear-gradient(135deg, var(--sleeve-2) 0 6px, #d6caae 6px 12px); }
+  .meta { min-width: 0; }
+  .meta strong, .meta span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sleeve .meta span { color: var(--ink-2); font-size: var(--step--1); }
+  .sleeve .acts { grid-column: 1 / -1; display: flex; gap: 0.4rem; align-items: center; flex-wrap: nowrap; }
+  .sleeve .acts button, .sleeve .acts select { min-height: 44px; padding: 0.3rem 0.8rem; font-size: var(--step--1); margin: 0; }
+  .sleeve .acts button { flex: 0 0 auto; background: var(--ink); color: var(--sleeve); }
+  .sleeve .acts button.play { background: var(--lamp); color: var(--ink); min-width: 5.2rem; }
+  .sleeve .acts select { flex: 1 1 0; min-width: 0; width: auto; background-color: transparent; color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--ink-2); background-image: linear-gradient(45deg, transparent 50%, var(--ink) 50%), linear-gradient(135deg, var(--ink) 50%, transparent 50%); }
+  .sleeve button:disabled { background: var(--sleeve-2); color: var(--ink-2); }
+  .sleeve :focus-visible { outline-color: var(--ink); }
+  .empty { border: 2px dashed var(--wood); border-radius: 6px; min-height: 5.5rem; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: var(--step--1); text-align: center; padding: 0.5rem; }
+  .results { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.5rem; }
+  .results .sleeve { grid-template-columns: 3.5rem minmax(0, 1fr) auto; }
+  .results .acts { grid-column: 1 / -1; }
+  .results .acts .adds { display: flex; gap: 0.4rem; flex: 1; }
+  .results .adds button { flex: 1 1 0; padding-inline: 0.2rem; min-width: 0; background: var(--lamp); color: var(--ink); }
+  .results .adds button:disabled { background: var(--sleeve-2); color: var(--ink-2); }
+  .results .adds button[aria-pressed="true"] { background: var(--ink); color: var(--sleeve); }
+  .sleeve.have { opacity: 0.85; }
+  .sleeve .tag { font: 600 0.75rem/1 var(--cat); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-2); }
+  .unsorted { margin: 0 0 1.5rem; }
+  .unsorted .sleeve .acts { flex-wrap: wrap; }
+  .unsorted .sleeve .acts button { flex: 1 1 4rem; }
+</style>
+<script define:vars={{ initial, max: TASTE_MAX, per: PER_SLOT, slots, lockedAtLoad: locked, back }}>
+  const $ = (id) => document.getElementById(id);
+  const msg = $("msg");
+  const player = $("player");
   let taste = initial;
   let found = [];
-
+  let locked = lockedAtLoad;
+  let playing = null;
+  const names = Object.fromEntries(slots.map((s) => [s.slot, s.name]));
   const say = (t) => { msg.textContent = t; };
   async function api(url, init) {
     const res = await fetch(url, init);
     const data = await res.json().catch(() => null);
     return { res, data };
   }
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  const inSlot = (s) => taste.filter((t) => t.slot === s);
 
-  function row(t, action) {
-    const li = document.createElement("li");
-    const art = document.createElement("div");
-    art.className = "sleeve-art";
-    if (t.cover) art.append(Object.assign(document.createElement("img"), { src: t.cover, alt: "", width: 56, height: 56, loading: "lazy" }));
-    else {
-      const nc = document.createElement("div");
-      nc.className = "nocover";
-      art.append(nc);
+  function cover(t) {
+    if (t.cover) return el("img", { className: "cover", src: t.cover, alt: "", width: 56, height: 56, loading: "lazy" });
+    return el("div", { className: "cover nocover" });
+  }
+  function playBtn(t) {
+    const on = playing === t.id;
+    const b = el("button", { type: "button", className: "play", textContent: on ? "Pause" : "Play" });
+    b.setAttribute("aria-label", `${on ? "Pause" : "Play"} preview of ${t.title} by ${t.artist}`);
+    b.addEventListener("click", () => toggle(t.id));
+    return b;
+  }
+  function meta(t) {
+    return el("div", { className: "meta" }, el("strong", { textContent: t.title }), el("span", { textContent: t.artist }));
+  }
+  function mover(t) {
+    const sel = el("select", { disabled: locked });
+    sel.setAttribute("aria-label", `Move ${t.title} to another slot`);
+    sel.append(el("option", { value: "", textContent: "Move to...", disabled: true, selected: true }));
+    for (const s of slots) {
+      if (s.slot === t.slot) continue;
+      const o = el("option", { value: s.slot, textContent: s.name });
+      if (inSlot(s.slot).length >= per) { o.disabled = true; o.textContent = `${s.name} (full)`; }
+      sel.append(o);
     }
-    const meta = document.createElement("div");
-    meta.className = "meta";
-    const title = document.createElement("strong");
-    title.textContent = t.title;
-    const artist = document.createElement("span");
-    artist.textContent = t.artist;
-    meta.append(title, artist);
-    const play = Object.assign(document.createElement("button"), { type: "button", className: "secondary", textContent: "Play" });
-    const acts = document.createElement("div");
-    acts.className = "acts";
-    play.setAttribute("aria-label", `Play preview of ${t.title} by ${t.artist}`);
-    play.addEventListener("click", () => preview(t.id));
-    acts.append(play, action);
-    li.append(art, meta, acts);
-    return li;
+    sel.addEventListener("change", () => move(t.id, sel.value));
+    return sel;
+  }
+  function sleeve(t) {
+    const rm = el("button", { type: "button", textContent: "Remove", disabled: locked });
+    rm.setAttribute("aria-label", `Remove ${t.title} by ${t.artist}`);
+    rm.addEventListener("click", () => remove(t.id));
+    return el("li", { className: "sleeve" }, cover(t), meta(t), el("div", { className: "acts" }, playBtn(t), mover(t), rm));
   }
 
   function render() {
-    const ids = new Set(taste.map((t) => t.id));
-    const full = taste.length >= max;
-    document.getElementById("counter").textContent = `${taste.length} / ${max}`;
-    document.getElementById("empty").hidden = taste.length > 0;
-    document.getElementById("full").hidden = !full;
-    mine.replaceChildren(...taste.map((t) => {
-      const b = Object.assign(document.createElement("button"), { type: "button", className: "secondary", textContent: "Remove" });
-      b.setAttribute("aria-label", `Remove ${t.title} by ${t.artist}`);
-      b.addEventListener("click", () => remove(t.id));
-      return row(t, b);
+    const sorted = taste.filter((t) => names[t.slot]);
+    const loose = taste.filter((t) => !names[t.slot]);
+    for (const s of slots) {
+      const here = inSlot(s.slot);
+      const sec = $(`slot-${s.slot}`);
+      sec.querySelector("[data-n]").textContent = `${here.length}/${per}`;
+      const bin = sec.querySelector("[data-bin]");
+      const items = here.map(sleeve);
+      for (let i = here.length; i < per; i++) {
+        items.push(el("li", { className: "empty", textContent: locked ? "Empty" : `Add a song to ${s.name}` }));
+      }
+      bin.replaceChildren(...items);
+    }
+    $("unsorted").hidden = loose.length === 0;
+    $("unsorted-bin").replaceChildren(...loose.map((t) => {
+      const adds = slots.map((s) => {
+        const b = el("button", { type: "button", textContent: s.name, disabled: locked || inSlot(s.slot).length >= per });
+        b.setAttribute("aria-label", `Sort ${t.title} into ${s.name}`);
+        b.addEventListener("click", () => move(t.id, s.slot));
+        return b;
+      });
+      const rm = el("button", { type: "button", textContent: "Remove", disabled: locked });
+      rm.setAttribute("aria-label", `Remove ${t.title} by ${t.artist}`);
+      rm.addEventListener("click", () => remove(t.id));
+      return el("li", { className: "sleeve" }, cover(t), meta(t), el("div", { className: "acts" }, playBtn(t), ...adds, rm));
     }));
-    results.replaceChildren(...found.map((t) => {
-      const b = Object.assign(document.createElement("button"), { type: "button" });
-      const has = ids.has(t.id);
-      b.textContent = has ? "Added" : "Add";
-      b.disabled = has || full;
-      b.setAttribute("aria-label", `${has ? "Already added" : "Add"} ${t.title} by ${t.artist}`);
-      b.addEventListener("click", () => add(t.id));
-      return row(t, b);
+
+    const n = sorted.length;
+    $("count").textContent = `${n} / ${max}`;
+    const short = slots.filter((s) => inSlot(s.slot).length < per).map((s) => ({ name: s.name, k: per - inSlot(s.slot).length }));
+    const done = short.length === 0;
+    $("need").textContent = done ? "" : short.map((s) => `${s.name} needs ${s.k} more`).join(". ") + ".";
+    $("need").hidden = done;
+    $("done").hidden = !done;
+    $("locked").hidden = !locked;
+
+    $("results").replaceChildren(...found.map((t) => {
+      const have = taste.find((x) => x.id === t.id && names[x.slot]);
+      const adds = slots.map((s) => {
+        const mineHere = have && have.slot === s.slot;
+        const full = inSlot(s.slot).length >= per;
+        const b = el("button", { type: "button", textContent: s.name, disabled: locked || !!have || full });
+        if (mineHere) b.setAttribute("aria-pressed", "true");
+        b.setAttribute("aria-label", have ? `${t.title} is in ${names[have.slot]}` : `Add ${t.title} to ${s.name}${full ? " (full)" : ""}`);
+        b.addEventListener("click", () => add(t.id, s.slot));
+        return b;
+      });
+      return el("li", { className: "sleeve" + (have ? " have" : "") }, cover(t), meta(t),
+        el("div", { className: "acts" }, playBtn(t), el("div", { className: "adds" }, ...adds)));
     }));
   }
 
-  async function add(id) {
+  // Any edit can come back 409 because a game began: then say so and lock the page.
+  function failed(res, data, fallback) {
+    if (res.status === 409 && /locked/i.test(data?.error ?? "")) { locked = true; render(); }
+    say(data?.error ?? fallback);
+  }
+
+  async function add(id, slot) {
     say("");
-    const { res, data } = await api("/api/taste", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ trackId: id }) });
-    if (!res.ok) return say(data?.error ?? "Could not add that track.");
+    const { res, data } = await api("/api/taste", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ trackId: id, slot }) });
+    if (!res.ok) return failed(res, data, "Could not add that song.");
     taste = data;
     render();
   }
-
+  async function move(id, slot) {
+    say("");
+    const { res, data } = await api(`/api/taste/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ slot }) });
+    if (!res.ok) { failed(res, data, "Could not move that song."); return render(); }
+    taste = data;
+    render();
+  }
   async function remove(id) {
     say("");
-    const { res } = await api(`/api/taste/${id}`, { method: "DELETE" });
-    if (!res.ok) return say("Could not remove that track.");
+    const { res, data } = await api(`/api/taste/${id}`, { method: "DELETE" });
+    if (!res.ok) return failed(res, data, "Could not remove that song.");
+    if (playing === id) stop();
     taste = taste.filter((t) => t.id !== id);
     render();
   }
 
+  function stop() { player.pause(); playing = null; }
   // The preview URL is signed and expires, so ask for a fresh one every play.
-  async function preview(id) {
+  async function toggle(id) {
     say("");
+    if (playing === id) { stop(); return render(); }
+    stop();
     const { res, data } = await api(`/api/tracks/${id}/preview`);
-    if (!res.ok) return say(data?.error ?? "No preview available.");
+    if (!res.ok) { say(data?.error ?? "No preview for that one."); return render(); }
     player.src = data.url;
-    player.hidden = false;
-    player.play().catch(() => say("Press play on the player to hear it."));
+    playing = id;
+    render();
+    player.play().catch(() => { say("Your browser would not play that."); playing = null; render(); });
   }
+  player.addEventListener("ended", () => { playing = null; render(); });
 
-  document.getElementById("search").addEventListener("submit", async (e) => {
+  $("search").addEventListener("submit", async (e) => {
     e.preventDefault();
     say("");
-    const q = document.getElementById("q").value.trim();
+    const status = $("status");
     status.textContent = "Searching...";
-    const { res, data } = await api(`/api/search?q=${encodeURIComponent(q)}`);
+    const { res, data } = await api(`/api/search?q=${encodeURIComponent($("q").value.trim())}`);
     if (!res.ok) { status.textContent = ""; return say(data?.error ?? "Search failed."); }
     found = data;
-    status.textContent = found.length ? `${found.length} results` : "No results.";
+    status.textContent = found.length ? `${found.length} results. Pick a slot on a song to add it.` : "No results.";
     render();
   });
 

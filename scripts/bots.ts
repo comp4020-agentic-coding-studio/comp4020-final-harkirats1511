@@ -15,8 +15,10 @@ const PIN = "2580";
 // A crate is 3 songs in each of 4 slots; the app refuses a start until every player has one.
 const SLOTS = ["up", "down", "out", "in"] as const;
 const PER_SLOT = 3;
-// Words searched per slot, after the bot's own genre, to find songs that fit its mood.
-const SLOT_WORDS: Record<(typeof SLOTS)[number], string> = { up: "energy hype", down: "sad slow", out: "party night", in: "chill cosy" };
+// Words searched per slot to find songs that fit its mood. Bots ask Deezer's public
+// search directly (the app's search hides previews and the explicit flag), trying the
+// bot's own genre first so tastes differ, and keep only songs with a preview, no explicit lyrics.
+const SLOT_WORDS: Record<(typeof SLOTS)[number], string> = { up: "dance anthem", down: "sad piano", out: "party", in: "lofi chill" };
 const DEFAULT_URL = "https://comp4020-final-harkirats1511.fly.dev";
 // One name and one taste word per bot, so tastes differ.
 const BOTS = [
@@ -95,12 +97,18 @@ class Bot {
   }
 
   async search(q: string): Promise<Track[]> {
+    try {
+      const res = await fetch(`https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=50`, { signal: AbortSignal.timeout(8000) });
+      const body = (await res.json()) as { data?: { id: number; title: string; preview?: string; explicit_lyrics?: boolean; artist?: { name?: string } }[] };
+      const ok = (body.data ?? []).filter((r) => r.preview && !r.explicit_lyrics).map((r) => ({ id: r.id, title: r.title, artist: r.artist?.name ?? "" }));
+      if (ok.length) return ok;
+    } catch { /* fall back to the app's own search */ }
     const r = await this.call(`/api/search?q=${encodeURIComponent(q)}`);
     return r.ok && Array.isArray(r.data) ? (r.data as Track[]) : [];
   }
 
-  // Builds a complete 12-track crate: searches "<genre> <slot words>" for each
-  // slot and adds the first songs it doesn't already have, until 3 are in each.
+  // Builds a complete 12-track crate: searches the slot's words (with the bot's
+  // genre first) and adds songs it doesn't already have until it has 3 in each slot.
   async setup() {
     const j = await this.call("/api/join", { name: this.name, pin: PIN });
     if (!j.ok) throw new Error(`${this.name} could not sign in`);
@@ -156,18 +164,22 @@ class Bot {
     else if (g.phase === "reveal") log(this.name, `round ${g.round} reveal`);
   }
 
-  // Bots can't judge a prompt, so they play from their own crate at random,
-  // skipping songs already played this game. Once per game, one in four rounds,
-  // a bot borrows from someone else's crate instead.
+  // Bots play from their own crate, preferring unplayed songs in the round's slot
+  // (a mole only knows the slot too). About one round in four, once per game, a
+  // bot borrows an unplayed song from someone else's crate instead.
   chooseTrack(me: Me): { track: Track; from?: string } | undefined {
-    const fresh = this.taste.filter((t) => !me.played.includes(t.id));
+    const unplayed = <T extends { slot?: string | null }>(xs: T[], id: (x: T) => number) => xs.filter((x) => !me.played.includes(id(x)));
     if (!me.borrowUsed && Math.random() < 0.25) {
       const lenders = this.members.filter((m) => m.name !== this.name && m.crate?.some((c) => !me.played.includes(c.trackId)));
       const lender = pickOne(lenders);
-      const song = lender && pickOne(lender.crate!.filter((c) => !me.played.includes(c.trackId)));
-      if (lender && song) return { track: { id: song.trackId, title: song.title, artist: "", slot: song.slot }, from: lender.name };
+      if (lender) {
+        const open = unplayed(lender.crate!, (c) => c.trackId);
+        const song = pickOne(open.filter((c) => c.slot === me.slot)) ?? pickOne(open);
+        if (song) return { track: { id: song.trackId, title: song.title, artist: "", slot: song.slot }, from: lender.name };
+      }
     }
-    const track = pickOne(fresh);
+    const fresh = unplayed(this.taste, (t) => t.id);
+    const track = pickOne(fresh.filter((t) => t.slot === me.slot)) ?? pickOne(fresh);
     return track && { track };
   }
 
@@ -197,7 +209,8 @@ class Bot {
     // Votes are on names: a random player still in, or skip.
     const cast = async () => {
       const names = ((await this.call(`/api/tables/${code}`)).data as { game?: { tally?: { name: string }[] } } | null)?.game?.tally ?? [];
-      const choice = names.length && Math.random() < 0.85 ? { name: pickOne(names.filter((n) => n.name !== this.name))!.name } : { skip: true };
+      const others = names.filter((n) => n.name !== this.name);
+      const choice = others.length && Math.random() < 0.85 ? { name: pickOne(others)!.name } : { skip: true };
       const r = await this.call(`/api/tables/${code}/vote`, choice);
       if (r.ok) log(this.name, "voted");
     };

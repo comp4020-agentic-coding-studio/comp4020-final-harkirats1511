@@ -122,3 +122,15 @@ it("keeps taste files private to their session's person", async () => {
   expect((await anonymous.call("/api/taste")).status).toBe(401);
   expect((await anonymous.call("/api/taste", { body: { trackId: 3135556, slot: "up" } })).status).toBe(401);
 });
+
+it("serves the crate builder with the four slot dividers, and a home page with no moles selector", async () => {
+  const { s } = await signedIn();
+  const page = await s.call("/taste");
+  expect(page.status).toBe(200);
+  const html = await page.text();
+  for (const name of ["Up", "Down", "Out", "In"]) expect(html).toMatch(new RegExp(`<h2[^>]*>${name}</h2>`));
+  expect(html).toContain("energy, hype");
+  const home = await (await s.call("/")).text();
+  expect(home).not.toMatch(/id="moles"/);
+  expect(home).toContain("/ 12");
+});
