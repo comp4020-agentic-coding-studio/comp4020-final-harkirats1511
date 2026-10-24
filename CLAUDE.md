@@ -73,6 +73,12 @@ They are decisions, not defaults (see `docs/decisions/0009`).
   many as everyone else still in (moles win), as in Among Us. Leaving counts the
   same way, and a host who leaves passes the host role on. A leaver's crate
   leaves with them.
+- **Every game ends.** The moles also win if, with three players left, a vote
+  ejects nobody (a tie or skip on top: the room had its last chance), or if they
+  survive round 12 (a crate has 12 songs). A round in which nobody picks at all
+  ends the game with no winner (an abandoned table), so crates never stay locked
+  behind a game nobody is playing. Someone with no song left to pick is told so,
+  and can still borrow if they haven't.
 - The reveal after a vote shows the prompt, every pick with its picker, the votes
   by name, and who was out and whether they were a mole. The public state keeps
   every finished round of the game (prompt, cards, ejected), who has used their

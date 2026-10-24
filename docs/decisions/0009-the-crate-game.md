@@ -42,6 +42,11 @@ knows they're the mole gives the game a liar.
   everyone who the mole is, so a mole who stayed in would just be voted out next
   round: the review of the server phase caught it.)
 - Ghosts watch; Among Us parity decides the game; up to 8 players.
+- Every game ends. With three left, a vote that ejects nobody hands the game to
+  the moles, and so does surviving round 12. A round where nobody picks ends
+  the game with no winner. (The end-to-end review found a three-player table
+  that skipped for 64 rounds, and abandoned tables that kept everyone's crate
+  locked.)
 
 ## Cost
 
