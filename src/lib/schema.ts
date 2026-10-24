@@ -99,7 +99,7 @@ export const tableReports = sqliteTable(
   (t) => [primaryKey({ columns: [t.tableCode, t.personId] })],
 );
 
-// A person's taste file: up to 10 tracks they'd actually play. Deezer ids plus
+// A person's crate (taste file): 12 tracks they'd actually play, 3 per slot. Deezer ids plus
 // metadata only; audio is never hosted.
 export const tasteTracks = sqliteTable(
   "taste_tracks",
@@ -112,6 +112,10 @@ export const tasteTracks = sqliteTable(
     artist: text("artist").notNull(),
     album: text("album"),
     cover: text("cover"),
+    // Up to 12 tracks, 3 in each of "up" | "down" | "out" | "in" (decision 0009).
+    // Rows from before slots existed are null and must be re-slotted by their
+    // owner: a crate with a null is incomplete.
+    slot: text("slot"),
     addedAt: integer("added_at").notNull(),
   },
   (t) => [primaryKey({ columns: [t.personId, t.trackId] })],
@@ -145,6 +149,17 @@ export const games = sqliteTable(
     nowPlaying: integer("now_playing"),
     // "players" | "moles" once the game is over.
     winner: text("winner"),
+    // The four slots in this game's order (JSON array, shuffled at the start):
+    // round n draws a prompt of slotOrder[(n - 1) % 4], so no slot repeats
+    // before all four have come up.
+    slotOrder: text("slot_order"),
+    // The steal phase: the voted-out mole, the four prompt ids they may guess
+    // from (JSON, shuffled; moles only ever see them in /me), their guess, and
+    // whether it was right (read at the reveal). Cleared when the next round begins.
+    stealPersonId: text("steal_person_id"),
+    stealOptions: text("steal_options"),
+    stealGuess: text("steal_guess"),
+    stole: integer("stole").notNull().default(0),
     startedAt: integer("started_at").notNull(),
     // Epoch ms the game ended; null while it runs. Games that ended before this
     // column existed carry their startedAt.
@@ -167,11 +182,30 @@ export const gamePlayers = sqliteTable(
     // The round they were voted out in: from then on a ghost.
     ejectedRound: integer("ejected_round"),
     left: integer("left").notNull().default(0),
+    // One borrow and one steal per game (1 once used).
+    borrowUsed: integer("borrow_used").notNull().default(0),
+    stealUsed: integer("steal_used").notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.gameId, t.personId] })],
 );
 
-// The theme pair drawn for a round: most of the table gets `majority`, the
+// The prompt drawn for a round (decision 0009), from src/lib/prompts.ts. Only
+// non-moles are ever sent it before the reveal; a mole gets the slot.
+export const gamePrompts = sqliteTable(
+  "game_prompts",
+  {
+    gameId: text("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "cascade" }),
+    round: integer("round").notNull(),
+    promptId: text("prompt_id").notNull(),
+    slot: text("slot").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.gameId, t.round] })],
+);
+
+// The theme pair drawn for a round by the old hidden-theme game (no longer
+// written; history still reads it for games played then): most of the table gets `majority`, the
 // mole(s) get `mole`. Never sent to anyone until the game is over, except that
 // each person's own side reaches only their own /me.
 export const gameThemes = sqliteTable(
@@ -187,8 +221,9 @@ export const gameThemes = sqliteTable(
   (t) => [primaryKey({ columns: [t.gameId, t.round] })],
 );
 
-// A person's pick for a round. slot is the anonymous position it plays in,
-// shuffled once when listening starts and then fixed.
+// A person's pick for a round. slot is the card's order of play, shuffled once
+// when listening starts and then fixed (old games: its anonymous slot).
+// lenderPersonId is whose crate it was borrowed from, null for the picker's own.
 export const picks = sqliteTable(
   "picks",
   {
@@ -208,13 +243,14 @@ export const picks = sqliteTable(
     // inspiredBy is the person whose crate's artist it was chosen from, shown
     // only at the reveal.
     inspiredBy: text("inspired_by"),
+    lenderPersonId: text("lender_person_id"),
   },
   (t) => [primaryKey({ columns: [t.gameId, t.round, t.personId] })],
 );
 
-// A vote, changeable until the vote locks (decision 0008). slot is the track
-// voted for, null for "skip". choice is the person voted for by the old rules;
-// rows from before 0008 keep it and nothing reads it any more.
+// A vote, changeable until the vote locks. choice is the person voted for, null
+// for "skip" (decision 0009). slot was the track voted for under 0008 and is
+// no longer written.
 export const votes = sqliteTable(
   "votes",
   {
