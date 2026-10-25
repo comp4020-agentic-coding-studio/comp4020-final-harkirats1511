@@ -31,6 +31,10 @@ RUN pnpm prune --prod
 # --- runtime stage: just the built server and its production deps ----------
 FROM base
 
+# the commit this image was built from, logged at startup (--build-arg GIT_SHA=...)
+ARG GIT_SHA=unknown
+ENV GIT_SHA=$GIT_SHA
+
 COPY --from=build /app/node_modules /app/node_modules
 COPY --from=build /app/dist /app/dist
 # the committed migrations, applied at boot (src/lib/db.ts)
