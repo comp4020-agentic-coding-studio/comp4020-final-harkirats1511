@@ -23,6 +23,8 @@ type Raw = {
   title?: string;
   preview?: string;
   explicit_lyrics?: boolean;
+  explicit_content_lyrics?: number;
+  bpm?: number;
   artist?: { name?: string };
   album?: { title?: string; cover_medium?: string };
 };
@@ -106,4 +108,55 @@ export async function getPreviewUrl(id: number): Promise<string | null> {
   })().finally(() => inflight.delete(id));
   inflight.set(id, p);
   return p;
+}
+
+// A last net under Deezer's explicit flag, which some catalogue entries lack.
+// Suggestions are automated content nobody chose, so they pass it (restored from
+// before 73296e7, where it guarded the house record's tracks).
+export const UNSAYABLE = /n[i1]gg|f[a@]gg|retard|c[u\*]nt|wh[o0]re|sl[u\*]t\b/i;
+
+// Ids and metadata only, for suggestions: a track with a preview, not marked
+// explicit, with no slur in its title or artist name. The preview URL itself is
+// dropped (it is signed and expires; the game fetches a fresh one per play).
+function suggestable(r: Raw): Track | null {
+  if (!r.preview || r.explicit_lyrics || r.explicit_content_lyrics === 1) return null;
+  if (UNSAYABLE.test(r.title ?? "") || UNSAYABLE.test(r.artist?.name ?? "")) return null;
+  return toTrack(r);
+}
+
+export type Artist = { id: number; name: string };
+
+// The first artist whose name matches (ignoring case), else Deezer's first hit.
+export async function findArtist(name: string, ms = TIMEOUT_MS): Promise<Artist | null> {
+  const body = await get(`/search/artist?q=${encodeURIComponent(name)}&limit=5`, ms);
+  const rows = ((body?.data as { id?: number; name?: string }[] | undefined) ?? []).filter(
+    (a): a is Artist => typeof a.id === "number" && !!a.name,
+  );
+  const wanted = name.trim().toLowerCase();
+  return rows.find((a) => a.name.trim().toLowerCase() === wanted) ?? rows[0] ?? null;
+}
+
+export async function artistTop(id: number, limit: number, ms = TIMEOUT_MS): Promise<Track[]> {
+  const body = await get(`/artist/${id}/top?limit=${limit}`, ms);
+  const tracks = ((body?.data as Raw[] | undefined) ?? []).map(suggestable).filter((t): t is Track => t !== null);
+  for (const t of tracks) remember(t);
+  return tracks;
+}
+
+export async function relatedArtists(id: number, limit: number, ms = TIMEOUT_MS): Promise<Artist[]> {
+  const body = await get(`/artist/${id}/related?limit=${limit}`, ms);
+  return ((body?.data as { id?: number; name?: string }[] | undefined) ?? []).filter(
+    (a): a is Artist => typeof a.id === "number" && !!a.name,
+  );
+}
+
+// Beats per minute from /track/:id: Deezer often says 0 (unknown), which is null here.
+const bpms = new Map<number, number | null>();
+export async function trackBpm(id: number, ms = TIMEOUT_MS): Promise<number | null> {
+  if (bpms.has(id)) return bpms.get(id)!;
+  const body = (await get(`/track/${id}`, ms)) as Raw | null;
+  const v = typeof body?.bpm === "number" && body.bpm > 30 ? body.bpm : null;
+  if (bpms.size >= 2000) bpms.delete(bpms.keys().next().value!);
+  bpms.set(id, v);
+  return v;
 }
