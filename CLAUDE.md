@@ -99,6 +99,33 @@ They are decisions, not defaults (see `docs/decisions/0009`).
   host's. The host's phone always plays. The choice is per person, saved, and can
   be changed during a game.
 
+## Formats
+
+The host picks one when starting (see `docs/decisions/0010`). Everything above
+holds in both unless this section says otherwise.
+
+- **Knockout** is the game above: vote someone out each round, ghosts watch, it
+  ends by the rules in "Every game ends". Ghosts also make a private guess each
+  round at who the mole is; nobody sees it until game over, when each ghost's
+  hits are shown.
+- **Four rounds.** One round per mood, each mood once, in shuffled order.
+  Nobody is voted out and there are no ghosts.
+  - **Moles are dealt again every round** (same counts as above), because the
+    steal shows who was caught. A round's moles are named at its reveal.
+  - **Two votes at once**, live and changeable like the knockout vote: who's the
+    mole (a name, not yourself, or skip), and **best pick** (a card, not your
+    own). Last call starts when everyone has cast both.
+  - **Scoring, per round:** each non-mole who voted for a mole +2; each best-pick
+    vote +1 to the card's picker and +1 to its lender if it was borrowed; each
+    mole +2 if the room's top mole vote isn't a mole (a tie or skip on top
+    counts). If the top mole vote is a mole, that mole gets the steal (8
+    prompts); a right guess +3.
+  - **Scores change only at the reveal**, never while a vote is open, so a score
+    can't leak who voted for what.
+  - After round 4 the highest score wins; a tie shares the win. A round nobody
+    picks in still ends the game with no winner. The borrow, the crate, hidden
+    picks and every rule in "What the app must never do" hold.
+
 ## Logging
 
 The server logs who did what, so the deployed app can be read from
