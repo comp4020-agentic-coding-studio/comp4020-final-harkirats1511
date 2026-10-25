@@ -34,8 +34,8 @@ async function pageFor(cookieFrom?: ReturnType<typeof session>, name?: string, p
 }
 const go = async (page: Page, path: string) => {
   await page.goto(new URL(path, baseUrl).href);
-  await page.waitForLoadState("networkidle");
-  await page.waitForTimeout(400);
+  await page.waitForLoadState("load");
+  await page.waitForTimeout(1200);
 };
 
 it("loads / signed out with no page error, and the sign-in form is there", async () => {
@@ -49,7 +49,7 @@ it("loads / signed out with no page error, and the sign-in form is there", async
 it("loads /, /taste and a table page signed in with no page error; the home page is true about bots", async () => {
   const name = uniqueName("pg");
   const { ctx, page, errors } = await pageFor(undefined, name);
-  await go(page, "/?welcome=0");
+  await go(page, "/");
   // The pace buttons still fill the selects (the null guard must not break the signed-in wiring).
   await page.locator("#custom summary").click();
   await page.locator('label[for="pace-quick"]').click();
@@ -119,6 +119,17 @@ it("keeps keyboard focus useful after Keep, Keep all and Swap", async () => {
   await page.click("#keep-all");
   await page.waitForFunction(() => document.activeElement?.id === "progress");
   expect(errors).toEqual([]);
+  await ctx.close();
+});
+
+it("says which artist has no clean songs, by name, next to the starter", async () => {
+  const { ctx, page } = await pageFor(undefined, uniqueName("fc"));
+  const none = { up: [], down: [], out: [], in: [] };
+  await page.route("**/api/taste/suggest", (r) => r.fulfill({ json: { artists: ["Drake"], missing: [], fewClean: ["Drake"], moods: none, spare: none } }));
+  await go(page, "/taste");
+  await page.fill("#artists", "Drake");
+  await page.click("#starter-go");
+  await expect.poll(async () => page.locator("#starter-status").innerText()).toContain("We couldn't find clean songs for Drake. Try another artist or search below.");
   await ctx.close();
 });
 

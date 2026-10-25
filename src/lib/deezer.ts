@@ -130,7 +130,7 @@ export async function getPreviewUrl(id: number): Promise<string | null> {
 // (spec/explicit.test.ts holds a list of them).
 export const UNSAYABLE = new RegExp(
   [
-    "n[i1!]gg(?!l)", // the plain word and its plurals (not "niggle")
+    "(?<![a-z])n[i1!]gg(?!l)", // the plain word and its plurals (not inside "snigger", not "niggle")
     "\\bn[*#@_]{2,}", // n**, n****as
     "n[i1!][*#@_]{2,}", // ni**as
     "n[*#@_]gg", // n*gg

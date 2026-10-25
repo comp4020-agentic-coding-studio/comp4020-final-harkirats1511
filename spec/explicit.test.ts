@@ -21,8 +21,8 @@ it("catches censored and spaced-out slurs, and passes ordinary song titles", asy
     "Bohemian Rhapsody", "Hotel California", "Billie Jean", "Smells Like Teen Spirit", "Stairway to Heaven", "Wonderwall",
     "Nightcall", "Niggle", "Night Fever", "Nothing Else Matters", "Nights in White Satin", "Nineteen", "Nine in the Afternoon",
     "Fagin's Lament", "Fag End", "Fugees", "Flagpole Sitta", "F.E.A.R.", "FM", "F.U.N.", "N.W.A", "NWA", "N-Dubz", "N.E.R.D", "N.Y. State of Mind", "NY Is Killing Me",
-    "N'Sync", "N Sync", "Snigger Snack", "Sluts of Summer".replace("Sluts of Summer", "Slutsky Waltz"), "Whoretensia".replace("Whoretensia", "Wholesome"),
-    "Cunning Stunts", "Retarded Clock".replace("Retarded Clock", "Return of the Mack"), "Under Pressure", "Dancing Queen", "Take On Me",
+    "N'Sync", "N Sync", "Snigger Snack", "Slutsky Waltz", "Wholesome",
+    "Cunning Stunts", "Return of the Mack", "Under Pressure", "Dancing Queen", "Take On Me",
     "Gangnam Style", "Mr. Brightside", "Seven Nation Army", "Africa", "Lose Yourself", "Mo Bamba", "Nuthin' but a G Thang", "99 Problems",
   ];
   for (const ok of normal) expect(UNSAYABLE.test(ok), ok).toBe(false);
@@ -111,13 +111,13 @@ it("finds the real BTS, not the look-alike account listed first: at least 6 sugg
   expect(Object.values(body.moods).flat().length).toBeGreaterThanOrEqual(6);
 });
 
-it("says so when an artist has too few clean songs, instead of a bare nothing", async () => {
+it("gives Drake, whose top tracks are mostly explicit, a full starter from the clean ones and artists like him", async () => {
   const s = await signedIn();
   const res = await suggest(s, ["Drake"]);
   expect(res.status).toBe(200);
-  const body = (await res.json()) as { fewClean: string[]; moods: Record<string, unknown[]> };
-  // Drake's own top tracks are nearly all explicit: the answer names him, whatever else it found.
-  expect(body.fewClean).toContain("Drake");
+  const body = (await res.json()) as { artists: string[]; moods: Record<string, unknown[]> };
+  expect(body.artists).toEqual(["Drake"]);
+  expect(Object.values(body.moods).flat().length).toBeGreaterThanOrEqual(6);
 });
 
 it("four people asking for starters at once don't take previews away from a fifth", async () => {

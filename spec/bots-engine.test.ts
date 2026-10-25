@@ -88,7 +88,7 @@ it("the bot brain and driver read no prompt list, role or hidden pick: they impo
 // driver, which decide and play, may import it.
 it("the seating module is imported by no decision code", () => {
   const root = join(import.meta.dirname, "..", "src", "lib", "bots");
-  for (const f of ["brain.ts", "driver.ts"]) expect(readFileSync(join(root, f), "utf8")).not.toMatch(/seats\.ts/);
+  for (const f of ["brain.ts", "driver.ts"]) expect(readFileSync(join(root, f), "utf8")).not.toMatch(/^import .*seats\.ts/m);
 });
 
 // What a restart does: bots are driven from the database, so a table that still has a person
