@@ -1,7 +1,8 @@
 import type { APIRoute } from "astro";
-import { frameFeed, normaliseCode, tableExists, tableWatchers, watchTable } from "../../../../lib/tables.ts";
-import { addressOf, firstSaying, MAX_STREAMS_PER_IP, MAX_WATCHERS_PER_TABLE, openStream } from "../../../../lib/limits.ts";
-import { refused } from "../../../../lib/log.ts";
+import { frameFeed, isMember, normaliseCode, tableExists, watchTable } from "../../../../lib/tables.ts";
+import { personFromCookies } from "../../../../lib/auth.ts";
+import { addressOf, firstSaying, MAX_STREAMS_PER_IP, MAX_STREAMS_PER_PERSON, MAX_WATCHERS_PER_TABLE, openStream } from "../../../../lib/limits.ts";
+import { refused, tag } from "../../../../lib/log.ts";
 
 const HEARTBEAT_MS = 15_000;
 
@@ -14,15 +15,21 @@ const HEARTBEAT_MS = 15_000;
 // frame leaves out `members[].crate` or `game.past` when they are unchanged
 // since that stream's last frame, naming what it left out in `same`
 // (["crates"], ["past"]); the client keeps its last copy of those.
-export const GET: APIRoute = ({ params, request, clientAddress }) => {
+export const GET: APIRoute = ({ params, request, clientAddress, cookies }) => {
   const code = normaliseCode(params.code);
   if (!tableExists(code)) return new Response("No such table.", { status: 404 });
 
   const ip = addressOf(request, clientAddress);
-  const slot = openStream(tableWatchers(code), ip);
+  const me = personFromCookies(cookies);
+  const member = me && isMember(code, me.id) ? me : null;
+  const slot = openStream(code, ip, member?.id ?? null);
+  if (slot === "person") {
+    if (firstSaying(`p${member!.id}`)) refused("streams", tag(member!), `watch table ${code}`, `${MAX_STREAMS_PER_PERSON} streams already open`);
+    return new Response("Too many tabs open on this table.", { status: 429, headers: { "x-full": "person" } });
+  }
   if (slot === "table") {
     if (firstSaying(`t${code}`)) refused("streams", null, `watch table ${code}`, `${MAX_WATCHERS_PER_TABLE} watchers already`);
-    return new Response("This table has too many watchers.", { status: 429 });
+    return new Response("This table has too many watchers.", { status: 429, headers: { "x-full": "table" } });
   }
   if (slot === "ip") {
     if (firstSaying(`i${ip}`)) refused("streams", null, `watch table ${code}`, `${MAX_STREAMS_PER_IP} streams open from one address`);

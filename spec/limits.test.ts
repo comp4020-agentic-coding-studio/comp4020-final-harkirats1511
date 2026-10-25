@@ -7,7 +7,7 @@ vi.setConfig({ testTimeout: 60_000 });
 
 const limits = () => import("../src/lib/limits.ts");
 
-it("refuses the 25th watcher of one table with 429, and frees the place when one leaves", async () => {
+it("refuses the 25th anonymous watcher of one table with 429, and frees the place when one leaves", async () => {
   const { MAX_WATCHERS_PER_TABLE } = await limits();
   const host = session();
   await host.call("/api/join", { body: { name: uniqueName("cap"), pin: "2580" } });
@@ -37,24 +37,47 @@ it("refuses the 25th watcher of one table with 429, and frees the place when one
   for (const o of open) o.close();
 });
 
-it("caps open streams per address, and frees them on release", async () => {
-  const { MAX_STREAMS_PER_IP, MAX_WATCHERS_PER_TABLE, openStream } = await limits();
-  expect(openStream(MAX_WATCHERS_PER_TABLE, "203.0.113.99")).toBe("table");
+it("never refuses a signed-in member of the table, however many strangers are watching", async () => {
+  const { MAX_WATCHERS_PER_TABLE, MAX_STREAMS_PER_PERSON } = await limits();
+  const host = session();
+  await host.call("/api/join", { body: { name: uniqueName("mem"), pin: "2580" } });
+  const { code } = (await (await host.call("/api/tables", { body: {} })).json()) as { code: string };
+  const strangers: Awaited<ReturnType<typeof host.open>>[] = [];
+  for (let i = 0; i < MAX_WATCHERS_PER_TABLE; i++) strangers.push(await session().open(`/api/tables/${code}/events`));
+  expect(strangers.every((o) => o.status === 200)).toBe(true);
+  // Full to strangers, open to the host: up to the per-person cap, then 429.
+  const mine: Awaited<ReturnType<typeof host.open>>[] = [];
+  for (let i = 0; i < MAX_STREAMS_PER_PERSON; i++) mine.push(await host.open(`/api/tables/${code}/events`));
+  expect(mine.every((o) => o.status === 200)).toBe(true);
+  expect((await host.open(`/api/tables/${code}/events`)).status).toBe(429);
+  for (const o of [...strangers, ...mine]) o.close();
+});
+
+it("caps anonymous streams per address, exempts members, and frees them on release", async () => {
+  const { MAX_STREAMS_PER_IP, MAX_WATCHERS_PER_TABLE, MAX_STREAMS_PER_PERSON, openStream } = await limits();
+  const full = Array.from({ length: MAX_WATCHERS_PER_TABLE }, () => openStream("FULLTBL", "203.0.113.99"));
+  expect(openStream("FULLTBL", "203.0.113.99")).toBe("table");
+  expect(typeof openStream("FULLTBL", "203.0.113.99", "member-1")).toBe("object");
+  for (const s of full) (s as { release: () => void }).release();
   const ip = "203.0.113.7";
   const slots = [];
   for (let i = 0; i < MAX_STREAMS_PER_IP; i++) {
-    const s = openStream(0, ip);
+    const s = openStream(`T${i % 3}${i}`, ip);
     expect(typeof s).toBe("object");
     slots.push(s as { release: () => void });
   }
-  expect(openStream(0, ip)).toBe("ip");
-  // Someone else's address is unaffected.
-  expect(typeof openStream(0, "203.0.113.8")).toBe("object");
+  expect(openStream("TX", ip)).toBe("ip");
+  // A member from the same address is not refused, and someone else's address is unaffected.
+  expect(typeof openStream("TX", ip, "member-2")).toBe("object");
+  expect(typeof openStream("TX", "203.0.113.8")).toBe("object");
   slots[0].release();
   slots[0].release(); // releasing twice frees one place only
-  const again = openStream(0, ip);
-  expect(typeof again).toBe("object");
-  expect(openStream(0, ip)).toBe("ip");
+  expect(typeof openStream("TX", ip)).toBe("object");
+  expect(openStream("TX", ip)).toBe("ip");
+  // One member's own streams are capped.
+  const own = Array.from({ length: MAX_STREAMS_PER_PERSON }, () => openStream("TY", ip, "member-3"));
+  expect(own.every((s) => typeof s === "object")).toBe(true);
+  expect(openStream("TY", ip, "member-3")).toBe("person");
 });
 
 it("rate-limits one person's actions: the sixth in a second is 429, and a pause clears it", async () => {
