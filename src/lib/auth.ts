@@ -23,6 +23,23 @@ export function validName(raw: unknown): string | null {
   return name.length >= 1 && name.length <= 24 ? name : null;
 }
 
+// What a name looks like once the look-alikes are flattened: Unicode compatibility forms
+// (fullwidth letters), invisible characters removed, accents dropped, and every run of
+// spaces, dots, underscores and dashes made one "-". So "Bot x", "BOT_x" and "bot . x" all
+// become "bot-x", the label the server's own bots carry.
+export function flatName(raw: string): string {
+  return raw
+    .normalize("NFKC")
+    .replace(/[\u00ad\u200b-\u200f\u2060\ufeff]/g, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[\s._\-\u2010-\u2015\u2212]+/g, "-")
+    .replace(/^-+/, "");
+}
+// True for a name a person may not take: one that starts "bot-" once flattened.
+export const botLike = (name: string) => flatName(name).startsWith("bot-");
+
 export function validPin(raw: unknown): string | null {
   return typeof raw === "string" && /^\d{4,8}$/.test(raw) ? raw : null;
 }

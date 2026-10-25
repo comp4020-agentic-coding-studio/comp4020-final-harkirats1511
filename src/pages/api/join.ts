@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 import {
-  clearFailures, createPerson, findPersonByName, json, newPinHash, noteFailure, pinMatches,
+  botLike, clearFailures, createPerson, findPersonByName, json, newPinHash, noteFailure, pinMatches,
   startSession, throttled, validName, validPin,
 } from "../../lib/auth.ts";
 import { log, refused, tag } from "../../lib/log.ts";
@@ -12,6 +12,10 @@ export const POST: APIRoute = async ({ request, cookies }) => {
   if (!name) {
     refused("auth", null, "sign-in", "bad name");
     return json({ error: "Name must be 1 to 24 characters." }, 400);
+  }
+  if (name && botLike(name)) {
+    refused("auth", null, "sign-in", "bot-like name");
+    return json({ error: 'Names starting with "bot-" are kept for the bots. Pick another name.' }, 400);
   }
   if (!pin) {
     refused("auth", null, `sign-in as ${name}`, "bad PIN format");

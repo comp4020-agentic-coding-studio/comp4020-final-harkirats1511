@@ -12,3 +12,7 @@ const FIRST = [
 ];
 export const BOT_NAMES: readonly string[] = FIRST.map((n) => `bot-${n}`);
 export const classOf = (index: number) => index % CLASSES;
+// A bot's row name is its base name, plus a number once the base is in use at another table
+// ("bot-ivy", "bot-ivy2"): people rows have unique names, and a row sits at one table at a time.
+export const baseName = (name: string) => name.toLowerCase().replace(/\d+$/, "");
+export const rowName = (base: string, n: number) => (n <= 1 ? base : `${base}${n}`);

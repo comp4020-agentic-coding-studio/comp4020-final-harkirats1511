@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "./db.ts";
 import { gamePlayers, games, tasteTracks } from "./schema.ts";
-import { artistTop, DeezerBusy, findArtist, relatedArtists, trackBpm, type Track } from "./deezer.ts";
+import { type Artist, artistTop, DeezerBusy, DeezerQueued, findArtist, relatedArtists, trackBpm, type Track } from "./deezer.ts";
 import { SLOTS, type Slot } from "./prompts.ts";
 
 // A crate is 12 songs in 4 slots of 3 (decision 0009). Sitting down needs
@@ -111,20 +111,39 @@ export function removeTaste(personId: string, trackId: number) {
 
 // ---- Starting a crate from your own artists (perfect-plan #2) and sorting old songs (#45) ----
 //
-// Mood guess, Deezer data only (no audio analysis, no outside list):
-//   1. Title keywords: a few words that name a mood ("party", "sad", "sleep", "run").
-//   2. Otherwise tempo, when Deezer knows it (track.bpm is often 0 = unknown):
-//        >= 128 up, 108-127 out, 88-107 in, below 88 down.
-//   3. Otherwise unknown (null): the caller spreads unknowns over the moods that
-//      still have room, so no mood is starved.
+// Mood guess, Deezer data only (no audio analysis, no outside list), and only a guess:
+//   1. Words in the title, album and artist name. A mood needs a clear word (a "strong"
+//      one: "lullaby", "heartbreak", "party") or two weaker words, or a weak word backed by a
+//      genre hint (metal, rock, punk -> Up; ambient, lofi, acoustic -> In). One weak word
+//      alone (a "Cocaine", a "Rock the boat") settles nothing.
+//   2. Otherwise unknown (null): the caller spreads unknowns over the moods that still have
+//      room, so no mood is starved.
+//   3. Tempo (Deezer's bpm, often 0 = unknown) is used only to sort old songs, a few lookups.
 // It is a starting point the person confirms, never a verdict.
-const KEYWORDS: Record<Slot, RegExp> = {
-  up: /\b(run|running|fire|power|jump|energy|wild|fight|champion|thunder|rise|stronger|adrenaline|rush|loud|go|victory|king|queen|rock|beast|hype)\b/i,
-  down: /\b(sad|cry|crying|tears?|goodbye|broken|lonely|blue|blues|rain|hurt|hurts|heartbreak|miss|missing|grief|sorrow|gone|lost|farewell|funeral|empty)\b/i,
-  out: /\b(party|dance|dancing|night|nights|club|tonight|friday|saturday|summer|friends?|drink|drinks|shots?|girls|boys|disco|celebrate|fun|weekend)\b/i,
-  in: /\b(home|cosy|cozy|sleep|sleeping|dream|dreams|coffee|lofi|chill|quiet|slow|morning|soft|lullaby|sunday|alone|gentle|calm|peace|blanket|tea)\b/i,
+type Words = { strong: RegExp; weak: RegExp; genre: RegExp };
+const WORDS: Record<Slot, Words> = {
+  up: {
+    strong: /\b(workout|adrenaline|champions?|anthem|stronger|victory|unstoppable|pump(ed)?|knockout|rampage|thunderstruck|run(ning)? (it|away|the))\b/i,
+    weak: /\b(run|running|fire|power|jump|energy|wild|fight|fighter|thunder|rise|rush|loud|go|king|queen|beast|hype|fast|louder|burn|blast|crazy|storm|war)\b/i,
+    genre: /\b(metal|metalcore|hardcore|punk|hard rock|thrash|rock|drill|trap|edm|techno|hardstyle|dubstep|drum and bass|dnb)\b/i,
+  },
+  down: {
+    strong: /\b(heartbreak(er)?|heartbroken|goodbye|farewell|funeral|grief|sorrow|tears?|crying|lonely|loneliness|broken[- ]hearted|breakup|depression|sad)\b/i,
+    weak: /\b(cry|blue|blues|rain|hurt|hurts|miss|missing|gone|lost|empty|alone|without you|over you|regret|sorry|ghost|dying|die|fall(ing)?|pain|lonesome|memories)\b/i,
+    genre: /\b(blues|ballad|sad|slowcore|torch|requiem|elegy|dirge|lament)\b/i,
+  },
+  out: {
+    strong: /\b(party|dance floor|dancing|club|tonight|friday|saturday night|weekend|disco|celebrate|celebration|good times|shots|summer(time)?|last night)\b/i,
+    weak: /\b(dance|night|nights|fun|friends?|drink|drinks|girls|boys|baby|move|body|groove|funk|fiesta|holiday|beach|sun|sunshine|good|feel)\b/i,
+    genre: /\b(disco|funk|house|dancehall|reggaeton|latin|salsa|pop|afrobeats?|soul|reggae|swing|samba|bossa)\b/i,
+  },
+  in: {
+    strong: /\b(lullaby|sleep(ing)?|bedroom|cosy|cozy|coffee|sunday morning|lofi|lo-fi|nightcap|bedtime|blanket|fireside|daydream)\b/i,
+    weak: /\b(home|dream|dreams|chill|quiet|slow|morning|soft|sunday|gentle|calm|peace|tea|rest|warm|tender|silence|moon|stars|window|sunrise|lazy)\b/i,
+    genre: /\b(ambient|lofi|lo-fi|acoustic|piano|instrumental|unplugged|chillout|chill|new age|folk|classical|sleep|meditation|bossa)\b/i,
+  },
 };
-// Keyword order matters when a title hits two (down and in first: they are the quieter ones).
+// Order matters when two moods tie (the quieter ones first).
 const KEY_ORDER: Slot[] = ["down", "in", "up", "out"];
 
 export function moodByBpm(bpm: number | null | undefined): Slot | null {
@@ -132,9 +151,22 @@ export function moodByBpm(bpm: number | null | undefined): Slot | null {
   return bpm >= 128 ? "up" : bpm >= 108 ? "out" : bpm >= 88 ? "in" : "down";
 }
 
-export function moodByTitle(title: string): Slot | null {
-  for (const s of KEY_ORDER) if (KEYWORDS[s].test(title)) return s;
-  return null;
+// A mood for the words, or null when no mood has enough behind it. `extra` is album
+// title and artist name: genre hints and words there count, but only as backing.
+export function moodByTitle(title: string, extra = ""): Slot | null {
+  let best: Slot | null = null;
+  let top = 0;
+  for (const s of KEY_ORDER) {
+    const w = WORDS[s];
+    const strong = w.strong.test(title) ? 1 : 0;
+    const weak = w.weak.test(title) ? 1 : 0;
+    const genre = w.genre.test(title) || w.genre.test(extra) ? 1 : 0;
+    const score = strong * 3 + weak * 1 + genre * 1;
+    // Enough: a strong word; or a weak word plus a genre hint. A lone weak word or a lone genre is not.
+    const enough = strong > 0 || (weak > 0 && genre > 0);
+    if (enough && score > top) { best = s; top = score; }
+  }
+  return best;
 }
 
 export function guessMood(title: string, bpm?: number | null): Slot | null {
@@ -168,18 +200,25 @@ export type Suggestion = Track;
 export type SuggestResult = {
   artists: string[];
   missing: string[];
+  // Artists with fewer than 3 clean songs of their own (the rest of what we found is from artists like them).
+  fewClean: string[];
   moods: Record<Slot, Suggestion[]>;
   spare: Record<Slot, Suggestion[]>;
 };
 
-// The most we ask Deezer for in one go: 3 artists, 3 related each. Parallel, and
-// the whole thing stops waiting after BUDGET_MS; whatever arrived is used.
-const BUDGET_MS = 7000;
-const TOP_LIMIT = 25;
-const RELATED_PER_ARTIST = 3;
-const RELATED_TOP = 8;
-const BPM_LOOKUPS = 20;
-const SPARE_PER_MOOD = 3;
+// What one starter costs Deezer: per artist 1 search, 1 top list (50), 1 related list and
+// the top list of its first related artist = 4, so 12 for three artists, all of it cached
+// for 10 minutes. Only when the first pass leaves too few songs does it look at more related
+// artists (a thin or mostly explicit catalogue: Drake has 4 clean songs in his top 25).
+// Parallel, and the whole thing stops waiting after BUDGET_MS; whatever arrived is used.
+const BUDGET_MS = 10_000;
+const TOP_LIMIT = 50;
+const RELATED_LIST = 10;
+const RELATED_TOP = 25;
+const ENOUGH = 14; // clean songs in the pool at which a first pass is not thin
+const MORE_RELATED = 4; // extra related artists looked at when thin
+const BPM_LOOKUPS = 6; // legacy sort only
+const SPARE_PER_MOOD = 6;
 
 // Resolves with `fallback` when the budget runs out; a Deezer busy error is not swallowed.
 function within<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -189,42 +228,70 @@ function within<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
   });
 }
 
-// DeezerBusy anywhere means the quota is gone: say so. Any other failure on one
-// branch just loses that branch.
-async function soft<T>(p: Promise<T>, fallback: T): Promise<T> {
-  try { return await p; } catch (e) { if (e instanceof DeezerBusy) throw e; return fallback; }
+// Deezer's own quota anywhere means the quota is gone: say so. When it was our own queue that
+// held a call back, or any other failure, just that branch is lost (and noted, so a result
+// with nothing in it can say "busy" rather than "nothing found").
+type Soft = { held: boolean };
+async function soft<T>(p: Promise<T>, fallback: T, note?: Soft): Promise<T> {
+  try { return await p; } catch (e) {
+    if (e instanceof DeezerQueued) { if (note) note.held = true; return fallback; }
+    if (e instanceof DeezerBusy) throw e;
+    return fallback;
+  }
 }
 
 export async function suggestFromArtists(names: string[], skip: Set<number>, only?: Slot[]): Promise<SuggestResult> {
   const until = Date.now() + BUDGET_MS;
   const left = () => until - Date.now();
-  const found = await within(Promise.all(names.map((n) => soft(findArtist(n, left()), null))), left(), names.map(() => null));
-  const artists = found.filter((a): a is { id: number; name: string } => !!a);
+  const note: Soft = { held: false };
+  const found = await within(Promise.all(names.map((n) => soft(findArtist(n, left()), null, note))), left(), names.map(() => null));
+  const artists = found.filter((a): a is Artist => !!a);
   const missing = names.filter((_, i) => !found[i]);
+  if (!artists.length && note.held) throw new DeezerBusy("Deezer calls are queued.");
 
-  // Each artist's own top tracks, and the top tracks of a few related artists.
+  // Each artist's own top tracks, and the top tracks of its closest related artist.
   type Cand = { t: Track; src: number };
-  const pools: Cand[][] = await within(
+  const own: Track[][] = artists.map(() => []);
+  const theirs: Track[][] = artists.map(() => []);
+  const related: Artist[][] = artists.map(() => []);
+  await within(
     Promise.all(
       artists.map(async (a, i) => {
-        const own = soft(artistTop(a.id, TOP_LIMIT, left()), [] as Track[]);
-        const rel = soft(relatedArtists(a.id, RELATED_PER_ARTIST, left()), []).then((rs) =>
-          Promise.all(rs.map((r) => soft(artistTop(r.id, RELATED_TOP, left()), [] as Track[]))),
-        );
-        const [mine, theirs] = await Promise.all([own, rel]);
-        // Own songs first, then related ones, interleaved so neither floods a mood.
-        const flat = theirs.flat();
-        const merged: Track[] = [];
-        for (let k = 0; k < Math.max(mine.length, flat.length); k++) {
-          if (mine[k]) merged.push(mine[k]);
-          if (flat[k]) merged.push(flat[k]);
-        }
-        return merged.map((t) => ({ t, src: i }));
+        const mine = soft(artistTop(a.id, TOP_LIMIT, left()), [] as Track[], note).then((r) => { own[i] = r; });
+        const rel = soft(relatedArtists(a.id, RELATED_LIST, left()), [] as Artist[], note).then(async (rs) => {
+          related[i] = rs;
+          if (rs[0]) theirs[i] = await soft(artistTop(rs[0].id, RELATED_TOP, left()), [] as Track[], note);
+        });
+        await Promise.all([mine, rel]);
       }),
     ),
     left(),
-    [] as Cand[][],
+    [],
   );
+  // Thin (a mostly explicit catalogue): look at more related artists, a few in all, round robin.
+  const count = () => own.reduce((n, o, i) => n + o.length + theirs[i].length, 0);
+  if (count() < ENOUGH && left() > 1500 && artists.length < 3) {
+    const more: { i: number; r: Artist }[] = [];
+    const extra = Math.max(0, Math.min(MORE_RELATED, 12 - 4 * artists.length)); // keeps a starter near 12 calls
+    for (let k = 1; more.length < MORE_RELATED && related.some((rs) => k < rs.length); k++) {
+      related.forEach((rs, i) => { if (rs[k] && more.length < extra) more.push({ i, r: rs[k] }); });
+    }
+    await within(
+      Promise.all(more.map(async ({ i, r }) => { theirs[i] = theirs[i].concat(await soft(artistTop(r.id, RELATED_TOP, left()), [] as Track[], note)); })),
+      left(),
+      [],
+    );
+  }
+  const fewClean = artists.filter((_, i) => own[i].length < PER_SLOT).map((a) => a.name);
+  const pools: Cand[][] = artists.map((_, i) => {
+    // Own songs first, then related ones, interleaved so neither floods a mood.
+    const merged: Track[] = [];
+    for (let k = 0; k < Math.max(own[i].length, theirs[i].length); k++) {
+      if (own[i][k]) merged.push(own[i][k]);
+      if (theirs[i][k]) merged.push(theirs[i][k]);
+    }
+    return merged.map((t) => ({ t, src: i }));
+  });
 
   // Interleave the artists, dedupe, drop what they already have.
   // Also dedupe the same song in another edition ("Tears in Heaven" and its live cut).
@@ -238,23 +305,11 @@ export async function suggestFromArtists(names: string[], skip: Set<number>, onl
       if (c && !seen.has(c.t.id) && !songs.has(songKey(c.t))) { seen.add(c.t.id); songs.add(songKey(c.t)); pool.push(c); }
     }
   }
+  if (!pool.length && note.held) throw new DeezerBusy("Deezer calls are queued.");
 
-  // Mood: title keywords first; for the rest, BPM for a limited number of lookups.
+  // Mood: words only (no tempo lookups: they were most of the cost).
   const guess = new Map<number, Slot | null>();
-  const unknown: Cand[] = [];
-  for (const c of pool) {
-    const g = moodByTitle(c.t.title);
-    guess.set(c.t.id, g);
-    if (!g) unknown.push(c);
-  }
-  const lookups = unknown.slice(0, BPM_LOOKUPS);
-  if (lookups.length && left() > 300) {
-    await within(
-      Promise.all(lookups.map((c) => soft(trackBpm(c.t.id, left()), null).then((b) => guess.set(c.t.id, moodByBpm(b))))),
-      left(),
-      [],
-    );
-  }
+  for (const c of pool) guess.set(c.t.id, moodByTitle(c.t.title, `${c.t.album ?? ""} ${c.t.artist}`));
 
   const moods = Object.fromEntries(SLOTS.map((s) => [s, [] as Track[]])) as Record<Slot, Track[]>;
   const spare = Object.fromEntries(SLOTS.map((s) => [s, [] as Track[]])) as Record<Slot, Track[]>;
@@ -274,7 +329,7 @@ export async function suggestFromArtists(names: string[], skip: Set<number>, onl
   for (const s of want) take(s, moods[s], PER_SLOT, () => true);
   for (const s of want) take(s, spare[s], SPARE_PER_MOOD, (c) => guess.get(c.t.id) === s || !guess.get(c.t.id));
   for (const s of want) take(s, spare[s], SPARE_PER_MOOD, () => true);
-  return { artists: artists.map((a) => a.name), missing, moods, spare };
+  return { artists: artists.map((a) => a.name), missing, fewClean, moods, spare };
 }
 
 // Old songs (no slot) with a suggested mood each, using the same guess plus
@@ -285,7 +340,7 @@ export async function legacySuggestions(personId: string): Promise<{ id: number;
   const need = loose.filter((t) => !moodByTitle(t.title)).slice(0, BPM_LOOKUPS);
   if (need.length) {
     await within(
-      Promise.all(need.map((t) => soft(trackBpm(t.id, 4000), null).then((b) => bpm.set(t.id, b)))),
+      Promise.all(need.map((t) => soft(trackBpm(t.id, 4000, "background"), null).then((b) => bpm.set(t.id, b)))),
       4500,
       [],
     ).catch(() => []);

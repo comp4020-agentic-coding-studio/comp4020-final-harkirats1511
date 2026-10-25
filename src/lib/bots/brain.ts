@@ -22,6 +22,7 @@ export type Pub = {
   members: { name: string; crate?: { trackId: number; title?: string; slot: Slot | null }[] }[];
   game?: {
     phase?: string;
+    deadline?: number | null;
     tally?: { name: string }[];
     cards?: { picker: string; lender?: string; trackId: number; title?: string; artist?: string }[];
   };

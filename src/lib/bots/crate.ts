@@ -5,6 +5,7 @@
 // stuck without one. Preview-less and explicit songs are skipped, as for people.
 import { addTaste, crateComplete, listTaste } from "../taste.ts";
 import { SLOTS, type Slot } from "../prompts.ts";
+import { searchClean } from "../deezer.ts";
 import { log } from "../log.ts";
 import { GENRES } from "./names.ts";
 import { SEED_CRATES } from "./seed.ts";
@@ -24,16 +25,14 @@ const budgetLeft = () => {
 
 type Hit = { id: number; title: string; artist: string; cover?: string };
 
+// Through the server's one Deezer bucket, at the lowest priority: a bot's crate waits (or gives
+// up, and the seed crate is used) rather than take a slot a person or a game needs. The same
+// clean filter as for people: a preview, neither explicit flag, no slur.
 async function search(q: string): Promise<Hit[]> {
   const run = async () => {
     calls.push(Date.now());
     try {
-      const res = await fetch(`https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=50`, { signal: AbortSignal.timeout(6000) });
-      const body = (await res.json()) as { error?: unknown; data?: { id: number; title: string; preview?: string; explicit_lyrics?: boolean; artist?: { name?: string }; album?: { cover_medium?: string } }[] };
-      if (body.error || !Array.isArray(body.data)) return [];
-      return body.data
-        .filter((r) => r.preview && !r.explicit_lyrics && r.title && r.artist?.name)
-        .map((r) => ({ id: r.id, title: r.title, artist: r.artist!.name!, cover: r.album?.cover_medium }));
+      return (await searchClean(q, 50)).map((t) => ({ id: t.id, title: t.title, artist: t.artist, cover: t.cover }));
     } catch {
       return [];
     } finally {

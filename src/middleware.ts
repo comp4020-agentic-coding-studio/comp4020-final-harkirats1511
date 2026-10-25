@@ -1,6 +1,6 @@
 import { defineMiddleware } from "astro:middleware";
 import { resumeGames } from "./lib/game.ts";
-import { resumeBots } from "./lib/bots/driver.ts";
+import { resumeBots } from "./lib/bots/seats.ts";
 
 // Astro loads this on the server's first request, before handling it: re-arm
 // the timer of every game that was mid-phase when the process last stopped, and

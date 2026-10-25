@@ -53,6 +53,14 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           <button id="copy-code" type="button" class="secondary sm">Copy code</button>
           <p class="hint" id="copy-msg" role="status"></p>
         </div>
+        <div class="setup" id="setup-lobby" hidden>
+          <div class="mole-ctl" id="moles-lobby"></div>
+          <div class="bot-ctl">
+            <button id="add-bot" type="button" class="secondary">Add a bot</button>
+            <p class="hint" id="bot-note">Bots fill empty seats. They play by the same rules and are always labelled BOT.</p>
+          </div>
+          <p class="hint" id="bot-msg" role="status"></p>
+        </div>
         <p class="status" id="status" hidden>
           <span class="status-label" id="status-label"></span>
           <span class="countdown" id="countdown" role="timer" aria-live="off"></span>
@@ -76,14 +84,6 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           </fieldset>
           <p class="hint">Everyone brings a crate of {MIN_CRATE} songs: {PER_SLOT} each for Up, Down, Out and In. Once the game starts the crates sit on the table for all to see.</p>
           <p class="hint"><a href="/me">Change your character</a></p>
-          <div class="setup" id="setup-lobby" hidden>
-            <div class="mole-ctl" id="moles-lobby"></div>
-            <div class="bot-ctl">
-              <button id="add-bot" type="button" class="secondary">Add a bot</button>
-              <p class="hint" id="bot-note">Bots fill empty seats. They play by the same rules and are always labelled BOT.</p>
-            </div>
-            <p class="hint" id="bot-msg" role="status"></p>
-          </div>
           <p class="mole-line-lobby hint" id="moles-guest" hidden></p>
           <p class="waiting" id="waiting" role="status" hidden></p>
           <a class="btn full holdup" id="crate-me" href={`/taste?next=/t/${code}`} hidden>Finish your crate</a>

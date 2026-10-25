@@ -37,7 +37,7 @@ if (me && safeNext) return Astro.redirect(safeNext);
   <div class="home">
     <div class="home-side">
       <h1 class="sign"><span class="sr-only">Mole Records</span><span class="big" aria-hidden="true">M<span class="disc-o"></span>LE</span><span class="small" aria-hidden="true">RECORDS</span></h1>
-      <p class="hours">Open late <b>tonight</b><br />A party game for friends in one room</p>
+      <p class="hours">Open late <b>tonight</b><br />Online, with friends or strangers. Bots fill the empty seats.</p>
       <p class="pitch">Everyone brings a crate of 12. One of you is the mole and only knows the mood.</p>
       <p class="enter-shop"><a class="btn ghost" href="/shop">Enter the shop</a></p>
     </div>
@@ -47,7 +47,7 @@ if (me && safeNext) return Astro.redirect(safeNext);
       <p class="who"><span id="who-badge" class="avatar" aria-hidden="true" data-avatar={JSON.stringify(mine)}></span><span>Signed in as <strong>{me.name}</strong>.</span></p>
       <section class="card" aria-labelledby="create-h">
         <h2 id="create-h">Start a table</h2>
-        <p class="hint">You get a code to share with the room.</p>
+        <p class="hint">You get a code to share, or fill the seats with bots.</p>
         <fieldset class="who-sits">
           <legend>Who can sit down?</legend>
           <div class="check">
@@ -196,8 +196,9 @@ if (me && safeNext) return Astro.redirect(safeNext);
       syncAuto();
     });
   }
+  // These exist only when signed in.
   for (const id of ["pick-s", "slot-s", "vote-s"]) {
-    sel(id).addEventListener("change", () => {
+    sel(id)?.addEventListener("change", () => {
       const hit = paces.find((r) => r.dataset.pick === sel("pick-s").value && r.dataset.slot === sel("slot-s").value && r.dataset.vote === sel("vote-s").value);
       for (const r of paces) r.checked = r === hit;
     });

@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 import { json, personFromCookies } from "../../../../lib/auth.ts";
-import { addBot } from "../../../../lib/bots/driver.ts";
+import { addBot } from "../../../../lib/bots/seats.ts";
 import { refused, tableScope, tag } from "../../../../lib/log.ts";
 import { isHost, normaliseCode, publicState, tableExists } from "../../../../lib/tables.ts";
 

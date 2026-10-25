@@ -59,7 +59,7 @@ it("lets the host add and remove bots, labelled as bots; a guest can't", async (
   expect(added.host).toBe(host.name);
   // Nobody can sign in as a bot, and a person can't take its name.
   const sneak = session();
-  expect((await sneak.call("/api/join", { body: { name: bots[0].name, pin: "1357" } })).status).toBe(403);
+  expect([400, 403]).toContain((await sneak.call("/api/join", { body: { name: bots[0].name, pin: "1357" } })).status);
   expect((await host.s.call(at(code, "bots/remove"), { body: { name: "nobody" } })).status).toBe(404);
   expect((await host.s.call(at(code, "bots/remove"), { body: { name: guest.name } })).status).toBe(404);
   const gone = (await (await host.s.call(at(code, "bots/remove"), { body: { name: bots[0].name } })).json()) as State;
@@ -240,3 +240,67 @@ it("a bot game with 1 human and 3 bots runs to game over by itself, then a remat
   expect((await state(host.s, code)).members).toHaveLength(0);
 
 }, 400_000);
+
+// Contract: a person can't be named like a bot (400 with a reason), whatever the case or the spacing.
+it("refuses names that start with bot- (or flatten to it), and the same for sign-in", async () => {
+  for (const name of ["bot-zed", "BOT-zed", "Bot-Zq", "bot_zed", "bot zed", "bot . zed", "\uFF42ot-zed", "b\u200Bot-zed", "bót-zed"]) {
+    const res = await session().call("/api/join", { body: { name, pin: "1357" } });
+    expect(res.status, name).toBe(400);
+    expect(((await res.json()) as { error: string }).error, name).toMatch(/bot-/);
+  }
+  // Ordinary names that merely contain or start like it are fine.
+  for (const name of ["robot-" + uniqueName("x"), uniqueName("bottle"), uniqueName("bo-t")]) {
+    expect((await session().call("/api/join", { body: { name, pin: "1357" } })).status, name).toBe(200);
+  }
+});
+
+// Contract: bot names are unique per table, not across the server, so many tables can all have bots.
+// A host's bots are capped across their tables (14), with a clear message.
+it("gives every table its own bots: 8 hosts fill 6 seats each (48 bots, more than there are names); a host is capped at 14", async () => {
+  const hosts = await Promise.all(Array.from({ length: 8 }, (_, i) => human(`bt${i}`)));
+  const tablesMade: { h: (typeof hosts)[number]; code: string }[] = [];
+  for (const h of hosts) {
+    const code = await newTable(h);
+    tablesMade.push({ h, code });
+    for (let i = 0; i < 6; i++) {
+      const res = await h.s.call(at(code, "bots"), { body: {} });
+      expect(res.status, `${h.name} bot ${i + 1}`).toBe(201);
+    }
+  }
+  for (const { h, code } of tablesMade) {
+    const st = await state(h.s, code);
+    const bots = st.members.filter((m) => m.bot).map((m) => m.name);
+    expect(bots).toHaveLength(6);
+    expect(new Set(bots.map((n) => n.toLowerCase())).size, "unique at the table").toBe(6);
+    expect(bots.every((n) => /^bot-/.test(n))).toBe(true);
+  }
+  // One account, three tables: 7 + 7 bots, then the cap speaks.
+  const solo = hosts[0];
+  const [t2, t3] = [await newTable(solo), await newTable(solo)];
+  // Table 1 already has 6: one more makes 7, table 2 takes 7 (14 in all).
+  const first = tablesMade[0].code;
+  expect((await solo.s.call(at(first, "bots"), { body: {} })).status).toBe(201);
+  for (let i = 0; i < 7; i++) expect((await solo.s.call(at(t2, "bots"), { body: {} })).status).toBe(201);
+  const capped = await solo.s.call(at(t3, "bots"), { body: {} });
+  expect(capped.status).toBe(409);
+  expect(((await capped.json()) as { error: string }).error).toMatch(/14 bots/);
+  // Another host is not held up by it.
+  expect((await hosts[1].s.call(at(tablesMade[1].code, "bots"), { body: {} })).status).toBe(201);
+  // Everyone leaves: the bots go with them, so the next host can have them.
+  for (const { h, code } of tablesMade) await h.s.call(at(code, "leave"), { body: {} });
+  await solo.s.call(at(t2, "leave"), { body: {} });
+  const after = await state(solo.s, t2);
+  expect(after.members).toHaveLength(0);
+});
+
+it("host leaving mid-game ends the game and takes the bots with them", async () => {
+  const host = await human("bhl");
+  await fillCrate(host.s, 5);
+  const code = await newTable(host, { pace: "quick" });
+  await addBots(host, code, 2);
+  expect((await host.s.call(at(code, "start"), { body: {} })).status).toBeLessThan(300);
+  await until(host.s, code, (s) => s.game?.phase === "pick");
+  await host.s.call(at(code, "leave"), { body: {} });
+  const st = await state(host.s, code);
+  expect(st.members).toHaveLength(0);
+});

@@ -23,7 +23,7 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
     ? <p class="hint welcome">Build a crate of 12 songs, 3 for each mood. It's what you play from.</p>
     : <p class="hint">12 songs you would actually play: 3 in each of four moods. Every pick you make comes from here, and the table sees it all.</p>}
 
-  <section class="progress sticky-progress" aria-label="Crate progress">
+  <section class="progress sticky-progress" id="progress" tabindex="-1" aria-label="Crate progress">
     <p class="line"><span class="count mono" id="count" aria-live="off"></span><span class="need" id="need"></span></p>
     <button type="button" id="keep-all" class="sm" hidden>Keep all suggestions</button>
     <div class="done" id="done" hidden>
@@ -75,6 +75,7 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
       <section class="slot" id={`slot-${s.slot}`} data-slot={s.slot} aria-labelledby={`slot-${s.slot}-h`}>
         <div class="tab"><h2 id={`slot-${s.slot}-h`}>{s.name}</h2><span class="tab-hint">{s.hint}</span><span class="tab-n mono" data-n></span></div>
         <ul class="bin" data-bin></ul>
+        <p class="hint slot-note" data-note role="status"></p>
       </section>
     ))}
   </div>
@@ -149,6 +150,9 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
   .sleeve .acts button.swap { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--ink-2); }
   .sleeve .acts button.sortit { background: var(--lamp); color: var(--ink); flex: 1 1 auto; }
   .starter form, .sortold form { margin: 0; }
+  .slot-note { margin: 0.3rem 0 0; min-height: 0; }
+  .slot-note:empty { display: none; }
+  .sticky-progress:focus-visible { outline-offset: -3px; }
   #keep-all { margin: 0.35rem 0 0; min-height: 44px; }
   .sortold .bin { margin-top: 0.8rem; }
   .sleeve .chips { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.35rem; }
@@ -230,9 +234,11 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
   function suggestedSleeve(t, slot) {
     const keep = el("button", { type: "button", textContent: "Keep", disabled: locked });
     keep.setAttribute("aria-label", `Keep ${t.title} by ${t.artist} in ${names[slot]}`);
+    keep.dataset.fk = `keep:${slot}:${t.id}`;
     keep.addEventListener("click", () => keepOne(t, slot));
     const swap = el("button", { type: "button", className: "swap", textContent: "Swap", disabled: locked });
     swap.setAttribute("aria-label", `Swap ${t.title} for another ${names[slot]} suggestion`);
+    swap.dataset.fk = `swap:${slot}:${t.id}`;
     swap.addEventListener("click", () => swapOne(t, slot));
     return el("li", { className: "sleeve suggested" }, cover(t), meta(t),
       el("div", { className: "acts" }, el("span", { className: "tag", textContent: "Suggested" }), playBtn(t), keep, swap));
@@ -323,9 +329,13 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
   }
 
   // Any edit can come back 409 because a game began: then say so and lock the page.
-  function failed(res, data, fallback) {
+  // The message goes next to the control that caused it (a mood's note, else the search status), and #msg at the top too.
+  const slotNote = (slot, t) => { const n = document.querySelector(`#slot-${slot} [data-note]`); if (n) n.textContent = t; };
+  function failed(res, data, fallback, slot) {
     if (res.status === 409 && /locked/i.test(data?.error ?? "")) { locked = true; render(); }
-    say(data?.error ?? fallback);
+    const text = data?.error ?? fallback;
+    if (slot) slotNote(slot, text); else say(text);
+    if (slot) say(text);
   }
 
   // Tapping an empty box: search takes focus, "adding to" is set (and cancellable),
@@ -358,7 +368,8 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
   async function add(id, slot) {
     say("");
     const { res, data } = await apiRetry("/api/taste", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ trackId: id, slot }) });
-    if (!res.ok) return failed(res, data, "Could not add that song.");
+    slotNote(slot, "");
+    if (!res.ok) return failed(res, data, "Could not add that song.", slot);
     taste = data;
     announce(slot);
     render();
@@ -367,14 +378,27 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
     const full = room(slot) <= 0;
     statusEl.textContent = `Added to ${names[slot]}, ${sortedN()} of ${max}.` + (full ? ` ${names[slot]} is full.` : "");
   }
+  // Where focus goes once a suggested sleeve is kept: the next suggested Keep in that mood,
+  // else the mood's first empty box, else the next empty box anywhere, else the progress bar.
+  function focusAfterKeep(slot, at) {
+    const keeps = [...document.querySelectorAll(`#slot-${slot} [data-fk^="keep:"]`)];
+    const next = keeps[Math.min(at, keeps.length - 1)]
+      ?? document.querySelector(`[data-fk="empty:${slot}"]`)
+      ?? document.querySelector('[data-fk^="empty:"]')
+      ?? $("progress");
+    next.focus();
+  }
   async function keepOne(t, slot) {
     say("");
+    slotNote(slot, "");
     const { res, data } = await apiRetry("/api/taste", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ trackId: t.id, slot }) });
-    if (!res.ok) return failed(res, data, "Could not add that song.");
+    if (!res.ok) { failed(res, data, "Could not add that song.", slot); render(); return document.querySelector(`[data-fk="keep:${slot}:${t.id}"]`)?.focus(); }
     taste = data;
+    const at = Math.max(0, [...document.querySelectorAll(`#slot-${slot} [data-fk^="keep:"]`)].findIndex((b) => b.dataset.fk === `keep:${slot}:${t.id}`));
     sugg[slot] = sugg[slot].filter((x) => x.id !== t.id);
     announce(slot);
     render();
+    focusAfterKeep(slot, at);
   }
   async function keepAll() {
     say("");
@@ -383,7 +407,7 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
       for (const t of [...sugg[s.slot]]) {
         if (taste.some((x) => x.id === t.id) || room(s.slot) <= 0) continue;
         const { res, data } = await apiRetry("/api/taste", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ trackId: t.id, slot: s.slot }) });
-        if (!res.ok) { failed(res, data, "Could not add that song."); render(); return; }
+        if (!res.ok) { failed(res, data, "Could not add that song.", s.slot); render(); return; }
         taste = data;
         kept++;
         sugg[s.slot] = sugg[s.slot].filter((x) => x.id !== t.id);
@@ -391,20 +415,30 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
     }
     $("starter-status").textContent = `Kept ${kept} songs. ${sortedN()} of ${max}.`;
     render();
+    $("progress").focus();
   }
   $("keep-all").addEventListener("click", keepAll);
 
+  // Songs already shown in a mood this visit (kept, swapped out or in): Swap never brings one back
+  // until the spares run out.
+  const shown = { up: new Set(), down: new Set(), out: new Set(), in: new Set() };
   function swapOne(t, slot) {
-    const next = spare[slot].find((x) => !taste.some((y) => y.id === x.id) && !Object.values(sugg).flat().some((y) => y.id === x.id));
+    shown[slot].add(t.id);
+    const next = spare[slot].find((x) => !shown[slot].has(x.id) && !taste.some((y) => y.id === x.id) && !Object.values(sugg).flat().some((y) => y.id === x.id));
     if (!next) {
-      statusEl.textContent = `No more suggestions for ${names[slot]}. Tap an empty box to search for one.`;
+      slotNote(slot, `No more suggestions for ${names[slot]}. Tap an empty box to search for one.`);
+      statusEl.textContent = `No more suggestions for ${names[slot]}.`;
+      document.querySelector(`[data-fk="swap:${slot}:${t.id}"]`)?.focus();
       return;
     }
-    spare[slot] = spare[slot].filter((x) => x.id !== next.id).concat(t);
+    slotNote(slot, "");
+    shown[slot].add(next.id);
+    spare[slot] = spare[slot].filter((x) => x.id !== next.id);
     sugg[slot] = sugg[slot].map((x) => (x.id === t.id ? next : x));
     statusEl.textContent = `Swapped for ${next.title} by ${next.artist}.`;
     render();
-    document.querySelector(`#slot-${slot} .suggested .swap`)?.focus();
+    // The new sleeve sits in the same place: focus its Swap.
+    document.querySelector(`[data-fk="swap:${slot}:${next.id}"]`)?.focus();
   }
 
   $("starter-form").addEventListener("submit", async (e) => {
@@ -414,14 +448,26 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
     if (!artists.length) return;
     st.textContent = "Looking through their records...";
     $("starter-go").disabled = true;
-    const { res, data } = await apiRetry("/api/taste/suggest", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ artists }) });
+    // No automatic retry: Deezer is shared by every table, and asking again at once only makes it busier.
+    const { res, data } = await api("/api/taste/suggest", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ artists }) });
     $("starter-go").disabled = false;
-    if (!res.ok) { st.textContent = ""; return say(res.status === 429 ? "One moment, then try again." : (data?.error ?? "Could not get suggestions.")); }
+    if (!res.ok) {
+      st.textContent = res.status === 429 ? "One moment, then try again."
+        : res.status === 503 ? "Deezer is busy, try again in a moment."
+        : (data?.error ?? "Could not get suggestions.");
+      say("");
+      return;
+    }
     sugg = data.moods;
     spare = data.spare;
+    for (const k of Object.keys(shown)) { shown[k] = new Set(sugg[k].map((x) => x.id)); }
     const total = Object.values(sugg).flat().length;
     const miss = data.missing?.length ? ` Not found: ${data.missing.join(", ")}.` : "";
-    st.textContent = total ? `${total} suggestions, in the moods below. Keep what you like, Swap the rest.${miss}` : `Nothing to suggest from those.${miss}`;
+    const few = data.fewClean ?? [];
+    st.textContent = !total
+      ? (few.length ? `We couldn't find clean songs for ${few.join(" or ")}. Try another artist or search below.` : "Nothing to suggest from those.") + miss
+      : `${total} suggestions, in the moods below. Keep what you like, Swap the rest.` +
+        (few.length ? ` ${few.join(" and ")} ${few.length === 1 ? "has" : "have"} few clean songs, so some come from artists like ${few.length === 1 ? "them" : "those"}.` : "") + miss;
     render();
     if (total) $("slot-up").scrollIntoView({ block: "start", behavior: "auto" });
   });
@@ -483,7 +529,7 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
     say("");
     statusEl.textContent = "Searching...";
     const { res, data } = await apiRetry(`/api/search?q=${encodeURIComponent($("q").value.trim())}`);
-    if (!res.ok) { statusEl.textContent = ""; return say(data?.error ?? "Search failed."); }
+    if (!res.ok) { statusEl.textContent = data?.error ?? "Search failed."; return say(""); }
     found = data;
     const how = adding ? `Tap Add to ${names[adding]} on a song.` : "Pick a mood on a song to add it.";
     statusEl.textContent = found.length ? `${found.length} results. ${how}` : "No results.";

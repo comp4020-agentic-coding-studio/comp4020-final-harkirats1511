@@ -39,7 +39,7 @@ async function handle(cookies: Parameters<APIRoute>[0]["cookies"], raw: unknown,
     if (e instanceof DeezerDown) logDeezer("suggest", e);
     // Deezer's quota says nothing about this person: let them ask again at once.
     if (e instanceof DeezerDown) last.delete(me.id);
-    if (e instanceof DeezerBusy) return json({ error: DEEZER_BUSY }, 503);
+    if (e instanceof DeezerBusy) return json({ error: DEEZER_BUSY }, 503, { "retry-after": "5" });
     if (e instanceof DeezerDown) return json({ error: "Music search is unavailable right now." }, 502);
     throw e;
   }
