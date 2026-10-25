@@ -59,6 +59,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
         </p>
 
         <p class="watch-line" id="watch-line" hidden></p>
+        <p class="watch-line late" id="late" hidden>The next game starts after this one. <a id="late-link" href={`/taste?next=/t/${code}`} hidden>Fill your crate now</a></p>
 
         <div id="v-lobby">
           <fieldset class="who-sits" id="vis-host" hidden>
@@ -75,7 +76,17 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           </fieldset>
           <p class="hint">Everyone brings a crate of {MIN_CRATE} songs: {PER_SLOT} each for Up, Down, Out and In. Once the game starts the crates sit on the table for all to see.</p>
           <p class="hint"><a href="/me">Change your character</a></p>
-          <p class="nudge" id="crate-me" hidden><a id="crate-me-link" href={`/taste?next=/t/${code}`}>Fill your crate</a></p>
+          <div class="setup" id="setup-lobby" hidden>
+            <div class="mole-ctl" id="moles-lobby"></div>
+            <div class="bot-ctl">
+              <button id="add-bot" type="button" class="secondary">Add a bot</button>
+              <p class="hint" id="bot-note">Bots fill empty seats. They play by the same rules and are always labelled BOT.</p>
+            </div>
+            <p class="hint" id="bot-msg" role="status"></p>
+          </div>
+          <p class="mole-line-lobby hint" id="moles-guest" hidden></p>
+          <p class="waiting" id="waiting" role="status" hidden></p>
+          <a class="btn full holdup" id="crate-me" href={`/taste?next=/t/${code}`} hidden>Finish your crate</a>
           <button id="start" type="button" class="full" disabled hidden>Start game</button>
           <p class="hint abandoned" id="abandoned" role="status" hidden></p>
           <p class="hint" id="start-note" aria-live="polite"></p>
@@ -196,6 +207,16 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
             </div>
           </div>
           <p class="mono next-in" id="next-in" hidden></p>
+          <div class="rematch" id="rematch" hidden>
+            <p class="in-count mono" id="in-count" role="status"></p>
+            <button id="im-in" type="button" class="full secondary" aria-pressed="false">I'm in</button>
+            <p><a id="swap" href={`/taste?next=/t/${code}`}>Swap a song before the next game</a></p>
+            <div class="setup" id="setup-over" hidden>
+              <div class="mole-ctl" id="moles-over"></div>
+              <button id="add-bot2" type="button" class="secondary sm">Add a bot</button>
+              <p class="hint" id="bot-msg2" role="status"></p>
+            </div>
+          </div>
           <button id="next" type="button" class="full" hidden>Next round</button>
           <button id="again" type="button" class="full" hidden>Play again</button>
           <p class="hint" id="reveal-wait" hidden></p>
@@ -320,8 +341,8 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     ending?: "final-vote" | "round-cap" | "nobody-picked";
     moles?: string[];
   };
-  type Member = { name: string; avatar: Avatar; crateReady: boolean; crate?: CrateTrack[] };
-  type State = { same?: string[]; status: string; private: boolean; host: string; members: Member[]; game?: Game };
+  type Member = { name: string; avatar: Avatar; crateReady: boolean; crateCount: number; bot?: true; in?: true; crate?: CrateTrack[] };
+  type State = { same?: string[]; status: string; private: boolean; host: string; moleChoice: number | null; members: Member[]; game?: Game };
   type Me = {
     role: "player" | "mole" | "ghost" | "spectator"; prompt?: string; slot?: Slot; picked?: boolean; borrowUsed?: boolean; played?: number[];
     vote?: { name: string } | { skip: true }; steal?: { options: { id: string; text: string }[] };
@@ -447,6 +468,10 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     const gone = state.status !== "playing" && g?.winner === "none";
     show("abandoned", gone);
     $("abandoned").textContent = gone ? (g!.ending === "nobody-picked" ? "Game abandoned: nobody picked. Your crates are open again." : "That game was left unfinished and has ended with no winner.") : "";
+    // Someone who sat down mid-game spectates: say when they play, and let them finish a short crate.
+    const spectating = playing && me?.role === "spectator";
+    show("late", spectating);
+    if (spectating) show("late-link", !(state.members.find((m) => m.name === myName)?.crateReady ?? true));
     renderCard(playing && (phase === "pick" || phase === "listen" || phase === "vote"), phase);
     renderPick(playing && phase === "pick");
     renderListen(playing && (phase === "listen" || phase === "vote"));
@@ -483,18 +508,25 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     const s = state!;
     const g = s.game;
     const inGame = s.status === "playing" && !!g;
-    once("members", JSON.stringify([s.members.map((m) => [m.name, m.avatar, m.crateReady]), s.host, inGame, g?.alive, g?.ghosts, isHost(), myCrate]), () => {
+    once("members", JSON.stringify([s.members.map((m) => [m.name, m.avatar, m.crateReady, m.crateCount, m.bot, m.in]), s.host, s.status, inGame, g?.alive, g?.ghosts, isHost(), myCrate]), () => {
       $("members").replaceChildren(
-        ...s.members.map(({ name, crateReady }) => {
+        ...s.members.map(({ name, crateReady, crateCount, bot, in: ready }) => {
           const stamps = h("span", { class: "stamps" });
           const stamp = (t: string, kind: string) => stamps.append(h("span", { class: `stamp ${kind}` }, t));
+          if (bot) stamp("BOT", "bot");
           if (name === s.host) stamp("Host", "host");
           const own = name === myName && myCrate !== null;
-          if (!inGame) stamp(crateReady ? "Crate ready" : own ? `Crate: ${myCrate}/${minCrate}` : "Crate: not ready", crateReady ? "crate ready" : "crate");
+          if (!inGame) stamp(crateReady ? "Crate ready" : `Crate: ${own ? myCrate : crateCount}/${minCrate}`, crateReady ? "crate ready" : "crate");
+          if (s.game?.winner && s.game.winner !== "none" && ready) stamp("In", "in");
           if (inGame && g!.ghosts.includes(name)) stamp("Out", "out");
           else if (inGame && !g!.alive.includes(name)) stamp("Watching", "watching");
           const li = h("li", {}, face(name), h("span", { class: "name" }, name), stamps);
-          if (isHost() && name !== myName) {
+          if (isHost() && bot && s.status !== "playing") {
+            // A bot goes at once: no one to confirm with, and the host can add another.
+            const rm = button("\u00d7", () => void removeBot(name), { secondary: true, aria: `Remove bot ${name}` });
+            rm.classList.add("sm", "rm", "rm-bot");
+            li.append(rm);
+          } else if (isHost() && name !== myName) {
             const rm = button("Remove", () => askRemove(name, rm), { secondary: true, aria: `Remove ${name} from the table` });
             rm.classList.add("sm", "rm");
             li.append(rm);
@@ -520,21 +552,93 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     show("start", isHost());
     start.textContent = s.game && s.game.winner !== "none" ? "Play again" : "Start game";
     delete start.dataset.conn;
-    const notReady = s.members.filter((m) => !m.crateReady).map((m) => m.name);
+    const notReady = s.members.filter((m) => !m.crateReady);
     start.disabled = n < minPlayers || notReady.length > 0;
-    const mineReady = s.members.find((m) => m.name === myName)?.crateReady ?? true;
+    const mine = s.members.find((m) => m.name === myName);
+    const mineReady = mine?.crateReady ?? true;
+    // Who the table is waiting on, by name and crate count: both public at the table, nothing private.
+    const lobby = s.status !== "playing" && !(s.game && s.game.winner && s.game.winner !== "none");
+    show("waiting", lobby && notReady.length > 0);
+    $("waiting").textContent = notReady.length
+      ? `Waiting on: ${notReady.map((m) => `${m.name} (crate ${m.name === myName && myCrate !== null ? myCrate : m.crateCount}/${minCrate})`).join(", ")}`
+      : "";
+    // Whoever is holding it up gets a way to finish.
     show("crate-me", !mineReady);
-    if (!mineReady) $("crate-me-link").textContent = `Fill your crate (${myCrate ?? 0}/${minCrate})`;
+    if (!mineReady) $("crate-me").textContent = `Finish your crate (${myCrate ?? mine?.crateCount ?? 0}/${minCrate})`;
     $("start-note").textContent = isHost()
       ? notReady.length
-        ? `Waiting on crates: ${notReady.join(", ")} (${minCrate} songs each).`
+        ? ""
         : n < minPlayers
         ? `Needs at least ${minPlayers} players to start (${minPlayers - n} more). 4 or more is best.`
         : n < 4
           ? "You can start now. 4 or more players is recommended."
           : "Everyone in? Start when ready."
       : "Waiting for the host to start.";
+    renderSetup(s);
   }
+
+  // The host's table setup: add a bot, and how many moles. Shown while no game is running.
+  const molesFor = (s: State) => {
+    const n = s.members.length;
+    const cap = Math.max(1, Math.floor(n / 3));
+    const shown = Math.min(s.moleChoice ?? (n <= 5 ? 1 : 2), cap);
+    return { n, cap, shown };
+  };
+  function drawMoles(el: HTMLElement, s: State) {
+    const { cap, shown } = molesFor(s);
+    el.replaceChildren(
+      h("span", { class: "k", id: `${el.id}-k` }, "Moles"),
+      h("span", { class: "seg", role: "radiogroup", "aria-labelledby": `${el.id}-k` },
+        ...[1, 2].map((v) => {
+          const b = button(String(v), () => void chooseMoles(v), { secondary: v !== shown, disabled: v > cap, key: `moles${v}` });
+          b.setAttribute("role", "radio");
+          b.setAttribute("aria-checked", String(v === shown));
+          b.setAttribute("aria-label", `${v} mole${v === 1 ? "" : "s"}`);
+          return b;
+        })),
+      h("span", { class: "hint" }, cap < 2 ? "2 moles need 6 players (never more than a third of the table)." : "Never more than a third of the table."),
+    );
+  }
+  function renderSetup(s: State) {
+    const lobby = s.status !== "playing" && !(s.game && s.game.winner && s.game.winner !== "none");
+    const over = !!s.game?.winner && s.game.winner !== "none" && s.status === "finished";
+    const host = isHost();
+    show("setup-lobby", host && lobby);
+    show("setup-over", host && over);
+    show("moles-guest", !host && lobby);
+    if (!host && lobby) {
+      const { shown } = molesFor(s);
+      $("moles-guest").textContent = `Moles: ${shown}`;
+    }
+    const full = s.members.length >= 8;
+    for (const id of ["add-bot", "add-bot2"]) {
+      const b = $<HTMLButtonElement>(id);
+      b.disabled = full;
+      b.dataset.full = full ? "1" : "";
+    }
+    $("bot-note").textContent = full ? "The table is full: 8 seats." : "Bots fill empty seats. They play by the same rules and are always labelled BOT.";
+    once("moles-ui", JSON.stringify([s.moleChoice, s.members.length, host && (lobby || over)]), () => {
+      if (host && lobby) drawMoles($("moles-lobby"), s);
+      if (host && over) drawMoles($("moles-over"), s);
+    });
+  }
+  async function chooseMoles(v: number) {
+    const { res, data } = await api(`/api/tables/${code}/moles`, { moles: v });
+    for (const id of ["bot-msg", "bot-msg2"]) $(id).textContent = res.ok ? "" : (data.error ?? "Could not change the moles.");
+    if (res.ok) onState(data as unknown as State);
+  }
+  async function addBot() {
+    const { res, data } = await api(`/api/tables/${code}/bots`, {});
+    for (const id of ["bot-msg", "bot-msg2"]) $(id).textContent = res.ok ? "" : (data.error ?? "Could not add a bot.");
+    if (res.ok) onState(data as unknown as State);
+  }
+  async function removeBot(name: string) {
+    const { res, data } = await api(`/api/tables/${code}/bots/remove`, { name });
+    for (const id of ["bot-msg", "bot-msg2"]) $(id).textContent = res.ok ? "" : (data.error ?? "Could not remove that bot.");
+    if (res.ok) { announce(`${name} was removed.`); onState(data as unknown as State); }
+  }
+  $("add-bot").addEventListener("click", () => void addBot());
+  $("add-bot2").addEventListener("click", () => void addBot());
 
   // Your card. A mole's comes from /me and holds the slot only: there is no other
   // source of a prompt in this page. Face down, a mole's card and a player's are the
@@ -1012,6 +1116,19 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     show("again", host && !!g.winner);
     delete $("again").dataset.conn;
     $<HTMLButtonElement>("again").disabled = state!.members.length < minPlayers;
+    // Rematch: "I'm in" is public and harmless; the host's button shows the count but isn't held by it.
+    const finished = !!g.winner && g.winner !== "none";
+    show("rematch", finished);
+    if (finished) {
+      const inN = state!.members.filter((m) => m.in).length;
+      const mineIn = !!state!.members.find((m) => m.name === myName)?.in;
+      $("in-count").textContent = `${inN} of ${state!.members.length} in`;
+      const b = $<HTMLButtonElement>("im-in");
+      b.textContent = mineIn ? "I'm in \u2713" : "I'm in";
+      b.setAttribute("aria-pressed", String(mineIn));
+      b.classList.toggle("secondary", !mineIn);
+      $("again").textContent = host ? `Play again (${inN} of ${state!.members.length} in)` : "Play again";
+    }
     show("see-games", !!g.winner);
     show("reveal-wait", !host);
     $("reveal-wait").textContent = g.winner ? "Waiting for the host to play again." : "Waiting for the host to start the next round.";
@@ -1119,6 +1236,12 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
   $("start").addEventListener("click", async () => {
     const { res, data } = await api(`/api/tables/${code}/start`, {});
     $("msg").textContent = res.ok ? "" : (data.error ?? "Could not start.");
+  });
+  $("im-in").addEventListener("click", async () => {
+    const want = $("im-in").getAttribute("aria-pressed") !== "true";
+    const { res, data } = await api(`/api/tables/${code}/rematch`, { in: want });
+    $("reveal-msg").textContent = res.ok ? "" : (data.error ?? "Could not say you're in.");
+    if (res.ok) onState(data as unknown as State);
   });
   $("again").addEventListener("click", async () => {
     const { res, data } = await api(`/api/tables/${code}/start`, {});
@@ -1476,7 +1599,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
   const conn = $("conn");
   // Anything that would fail while we can't reach the server. Buttons we turn off
   // are marked, so turning back on never touches one that was off for another reason.
-  const ACTIONS = "#start, #again, #next, #to-vote, #cards button, #pick-fit button, #pick-rest button, #borrow-panel button, #borrow-toggle, #vote-list button, #vote-skip-wrap button, #steal-options button";
+  const ACTIONS = "#start, #again, #im-in, #add-bot, #add-bot2, #moles-lobby button, #moles-over button, #next, #to-vote, #cards button, #pick-fit button, #pick-rest button, #borrow-panel button, #borrow-toggle, #vote-list button, #vote-skip-wrap button, #steal-options button";
   function syncActions() {
     const down = !connected || !navigator.onLine;
     for (const b of document.querySelectorAll<HTMLButtonElement>(ACTIONS)) {

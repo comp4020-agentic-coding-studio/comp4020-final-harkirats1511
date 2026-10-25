@@ -4,11 +4,17 @@ import { personFromCookies } from "../lib/auth.ts";
 import { crateLocked, listTaste, PER_SLOT, TASTE_MAX as MIN_CRATE } from "../lib/taste.ts";
 import { SLOTS, SLOT_NAMES } from "../lib/prompts.ts";
 import { getAvatar } from "../lib/avatars.ts";
-import { PICK_SECONDS, SECONDS_PER_TRACK, VOTE_SECONDS } from "../lib/tables.ts";
+import { PACES, PICK_SECONDS, SECONDS_PER_TRACK, VOTE_SECONDS } from "../lib/tables.ts";
 // Form defaults are the server constants, so the form and the plan agree.
 const PICK_OPTS = [30, 45, 60, 90];
 const VOTE_OPTS = [20, 30, 45];
 const TRACK_OPTS = [15, 20, 30];
+// The three paces; their numbers come from the server's own table, so the form can't drift from it.
+const PACE_CARDS = [
+  { key: "quick", name: "Quick", note: "Fast rounds, about 20 min" },
+  { key: "normal", name: "Normal", note: "The usual pace" },
+  { key: "chill", name: "Chill", note: "Time to think and talk" },
+] as const;
 const me = personFromCookies(Astro.cookies);
 const next = Astro.url.searchParams.get("next") ?? "";
 const safeNext = /^(\/t\/[A-Za-z]{4}|\/taste|\/me|\/shop)$/.test(next) ? next : "";
@@ -59,23 +65,37 @@ if (me && safeNext) return Astro.redirect(safeNext);
           <label for="autoplay">Play the tracks automatically</label>
         </div>
         <p class="hint" id="autoplay-hint">Each track plays for <span id="autoplay-n">{SECONDS_PER_TRACK}</span> seconds, then voting opens. The host can still pick a track.</p>
-        <div id="slot-wrap">
-          <label for="slot-s">Seconds per track</label>
-          <select id="slot-s">
-            {TRACK_OPTS.map((n) => <option value={n} selected={n === SECONDS_PER_TRACK}>{n} seconds</option>)}
-          </select>
-        </div>
-        <details class="options">
-          <summary>Table options</summary>
-          <label for="pick-s">Time to pick a song</label>
-          <select id="pick-s">
-            {PICK_OPTS.map((n) => <option value={n} selected={n === PICK_SECONDS}>{n} seconds</option>)}
-          </select>
-          <label for="vote-s">Time to vote</label>
-          <select id="vote-s">
-            {VOTE_OPTS.map((n) => <option value={n} selected={n === VOTE_SECONDS}>{n} seconds</option>)}
-          </select>
-        </details>
+        <fieldset class="pace">
+          <legend>How fast?</legend>
+          <div class="pace-row">
+            {PACE_CARDS.map((p) => (
+              <div class="pace-opt">
+                <input type="radio" name="pace" id={`pace-${p.key}`} value={p.key} checked={p.key === "normal"} data-pick={PACES[p.key].pickSeconds} data-slot={PACES[p.key].slotSeconds} data-vote={PACES[p.key].voteSeconds} />
+                <label for={`pace-${p.key}`}>
+                  <b>{p.name}</b>
+                  <span>{PACES[p.key].pickSeconds} s pick, {PACES[p.key].slotSeconds} s a track, {PACES[p.key].voteSeconds} s vote</span>
+                </label>
+              </div>
+            ))}
+          </div>
+          <details class="options" id="custom">
+            <summary>Custom</summary>
+            <div id="slot-wrap">
+              <label for="slot-s">Seconds per track</label>
+              <select id="slot-s">
+                {TRACK_OPTS.map((n) => <option value={n} selected={n === SECONDS_PER_TRACK}>{n} seconds</option>)}
+              </select>
+            </div>
+            <label for="pick-s">Time to pick a song</label>
+            <select id="pick-s">
+              {PICK_OPTS.map((n) => <option value={n} selected={n === PICK_SECONDS}>{n} seconds</option>)}
+            </select>
+            <label for="vote-s">Time to vote</label>
+            <select id="vote-s">
+              {VOTE_OPTS.map((n) => <option value={n} selected={n === VOTE_SECONDS}>{n} seconds</option>)}
+            </select>
+          </details>
+        </fieldset>
         <button id="create" type="button" class="full">Start a table</button>
       </section>
       <section class="card" aria-labelledby="join-h">
@@ -165,9 +185,28 @@ if (me && safeNext) return Astro.redirect(safeNext);
   slotSel?.addEventListener("change", syncAuto);
   if (auto) syncAuto();
 
+  // A pace fills the three selects; changing a select by hand leaves no pace chosen (it is custom).
+  const sel = (id: string) => document.getElementById(id) as HTMLSelectElement;
+  const paces = [...document.querySelectorAll<HTMLInputElement>('input[name="pace"]')];
+  for (const r of paces) {
+    r.addEventListener("change", () => {
+      sel("pick-s").value = r.dataset.pick!;
+      sel("slot-s").value = r.dataset.slot!;
+      sel("vote-s").value = r.dataset.vote!;
+      syncAuto();
+    });
+  }
+  for (const id of ["pick-s", "slot-s", "vote-s"]) {
+    sel(id).addEventListener("change", () => {
+      const hit = paces.find((r) => r.dataset.pick === sel("pick-s").value && r.dataset.slot === sel("slot-s").value && r.dataset.vote === sel("vote-s").value);
+      for (const r of paces) r.checked = r === hit;
+    });
+  }
+
   document.getElementById("create")?.addEventListener("click", async () => {
     const value = (id: string) => (document.getElementById(id) as HTMLSelectElement).value;
     const { res, data } = await post("/api/tables", {
+      pace: paces.find((r) => r.checked)?.value,
       pickSeconds: Number(value("pick-s")),
       voteSeconds: Number(value("vote-s")),
       autoplay: auto.checked,

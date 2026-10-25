@@ -762,3 +762,33 @@ ul.tracks.pickable > li.prow > .acts { grid-column: 3; grid-row: 1; flex: none; 
 ul.tracks.pickable > li.prow > .acts button { flex: none; min-width: 5rem; }
 #pick-fit li.prow > .slot-tag { display: none; }
 ul.tracks.pickable > li.prow > .slot-tag { grid-column: 2 / -1; }
+
+/* ---- Table setup: bots, moles, rematch, pace (stage 2b) ---- */
+.stamp.bot { color: var(--ink); background: var(--lamp); border-color: var(--lamp); transform: rotate(-1.5deg); }
+.stamp.in { color: var(--lamp); transform: rotate(1.5deg); }
+.paper .stamp.bot, .liner .stamp.bot { color: var(--ink); background: transparent; }
+ul.members .rm-bot { min-width: 44px; min-height: 44px; padding: 0; font-size: 1.25rem; line-height: 1; }
+.setup { display: grid; gap: 0.75rem; margin: 0 0 1rem; padding: 0.9rem; border-radius: 10px; box-shadow: inset 0 0 0 1.5px var(--rule); }
+.setup .hint { margin: 0; }
+.mole-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; }
+.mole-ctl .k { font: 600 0.75rem/1.2 var(--cat); letter-spacing: 0.1em; text-transform: uppercase; color: var(--lamp); }
+.mole-ctl .seg { display: inline-flex; gap: 0.4rem; }
+.mole-ctl .seg button { min-width: 48px; min-height: 44px; padding: 0 1rem; }
+.mole-ctl .seg button:disabled { opacity: 0.4; }
+.mole-ctl .hint { flex: 1 1 100%; }
+.waiting { font-weight: 600; margin: 0 0 0.75rem; border-left: 4px solid var(--lamp); padding-left: 0.75rem; }
+a.btn.holdup { display: block; text-align: center; min-height: 52px; line-height: 52px; padding: 0 1rem; margin: 0 0 1rem; font-size: var(--step-1); text-decoration: none; }
+.watch-line.late a { font-weight: 700; }
+.rematch { display: grid; gap: 0.6rem; margin: 0.75rem 0; }
+.rematch .in-count { margin: 0; font-weight: 600; text-align: center; color: var(--ink-2); }
+.rematch button { min-height: 52px; }
+.rematch p { margin: 0; }
+fieldset.pace { border: 0; padding: 0; margin: 0 0 1rem; min-width: 0; }
+fieldset.pace legend { font: 600 0.75rem/1.2 var(--cat); letter-spacing: 0.1em; text-transform: uppercase; color: var(--lamp); padding: 0; margin-bottom: 0.4rem; }
+.pace-row { display: grid; gap: 0.5rem; margin-bottom: 0.75rem; }
+.pace-opt input { position: absolute; opacity: 0; pointer-events: none; }
+.pace-opt label { display: grid; gap: 0.1rem; margin: 0; padding: 0.8rem 1rem; min-height: 64px; border-radius: 10px; box-shadow: inset 0 0 0 1.5px var(--line); cursor: pointer; font-size: var(--step-0); }
+.pace-opt label b { font-size: var(--step-1); }
+.pace-opt label span { font-size: var(--step--1); color: var(--muted); font-weight: 400; }
+.pace-opt input:checked + label { box-shadow: inset 0 0 0 3px var(--lamp); background: rgba(244, 184, 96, 0.12); }
+.pace-opt input:focus-visible + label { outline: 3px solid var(--lamp); outline-offset: 2px; }

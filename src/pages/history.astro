@@ -28,7 +28,7 @@ const games = historyFor(me.id);
             </div>
             <span class={`stamp ${g.winner === "moles" ? "moles" : "win"}`}>{g.winner === "moles" ? "Moles won" : g.winner === "none" ? "No winner" : "Players won"}</span>
           </div>
-          <p class="hist-players"><strong>Players:</strong> {g.players.join(", ")}</p>
+          <p class="hist-players"><strong>Players:</strong> {g.players.join(", ")}{g.bots ? ` (and ${g.bots} bot${g.bots === 1 ? "" : "s"})` : ""}</p>
           {g.winner === "none" && (
             <p class="hist-ending">{g.ending === "nobody-picked" ? "Game abandoned: nobody picked." : "This game was left unfinished and ended with no winner."}</p>
           )}

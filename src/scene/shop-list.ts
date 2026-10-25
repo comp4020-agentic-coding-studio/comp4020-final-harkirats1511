@@ -10,7 +10,7 @@ export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", 
 export function boothItem(b: Booth, i: number): string {
   const full = b.seated >= b.max;
   const status = b.status === "playing" ? `Playing${b.round ? `, round ${b.round}` : ""}` : "Waiting for players";
-  const seats = `${b.seated}/${b.max} seated`;
+  const seats = `${b.seated}/${b.max} seated${b.bots ? `, ${b.bots} ${b.bots === 1 ? "is a bot" : "are bots"}` : ""}`;
   const id = `bk-${i}`;
   if (b.private || !b.code) {
     return `<li class="shop-booth" data-key="private-${i}">
