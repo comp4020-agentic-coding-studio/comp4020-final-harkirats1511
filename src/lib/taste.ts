@@ -227,12 +227,15 @@ export async function suggestFromArtists(names: string[], skip: Set<number>, onl
   );
 
   // Interleave the artists, dedupe, drop what they already have.
+  // Also dedupe the same song in another edition ("Tears in Heaven" and its live cut).
   const seen = new Set<number>(skip);
+  const songs = new Set<string>();
+  const songKey = (t: Track) => `${t.artist}|${t.title.replace(/[\(\[].*$/, "").replace(/ - .*$/, "").trim()}`.toLowerCase();
   const pool: Cand[] = [];
   for (let k = 0; pools.some((p) => k < p.length); k++) {
     for (const p of pools) {
       const c = p[k];
-      if (c && !seen.has(c.t.id)) { seen.add(c.t.id); pool.push(c); }
+      if (c && !seen.has(c.t.id) && !songs.has(songKey(c.t))) { seen.add(c.t.id); songs.add(songKey(c.t)); pool.push(c); }
     }
   }
 
