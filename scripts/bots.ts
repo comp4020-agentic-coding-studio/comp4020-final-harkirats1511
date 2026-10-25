@@ -14,7 +14,9 @@
 // The brain is the server's own (src/lib/bots/brain.ts): the same picking, borrowing, voting and
 // stealing, deciding only from /me and the public state. The app can also seat bots itself now
 // (the host's "Add a bot" button); this script is for testing against any server over HTTP.
-import { decidePick, decideSteal, decideVote, type MeView, type Pub } from "../src/lib/bots/brain.ts";
+// It plays both formats: Knockout (pick, vote, steal, and a ghost's private guess) and Four rounds
+// (pick, the mole vote, and a best pick that isn't its own card).
+import { decideBest, decideGuess, decidePick, decideSteal, decideVote, type MeView, type Pub } from "../src/lib/bots/brain.ts";
 
 const PIN = "2580";
 // A crate is 3 songs in each of 4 slots; the app refuses a start until every player has one.
@@ -37,7 +39,7 @@ const BOTS = [
 
 type Track = { id: number; title: string; artist: string; slot?: string | null };
 type Game = {
-  round: number; phase: string; deadline: number | null; alive: string[]; ghosts: string[]; winner?: string; accused?: string;
+  format?: string; round: number; phase: string; deadline: number | null; alive: string[]; ghosts: string[]; winner?: string; accused?: string;
   tally?: { name: string }[];
 };
 type State = { status: string; host: string; members: { name: string; crate?: { trackId: number; title: string; slot: string | null }[] }[]; game?: Game };
@@ -198,16 +200,28 @@ class Bot {
   async vote(g: Game, mine: number) {
     const me = (await this.call(`/api/tables/${code}/me`)).data as Me | null;
     if (!me || mine !== this.run) return;
-    if (me.role !== "player" && me.role !== "mole") return;
+    // A Knockout ghost can't vote: it makes a private guess at who the mole is (changeable).
+    const ghost = me.role === "ghost";
+    if (!ghost && me.role !== "player" && me.role !== "mole") return;
     await sleep(this.delay(3, 12, g.deadline));
     if (mine !== this.run) return;
     // A player whose song is off the round's mood first, else a random name.
     const cast = async () => {
       const pub = (await this.call(`/api/tables/${code}`)).data as Pub;
       const view = (await this.call(`/api/tables/${code}/me`)).data as Me;
+      if (ghost) {
+        const name = decideGuess(view as MeView, this.name, pub);
+        if (name && (await this.call(`/api/tables/${code}/guess`, { name })).ok) log(this.name, "guessed");
+        return;
+      }
       const pick = decideVote(view as MeView, this.name, pub);
       const r = await this.call(`/api/tables/${code}/vote`, pick === "skip" ? { skip: true } : pick);
       if (r.ok) log(this.name, "voted");
+      // Four rounds: the second ballot, a best pick that isn't its own card.
+      if (pub.game?.format === "four") {
+        const order = decideBest(view as MeView, this.name, pub);
+        if (order !== null && (await this.call(`/api/tables/${code}/best`, { order })).ok) log(this.name, "chose a best pick");
+      }
     };
     await cast();
     // May change its mind once, before the vote locks.
