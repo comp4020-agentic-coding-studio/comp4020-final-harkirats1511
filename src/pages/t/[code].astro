@@ -264,7 +264,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           <ol>
             <li>Bring a crate of 12 songs, 3 each for Up, Down, Out and In. Everyone sees every crate.</li>
             <li>Each round has a prompt. You all get it except one or two moles, who only get its mood.</li>
-            <li>Pick a song from your crate that answers the prompt. You can borrow one song from someone else's crate, once.</li>
+            <li>Pick a song from your crate that answers the prompt. Everyone, the mole too, can borrow one song a game from someone else's crate.</li>
             <li>Every pick plays with its picker's name. A song can only be heard once a game.</li>
             <li>Vote out the player whose song doesn't fit. A mole who is caught can steal the win by guessing the prompt.</li>
             <li>Players win when every mole is out. Moles win when they are as many as everyone left, when a steal lands, when a vote with three left ejects nobody, or if they are still in after round 12. A round nobody picks in ends the game with no winner.</li>
@@ -664,7 +664,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
       bt.hidden = used || !canBorrow;
       bt.textContent = borrowOpen ? "Close borrowing" : "Borrow instead";
       bt.setAttribute("aria-expanded", String(borrowOpen));
-      $("borrow-note").textContent = used ? "You have used your borrow this game." : !canBorrow ? "Nobody has a song left to borrow." : "One borrow a game, from anyone's crate. It will say whose.";
+      $("borrow-note").textContent = used ? "You have used your borrow this game." : !canBorrow ? "Nobody has a song left to borrow." : "Everyone gets one borrow a game, the mole too. The table will see whose crate it came from.";
       show("borrow-panel", borrowOpen && canBorrow);
       if (borrowOpen && canBorrow) {
         const others = state!.members.filter((m) => m.name !== myName && m.crate);
