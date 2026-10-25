@@ -264,9 +264,10 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           <summary>How to play</summary>
           <h3>Your turn</h3>
           <ul>
+            <li>Your crate is 12 songs, 3 for each mood (Up, Down, Out, In), built on the Taste page before you sit down.</li>
             <li>Everyone but the mole gets a prompt, like "a song for a long drive".</li>
-            <li>The mole knows they are the mole. They only get the prompt's mood.</li>
-            <li>Pick a song from your crate that fits.</li>
+            <li>The mole knows they are the mole. They only get the prompt's mood. With 6 or more players there are two moles, and they don't know each other.</li>
+            <li>Pick a song from your crate that fits. Each song can be heard once a game.</li>
             <li>Once a game, anyone, the mole too, can borrow a song from someone else's crate.</li>
             <li>Every pick plays with its picker's name.</li>
             <li>Then vote someone out (not yourself). You see live counts, and a short last call runs once everyone has voted.</li>
@@ -274,7 +275,8 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           <h3>How it ends</h3>
           <ul>
             <li>A mole who is voted out gets a steal: 15 seconds to guess the prompt from 8. A right guess wins the game for the moles.</li>
-            <li>Players who are voted out watch.</li>
+            <li>A tie, or skip on top, votes out nobody.</li>
+            <li>Players who are voted out watch, and their crates can still be borrowed from.</li>
             <li>Players win when every mole is out.</li>
             <li>Moles win when they are as many as everyone left in, if nobody is voted out with three left, or if they survive round 12.</li>
             <li>The reveal moves on by itself after 30 seconds.</li>
@@ -319,7 +321,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     moles?: string[];
   };
   type Member = { name: string; avatar: Avatar; crateReady: boolean; crate?: CrateTrack[] };
-  type State = { status: string; private: boolean; host: string; members: Member[]; game?: Game };
+  type State = { same?: string[]; status: string; private: boolean; host: string; members: Member[]; game?: Game };
   type Me = {
     role: "player" | "mole" | "ghost" | "spectator"; prompt?: string; slot?: Slot; picked?: boolean; borrowUsed?: boolean; played?: number[];
     vote?: { name: string } | { skip: true }; steal?: { options: { id: string; text: string }[] };
@@ -399,7 +401,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
   let me: Me | null = null;
   let myCrate: number | null = null;
   let roleShown = true;
-  let howtoSet = false;
+  let howtoPlaying: boolean | null = null;
   let lastKey = "";
   let announcedLow = "";
   let clockSkew = 0;
@@ -435,9 +437,10 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     show("to-shop", !inGame || over);
     // How to play: open until a game has been played here, then folded away.
     show("howto", true);
-    if (!howtoSet || playing) {
-      howtoSet = true;
-      ($("howto") as HTMLDetailsElement).open = !g;
+    // Open in the lobby, folded once when a game starts, and the person's own choice otherwise.
+    if (howtoPlaying === null || playing !== howtoPlaying) {
+      if (howtoPlaying === null || playing) ($("howto") as HTMLDetailsElement).open = !g;
+      howtoPlaying = playing;
     }
     renderMembers();
     renderLobby();
@@ -894,8 +897,9 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     const g = state!.game!;
     const accused = g.accused ?? "";
     const mineToGuess = !!me?.steal;
+    $("steal").classList.toggle("guessing", mineToGuess);
     $("steal-line").textContent = accused === myName
-      ? `You were voted out, and you were the mole. You have 15 s to guess the prompt from 8 and steal the game.`
+      ? `You were voted out, and you were the mole. 15 s to guess the prompt from 8 and steal the game.`
       : `${accused} was the mole. They have 15 s to guess the prompt from 8 and steal the game.`;
     const box = $("steal-options");
     show("steal-options", mineToGuess);
@@ -1466,6 +1470,9 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
   const STALL_MS = 35_000;
   const RETRY_MS = 2_000;
   let connected = false;
+  // Why the server turned the stream away (429), and how long to wait before asking again.
+  let fullMsg = "";
+  let backoff = RETRY_MS;
   const conn = $("conn");
   // Anything that would fail while we can't reach the server. Buttons we turn off
   // are marked, so turning back on never touches one that was off for another reason.
@@ -1485,11 +1492,13 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     app.classList.toggle("is-down", down);
     conn.textContent = offline
       ? "You're offline. Picking, voting and playing are paused until you are back."
+      : fullMsg ? `${fullMsg} Picking, voting and playing are paused until you are in.`
       : "Reconnecting... Picking, voting and playing are paused until you are back.";
     syncActions();
   }
   window.addEventListener("offline", showConn);
 
+  let lastFrame: State | null = null;
   let streamCtl: AbortController | null = null;
   let lastHeard = Date.now();
   let everOpened = false;
@@ -1508,15 +1517,34 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     // a healthy stream and send it round the retry loop.
     let next: State;
     try { next = JSON.parse(data.join("\n")) as State; } catch { return; }
+    // A slim frame leaves out what hasn't changed and names it in `same`: keep our copy.
+    if (next.same?.includes("crates") && lastFrame) {
+      const had = new Map(lastFrame.members.map((m) => [m.name, m.crate]));
+      for (const m of next.members) if (!m.crate && had.get(m.name)) m.crate = had.get(m.name);
+    }
+    if (next.same?.includes("past") && next.game && lastFrame?.game) next.game.past = lastFrame.game.past;
+    delete next.same;
+    lastFrame = next;
     onState(next);
   }
 
   async function followOnce() {
     const ctl = new AbortController();
     streamCtl = ctl;
+    // The first frame of a stream is complete: merge nothing from before it.
+    lastFrame = null;
     lastHeard = Date.now();
-    const res = await fetch(`/api/tables/${code}/events`, { signal: ctl.signal, headers: { accept: "text/event-stream" }, cache: "no-store" });
+    const res = await fetch(`/api/tables/${code}/events?slim=1`, { signal: ctl.signal, headers: { accept: "text/event-stream" }, cache: "no-store" });
+    if (res.status === 429) {
+      const why = res.headers.get("x-full");
+      fullMsg = why === "table" ? "This table is full to watchers right now. Trying again shortly."
+        : why === "person" ? "This table is open in too many tabs. Close some and it will reconnect."
+        : "Too many connections from your network. Trying again shortly.";
+      throw new Error("stream 429");
+    }
     if (!res.ok || !res.body) throw new Error(`stream ${res.status}`);
+    fullMsg = "";
+    backoff = RETRY_MS;
     const reopened = everOpened;
     everOpened = true;
     connected = true;
@@ -1546,7 +1574,9 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
       if (removed) return;
       connected = false;
       showConn();
-      await new Promise((r) => setTimeout(r, navigator.onLine ? RETRY_MS : 500));
+      const wait = !navigator.onLine ? 500 : fullMsg ? backoff : RETRY_MS;
+      if (fullMsg) backoff = Math.min(backoff * 2, 30_000);
+      await new Promise((r) => setTimeout(r, wait));
     }
   }
   // A stream that says nothing, not even a heartbeat, is dead: close it, say so, reopen.

@@ -711,6 +711,16 @@ div.skipbtn.ro { border-radius: 999px; box-shadow: inset 0 0 0 1.5px var(--line)
 .steal-opt { justify-content: flex-start; text-align: left; font: 600 1rem/1.25 var(--ui); padding: 0.55rem 0.9rem; min-height: 44px; border-radius: 12px; }
 @media (min-width: 900px) { .steal-options { grid-template-columns: 1fr 1fr; } }
 .steal-opt:disabled { opacity: 0.8; }
+/* The accused mole's own steal: heading and clock share a row, no big stamp, so all 8 options fit one screen. */
+.steal.guessing { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "h c" "i i" "o o" "m m"; align-items: center; column-gap: 1rem; padding-block: 0.75rem; }
+.steal.guessing > * { grid-column: 1 / -1; }
+.steal.guessing .steal-stamp { display: none; }
+.steal.guessing h2 { grid-area: h; grid-column: auto; font-size: clamp(1.5rem, 7vw, 2rem); margin: 0; text-align: left; }
+.steal.guessing .steal-clock { grid-area: c; grid-column: auto; font-size: 2.25rem; margin: 0; }
+.steal.guessing .instr { grid-area: i; margin: 0.25rem 0 0.5rem; font-size: 0.9375rem; line-height: 1.3; text-align: left; }
+.steal.guessing .steal-options { grid-area: o; gap: 0.375rem; }
+.steal.guessing .steal-opt { padding: 0.3rem 0.75rem; font-size: 0.9375rem; line-height: 1.2; }
+.steal.guessing #steal-msg { grid-area: m; margin: 0.25rem 0 0; }
 
 /* Reveal and game over */
 .reveal-prompt { margin: 0 0 1rem; font-size: clamp(1.9rem, 8vw, 2.4rem); }
