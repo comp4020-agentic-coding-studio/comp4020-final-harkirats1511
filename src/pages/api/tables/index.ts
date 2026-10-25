@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 import { json, personFromCookies } from "../../../lib/auth.ts";
-import { createTable, isPace, PACES } from "../../../lib/tables.ts";
+import { createTable, isFormat, isPace, PACES } from "../../../lib/tables.ts";
 import { refused } from "../../../lib/log.ts";
 
 const MIN_SECONDS = 2;
@@ -25,6 +25,8 @@ export const POST: APIRoute = async ({ cookies, request }) => {
   if (typeof autoplay !== "boolean") return json({ error: "autoplay is true or false." }, 400);
   const priv = body.private ?? false;
   if (typeof priv !== "boolean") return json({ error: "private is true or false." }, 400);
+  if (body.format !== undefined && !isFormat(body.format)) return json({ error: "format is knockout or four." }, 400);
+  const format = body.format ?? "knockout";
   // A pace preset ("quick" | "normal" | "chill") sets the three timings; a number sent
   // alongside it still wins, so the form's Custom disclosure needs no preset.
   if (body.pace !== undefined && !isPace(body.pace)) return json({ error: "pace is quick, normal or chill." }, 400);
@@ -38,5 +40,5 @@ export const POST: APIRoute = async ({ cookies, request }) => {
   }
   // The mole count is chosen in the lobby (POST /api/tables/:code/moles), where the player count is known; a `moles` here is ignored.
   const moles = null;
-  return json({ code: createTable(me.id, { pickSeconds, voteSeconds, moles, autoplay, slotSeconds, private: priv }) }, 201);
+  return json({ code: createTable(me.id, { pickSeconds, voteSeconds, moles, autoplay, slotSeconds, private: priv, format }) }, 201);
 };
