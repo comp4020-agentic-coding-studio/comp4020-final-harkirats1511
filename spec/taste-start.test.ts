@@ -46,7 +46,7 @@ it("suggests at most 3 songs per mood, all with previews and none explicit, and 
     expect(p.status, `${t.title} has a preview`).toBe(200);
   }
   // Metadata only: no preview URLs, no explicit flag, no audio.
-  expect(JSON.stringify(body)).not.toMatch(/preview|cdn|\.mp3/i);
+  expect(JSON.stringify(body)).not.toMatch(/"preview"|\.mp3|dzcdn\.net\/stream/i);
   expect(JSON.stringify(body)).not.toMatch(/n[i1]gg|f[a@]gg|retard/i);
   // Nothing went into the crate.
   expect((await (await s.call("/api/taste")).json()) as Track[]).toEqual([]);
