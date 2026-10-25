@@ -53,7 +53,12 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           <button id="copy-code" type="button" class="secondary sm">Copy code</button>
           <p class="hint" id="copy-msg" role="status"></p>
         </div>
+        <div class="setup" id="setup-guest" hidden>
+          <p class="fmt-guest" id="format-guest"></p>
+          <p class="mole-line-lobby hint" id="moles-guest"></p>
+        </div>
         <div class="setup" id="setup-lobby" hidden>
+          <div class="fmt-ctl" id="format-lobby"></div>
           <div class="mole-ctl" id="moles-lobby"></div>
           <div class="bot-ctl">
             <button id="add-bot" type="button" class="secondary">Add a bot</button>
@@ -65,6 +70,12 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           <span class="status-label" id="status-label"></span>
           <span class="countdown" id="countdown" role="timer" aria-live="off"></span>
         </p>
+
+        <!-- Four rounds: everyone's score as of the last reveal. It never moves during a vote. -->
+        <section class="strip" id="scores" aria-labelledby="scores-h" hidden>
+          <p class="strip-k mono" id="scores-h"></p>
+          <ol class="strip-list" id="scores-list"></ol>
+        </section>
 
         <p class="watch-line" id="watch-line" hidden></p>
         <p class="watch-line late" id="late" hidden>The next game starts after this one. <a id="late-link" href={`/taste?next=/t/${code}`} hidden>Fill your crate now</a></p>
@@ -84,7 +95,6 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           </fieldset>
           <p class="hint">Everyone brings a crate of {MIN_CRATE} songs: {PER_SLOT} each for Up, Down, Out and In. Once the game starts the crates sit on the table for all to see.</p>
           <p class="hint"><a href="/me">Change your character</a></p>
-          <p class="mole-line-lobby hint" id="moles-guest" hidden></p>
           <p class="waiting" id="waiting" role="status" hidden></p>
           <a class="btn full holdup" id="crate-me" href={`/taste?next=/t/${code}`} hidden>Finish your crate</a>
           <button id="start" type="button" class="full" disabled hidden>Start game</button>
@@ -139,8 +149,14 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           <h2 id="vote-h" tabindex="-1">Vote someone out</h2>
           <p class="instr" id="vote-instr">Who is the mole? Vote for a player, or skip. You can change your vote until it locks.</p>
           <p class="hint" id="vote-note"></p>
-          <ul class="ballot" id="vote-list" aria-label="Players to vote for"></ul>
-          <div class="skipbar" id="vote-skip-wrap"></div>
+          <div class="vtabs" id="vote-tabs" role="tablist" aria-label="The two votes" hidden></div>
+          <div id="vote-mole-panel" role="tabpanel" aria-labelledby="tab-mole">
+            <ul class="ballot" id="vote-list" aria-label="Players to vote for"></ul>
+            <div class="skipbar" id="vote-skip-wrap"></div>
+          </div>
+          <div id="vote-best-panel" role="tabpanel" aria-labelledby="tab-best" hidden>
+            <ul class="ballot best" id="best-list" aria-label="Songs to pick as best"></ul>
+          </div>
           <p class="lastcall mono" id="last-call" role="status" hidden></p>
           <p id="vote-msg" class="error" role="alert"></p>
         </section>
@@ -193,12 +209,28 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
             <p class="kicker" id="reveal-slot"></p>
             <p class="theme reveal-prompt" id="reveal-prompt"></p>
           </div>
+          <div id="scoreboard" class="scoreboard" hidden>
+            <h3>Final scores</h3>
+            <ol class="board" id="board-list"></ol>
+          </div>
+          <div id="ghost-results" class="ghost-results" hidden>
+            <h3>The ghosts' guesses</h3>
+            <ul class="ghosts" id="ghost-list"></ul>
+          </div>
           <p id="eject" class="eject"></p>
+          <div id="four-points" class="four-points" hidden>
+            <h3>Points this round</h3>
+            <ul class="pts" id="pts-list"></ul>
+          </div>
           <ol class="plays reveal" id="reveal-cards" aria-label="Who picked what"></ol>
           <p class="deadair" id="reveal-dead" hidden></p>
           <div id="reveal-votes-wrap" class="votes-note" hidden>
-            <h3>Votes</h3>
+            <h3 id="reveal-votes-h">Votes</h3>
             <ul class="votelist" id="reveal-votes"></ul>
+          </div>
+          <div id="reveal-best-wrap" class="votes-note" hidden>
+            <h3>Best pick votes</h3>
+            <ul class="votelist" id="reveal-best"></ul>
           </div>
           <div id="past-end" hidden>
             <div class="pressing">
@@ -212,6 +244,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
             <button id="im-in" type="button" class="full secondary" aria-pressed="false">I'm in</button>
             <p><a id="swap" href={`/taste?next=/t/${code}`}>Swap a song before the next game</a></p>
             <div class="setup" id="setup-over" hidden>
+              <div class="fmt-ctl" id="format-over"></div>
               <div class="mole-ctl" id="moles-over"></div>
               <button id="add-bot2" type="button" class="secondary sm">Add a bot</button>
               <p class="hint" id="bot-msg2" role="status"></p>
@@ -283,26 +316,30 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
 
         <details class="card howto" id="howto" hidden>
           <summary>How to play</summary>
-          <h3>Your turn</h3>
+          <h3>Every round</h3>
           <ul>
             <li>Your crate is 12 songs, 3 for each mood (Up, Down, Out, In), built on the Taste page before you sit down.</li>
             <li>Everyone but the mole gets a prompt, like "a song for a long drive".</li>
             <li>The mole knows they are the mole. They only get the prompt's mood. With 6 or more players there are two moles, and they don't know each other.</li>
             <li>Pick a song from your crate that fits. Each song can be heard once a game.</li>
             <li>Once a game, anyone, the mole too, can borrow a song from someone else's crate.</li>
-            <li>Every pick plays with its picker's name.</li>
-            <li>Then vote someone out (not yourself). You see live counts, and a short last call runs once everyone has voted.</li>
+            <li>Every pick plays with its picker's name. Then you vote, with live counts and a short last call once everyone has voted.</li>
+            <li>A mole who is caught gets a steal: 15 seconds to guess the prompt from 8.</li>
           </ul>
-          <h3>How it ends</h3>
+          <h3>Knockout</h3>
           <ul>
-            <li>A mole who is voted out gets a steal: 15 seconds to guess the prompt from 8. A right guess wins the game for the moles.</li>
-            <li>A tie, or skip on top, votes out nobody.</li>
-            <li>Players who are voted out watch, and their crates can still be borrowed from.</li>
-            <li>Players win when every mole is out.</li>
-            <li>Moles win when they are as many as everyone left in, if nobody is voted out with three left, or if they survive round 12.</li>
-            <li>The reveal moves on by itself after 30 seconds.</li>
+            <li>Vote someone out each round (not yourself). A tie, or skip on top, votes out nobody.</li>
+            <li>A right steal wins the game for the moles. Players who are voted out watch, make a private guess at the mole each round, and their crates can still be borrowed from.</li>
+            <li>Players win when every mole is out. Moles win when they are as many as everyone left in, if nobody is voted out with three left, or if they survive round 12.</li>
           </ul>
-          <p class="hint">Playing an obvious song for the prompt helps a caught mole guess it.</p>
+          <h3>Four rounds</h3>
+          <ul>
+            <li>Four rounds, one per mood. Nobody is voted out. The moles are dealt again every round.</li>
+            <li>Two votes at once: who is the mole, and the best pick (a song, not your own). Change either until it locks.</li>
+            <li>Points: +2 for voting for a mole. +1 for each best-pick vote your song gets, and +1 to whoever lent it. A mole gets +2 if the room's top vote isn't a mole, and +3 for a right steal.</li>
+            <li>Scores change only at the reveal. After round 4 the most points wins; a tie shares it.</li>
+          </ul>
+          <p class="hint">The reveal moves on by itself after 30 seconds. Playing an obvious song for the prompt helps a caught mole guess it.</p>
         </details>
       </aside>
     </div>
@@ -314,12 +351,19 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
   type Slot = "up" | "down" | "out" | "in";
   type CrateTrack = { trackId: number; title: string; artist: string; cover?: string; slot: Slot | null };
   type Card = { order: number; picker: string; lender?: string; trackId: number; title: string; artist: string; cover?: string; clash?: true };
-  type Past = { round: number; prompt: string; slot: Slot; cards: Card[]; ejected: string | null; wasMole: boolean };
+  type Points = { name: string; points: number };
+  type Past = { round: number; prompt: string; slot: Slot; cards: Card[]; ejected: string | null; wasMole: boolean; moles?: string[]; points?: Points[] };
   type Reveal = {
     prompt: string; slot: Slot; cards: Card[]; deadAir: string[]; votes: { voter: string; choice: string | null }[];
     accused: string | null; ejected: string | null; wasMole: boolean; stole: boolean;
+    moles?: string[]; points?: Points[]; bestVotes?: { voter: string; order: number; picker: string; lender?: string }[];
   };
   type Game = {
+    format?: "knockout" | "four";
+    scores?: { name: string; score: number }[];
+    bestTally?: { order: number; votes: number }[];
+    winners?: string[];
+    ghostGuesses?: { ghost: string; guesses: { round: number; guess: string; hit: boolean }[]; hits: number }[];
     round: number;
     autoplay?: boolean;
     phase: "pick" | "listen" | "vote" | "steal" | "reveal";
@@ -337,15 +381,15 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     past: Past[];
     borrowed: string[];
     played: number[];
-    winner?: "players" | "moles" | "none";
+    winner?: "players" | "moles" | "none" | "points";
     ending?: "final-vote" | "round-cap" | "nobody-picked";
     moles?: string[];
   };
   type Member = { name: string; avatar: Avatar; crateReady: boolean; crateCount: number; bot?: true; in?: true; crate?: CrateTrack[] };
-  type State = { same?: string[]; status: string; private: boolean; host: string; moleChoice: number | null; members: Member[]; game?: Game };
+  type State = { same?: string[]; status: string; private: boolean; host: string; moleChoice: number | null; format?: "knockout" | "four"; members: Member[]; game?: Game };
   type Me = {
     role: "player" | "mole" | "ghost" | "spectator"; prompt?: string; slot?: Slot; picked?: boolean; borrowUsed?: boolean; played?: number[];
-    vote?: { name: string } | { skip: true }; steal?: { options: { id: string; text: string }[] };
+    vote?: { name: string } | { skip: true }; best?: { order: number }; guess?: { name: string }; steal?: { options: { id: string; text: string }[] };
   };
 
   import type { TableScene } from "../../scene/table-scene.ts";
@@ -430,6 +474,10 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
   let dropKey = "";
   let borrowOpen = false;
   let stealGuessed = false;
+  const FOUR_ROUNDS = 4;
+  let voteTab: "mole" | "best" = "mole";
+  // Best cards seen at a reveal this session (the public state only holds the current round's votes).
+  const bestSeen = new Map<number, number[]>();
 
   const announce = (t: string) => { $("announce").textContent = t; };
   const isHost = () => state?.host === myName;
@@ -450,7 +498,9 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     const inGame = playing || over;
     const phase = g?.phase;
 
-    $("title").textContent = !inGame ? "Table" : over ? "Game over" : `Round ${g!.round}`;
+    const four = g?.format === "four";
+    // "Round 2 of 4 · Down": the mood comes from /me (a mole has it too), never from a prompt.
+    $("title").textContent = !inGame ? "Table" : over ? "Game over" : four ? `Round ${g!.round} of ${FOUR_ROUNDS}${me?.slot ? ` \u00b7 ${slotName(me.slot)}` : ""}` : `Round ${g!.round}`;
     show("lobby-code", !inGame || over);
     show("status", playing && !over);
     $("status-label").textContent = phase ? phaseWords[phase] : "";
@@ -472,6 +522,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     const spectating = playing && me?.role === "spectator";
     show("late", spectating);
     if (spectating) show("late-link", !(state.members.find((m) => m.name === myName)?.crateReady ?? true));
+    renderStrip(playing && four && phase !== "reveal");
     renderCard(playing && (phase === "pick" || phase === "listen" || phase === "vote"), phase);
     renderPick(playing && phase === "pick");
     renderListen(playing && (phase === "listen" || phase === "vote"));
@@ -577,13 +628,31 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     renderSetup(s);
   }
 
-  // The host's table setup: add a bot, and how many moles. Shown while no game is running.
+  // The host's table setup: the format, add a bot, and how many moles. Shown while no game is running.
+  const FORMATS = [
+    { key: "knockout", name: "Knockout", note: "Vote someone out each round. Out players still guess." },
+    { key: "four", name: "Four rounds", note: "One round per mood. Nobody is out. Score points." },
+  ] as const;
+  const formatOf = (s: State) => (s.format === "four" ? "four" : "knockout");
   const molesFor = (s: State) => {
     const n = s.members.length;
     const cap = Math.max(1, Math.floor(n / 3));
     const shown = Math.min(s.moleChoice ?? (n <= 5 ? 1 : 2), cap);
     return { n, cap, shown };
   };
+  function drawFormat(el: HTMLElement, s: State) {
+    const now = formatOf(s);
+    el.replaceChildren(
+      h("span", { class: "k", id: `${el.id}-k` }, "Format"),
+      h("div", { class: "fmt-row", role: "radiogroup", "aria-labelledby": `${el.id}-k` },
+        ...FORMATS.map((f) => {
+          const b = h("button", { type: "button", class: "fmt-opt" + (f.key === now ? " on" : ""), role: "radio", "aria-checked": String(f.key === now), "data-fk": `format:${el.id}:${f.key}` },
+            h("b", {}, f.name), h("span", {}, f.note)) as HTMLButtonElement;
+          b.addEventListener("click", () => void chooseFormat(f.key));
+          return b;
+        })),
+    );
+  }
   function drawMoles(el: HTMLElement, s: State) {
     const { cap, shown } = molesFor(s);
     el.replaceChildren(
@@ -605,9 +674,11 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     const host = isHost();
     show("setup-lobby", host && lobby);
     show("setup-over", host && over);
-    show("moles-guest", !host && lobby);
+    show("setup-guest", !host && lobby);
     if (!host && lobby) {
       const { shown } = molesFor(s);
+      const f = FORMATS.find((x) => x.key === formatOf(s))!;
+      $("format-guest").replaceChildren(h("span", { class: "k" }, "Format"), h("b", {}, f.name), h("span", { class: "hint" }, f.note));
       $("moles-guest").textContent = `Moles: ${shown}`;
     }
     const full = s.members.length >= 8;
@@ -617,10 +688,15 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
       b.dataset.full = full ? "1" : "";
     }
     $("bot-note").textContent = full ? "The table is full: 8 seats." : "Bots fill empty seats. They play by the same rules and are always labelled BOT.";
-    once("moles-ui", JSON.stringify([s.moleChoice, s.members.length, host && (lobby || over)]), () => {
-      if (host && lobby) drawMoles($("moles-lobby"), s);
-      if (host && over) drawMoles($("moles-over"), s);
+    once("moles-ui", JSON.stringify([s.moleChoice, s.format, s.members.length, host && (lobby || over)]), () => {
+      if (host && lobby) { drawFormat($("format-lobby"), s); drawMoles($("moles-lobby"), s); }
+      if (host && over) { drawFormat($("format-over"), s); drawMoles($("moles-over"), s); }
     });
+  }
+  async function chooseFormat(f: "knockout" | "four") {
+    const { res, data } = await api(`/api/tables/${code}/format`, { format: f });
+    for (const id of ["bot-msg", "bot-msg2"]) $(id).textContent = res.ok ? "" : (data.error ?? "Could not change the format.");
+    if (res.ok) onState(data as unknown as State);
   }
   async function chooseMoles(v: number) {
     const { res, data } = await api(`/api/tables/${code}/moles`, { moles: v });
@@ -639,6 +715,21 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
   }
   $("add-bot").addEventListener("click", () => void addBot());
   $("add-bot2").addEventListener("click", () => void addBot());
+
+  // Four rounds: a compact score strip. Scores are as of the last reveal, and the label says so.
+  function renderStrip(on: boolean) {
+    show("scores", on);
+    if (!on) return;
+    const g = state!.game!;
+    const done = g.past.length;
+    $("scores-h").textContent = done ? `Scores after round ${done}` : "Scores: nobody has scored yet";
+    once("strip", JSON.stringify([g.scores, done]), () => {
+      const rows = [...(g.scores ?? [])].sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+      $("scores-list").replaceChildren(
+        ...rows.map((r) => h("li", { class: r.name === myName ? "me" : "" }, h("span", { class: "nm" }, r.name === myName ? `${r.name} (you)` : r.name), h("b", { class: "mono" }, String(r.score)))),
+      );
+    });
+  }
 
   // Your card. A mole's comes from /me and holds the slot only: there is no other
   // source of a prompt in this page. Face down, a mole's card and a player's are the
@@ -664,13 +755,14 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     $("role-back").setAttribute("aria-hidden", String(open));
     $("role-toggle-text").textContent = open ? "Hide" : "Show";
     $("role-toggle").setAttribute("aria-expanded", String(open));
-    $("role-h").textContent = mole && open ? "You're the mole" : "Your card";
+    const four = state?.game?.format === "four";
+    $("role-h").textContent = mole && open ? (four ? "You're the mole this round" : "You're the mole") : four ? "Your card this round" : "Your card";
     const text = $("role-text");
     text.classList.toggle("quiet", mole);
     $("role-k").textContent = mole ? "Mole" : "Staff pick";
     show("role-sub", mole);
     if (mole) {
-      text.textContent = "You're the mole. You don't know the prompt, only its mood:";
+      text.textContent = `You're the mole${four ? " this round" : ""}. You don't know the prompt, only its mood:`;
       $("role-sub").textContent = `${slotName(me.slot).toUpperCase()} (${slotInfo.find((i) => i.slot === me!.slot)?.hint ?? ""}). Blend in.`;
       $("role-slot").textContent = "";
     } else {
@@ -921,27 +1013,53 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     setTimeout(() => sfx.needle(), matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 2400);
   }
 
-  // ---- vote: on players ----
+  // ---- vote: on players (and, in Four rounds, a best pick on the cards) ----
 
   function renderVote(on: boolean) {
     show("vote", on && !!me);
     if (!on || !me) return;
     const g = state!.game!;
+    const four = g.format === "four";
     const voter = active();
+    const ghost = me.role === "ghost";
+    // A Knockout ghost can't vote; it makes a private guess at who the mole is, with the same rows.
+    $("vote-h").textContent = four ? "Cast your votes" : ghost ? "Who do you think it is?" : "Vote someone out";
+    $("vote-instr").textContent = four
+      ? "Two votes: who is the mole (or skip), and the best pick, a song that isn't yours. Change either until it locks."
+      : ghost ? "Who do you think it is? (only you see this)" : "Who is the mole? Vote for a player, or skip. You can change your vote until it locks.";
     $("vote-note").textContent = voter
-      ? g.alive.length === 3 ? "Three left: if nobody is voted out, the moles win." : ""
-      : me.role === "ghost" ? "You're out, so you can't vote. You can still watch the count." : "You're watching this game, so you can't vote.";
+      ? four ? "Cast both to lock in sooner." : g.alive.length === 3 ? "Three left: if nobody is voted out, the moles win." : ""
+      : ghost ? "You're out, so you can't vote. Your guess stays private until the game is over." : "You're watching this game, so you can't vote.";
     const mine = me.vote;
     const myName_ = "name" in (mine ?? {}) ? (mine as { name: string }).name : null;
     const skipMine = !!mine && "skip" in mine;
+    const myGuess = me.guess?.name ?? null;
+    const myBest = me.best?.order ?? null;
     const tally = g.tally ?? [];
     const cards = g.cards ?? [];
-    once("votes", JSON.stringify([tally, g.skips, mine, voter, cards, g.alive]), () => {
+    // Two tabs in Four rounds: both ballots stay a tap apart, each marked done once cast.
+    show("vote-tabs", four);
+    show("vote-mole-panel", !four || voteTab === "mole");
+    show("vote-best-panel", four && voteTab === "best");
+    if (four) {
+      const moleDone = !!mine, bestDone = myBest !== null;
+      once("vtabs", JSON.stringify([voteTab, voter, moleDone, bestDone]), () => {
+        const tab = (key: "mole" | "best", label: string, done: boolean) => {
+          const on = voteTab === key;
+          const b = h("button", { type: "button", role: "tab", id: `tab-${key}`, class: "vtab" + (on ? " on" : ""), "aria-selected": String(on), "aria-controls": `vote-${key}-panel`, "data-fk": `tab:${key}` },
+            h("span", {}, label), ...(voter ? [h("span", { class: "vt-state mono" + (done ? " done" : "") }, done ? "cast" : "to cast")] : [])) as HTMLButtonElement;
+          b.addEventListener("click", () => { voteTab = key; sigs.delete("vtabs"); render(); });
+          return b;
+        };
+        $("vote-tabs").replaceChildren(tab("mole", "Who's the mole?", moleDone), tab("best", "Best pick", bestDone));
+      });
+    }
+    once("votes", JSON.stringify([tally, g.skips, mine, myGuess, voter, ghost, cards, g.alive]), () => {
       const rows = tally.filter((t) => !(voter && t.name === myName));
       $("vote-list").replaceChildren(
         ...rows.map((t) => {
           const card = cards.find((c) => c.picker === t.name);
-          const chosen = myName_ === t.name;
+          const chosen = ghost ? myGuess === t.name : myName_ === t.name;
           const body = [
             face(t.name),
             h("span", { class: "bname" },
@@ -949,19 +1067,22 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
               h("span", { class: "bcard" }, card ? `${card.title}, ${card.artist}${card.lender ? ` (from ${card.lender})` : ""}` : "Dead air: no song")),
             h("span", { class: "count mono", "aria-hidden": "true" }, String(t.votes)),
           ];
-          if (!voter) return h("li", {}, h("div", { class: "brow ro", role: "group", "aria-label": `${t.name}: ${t.votes} vote${t.votes === 1 ? "" : "s"}` }, ...body));
+          if (!voter && !ghost) return h("li", {}, h("div", { class: "brow ro", role: "group", "aria-label": `${t.name}: ${t.votes} vote${t.votes === 1 ? "" : "s"}` }, ...body));
           const b = h("button", {
             type: "button", class: "brow" + (chosen ? " mine" : ""), "aria-pressed": String(chosen), "data-fk": `vote:${t.name}`,
-            "aria-label": `Vote ${t.name}. Their song: ${card ? `${card.title} by ${card.artist}` : "none, dead air"}. ${t.votes} vote${t.votes === 1 ? "" : "s"} so far${chosen ? ". Your vote" : ""}`,
+            "aria-label": ghost
+              ? `Guess ${t.name}. Their song: ${card ? `${card.title} by ${card.artist}` : "none, dead air"}.${chosen ? " Your guess" : ""}`
+              : `Vote ${t.name}. Their song: ${card ? `${card.title} by ${card.artist}` : "none, dead air"}. ${t.votes} vote${t.votes === 1 ? "" : "s"} so far${chosen ? ". Your vote" : ""}`,
           }, ...body) as HTMLButtonElement;
-          if (chosen) b.append(h("span", { class: "your", "aria-hidden": "true" }, "your vote"));
-          b.addEventListener("click", () => vote({ name: t.name }));
+          if (chosen) b.append(h("span", { class: "your", "aria-hidden": "true" }, ghost ? "your guess" : "your vote"));
+          b.addEventListener("click", () => (ghost ? guess(t.name) : vote({ name: t.name })));
           return h("li", {}, b);
         }),
       );
       const sk = g.skips ?? 0;
       const skipBody = [h("span", {}, skipMine ? "Skip (your vote)" : "Skip: nobody"), h("span", { class: "count mono", "aria-hidden": "true" }, String(sk))];
       $("vote-skip-wrap").replaceChildren(
+        ghost ? "" :
         voter
           ? (() => {
               const b = h("button", { type: "button", "data-fk": "vote:skip", class: "skipbtn secondary" + (skipMine ? " mine" : ""), "aria-pressed": String(skipMine), "aria-label": `Skip: vote for nobody. ${sk} so far${skipMine ? ", your vote" : ""}` }, ...skipBody) as HTMLButtonElement;
@@ -971,6 +1092,36 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           : h("div", { class: "skipbtn ro" }, ...skipBody),
       );
     });
+    if (four) {
+      const counts = new Map((g.bestTally ?? []).map((t) => [t.order, t.votes]));
+      once("best", JSON.stringify([g.bestTally, myBest, voter, cards, myName]), () => {
+        $("best-list").replaceChildren(
+          ...cards.map((c) => {
+            const n = counts.get(c.order) ?? 0;
+            const own = c.picker === myName;
+            const lent = c.lender === myName;
+            const chosen = myBest === c.order;
+            const tag = own ? "your card" : lent ? "you lent it" : "";
+            const body = [
+              h("span", { class: "n mono", "aria-hidden": "true" }, String(c.order + 1)),
+              h("span", { class: "bname" },
+                h("strong", {}, c.title),
+                h("span", { class: "bcard" }, `${c.artist} \u00b7 ${c.picker}${c.lender ? ` (from ${c.lender})` : ""}`)),
+              h("span", { class: "count mono", "aria-hidden": "true" }, String(n)),
+            ];
+            const label = `Card ${c.order + 1}: ${c.title} by ${c.artist}, picked by ${c.picker}${c.lender ? `, borrowed from ${c.lender}` : ""}. ${n} vote${n === 1 ? "" : "s"} so far`;
+            if (!voter || tag) {
+              return h("li", {}, h("div", { class: "brow ro" + (tag ? " off" : ""), role: "group", "aria-label": `${label}${tag ? `. ${tag}: you can't pick it` : ""}` }, ...body,
+                ...(tag ? [h("span", { class: "your off", "aria-hidden": "true" }, tag)] : [])));
+            }
+            const b = h("button", { type: "button", class: "brow" + (chosen ? " mine" : ""), "aria-pressed": String(chosen), "data-fk": `best:${c.order}`, "aria-label": `${label}${chosen ? ". Your best pick" : ""}` }, ...body) as HTMLButtonElement;
+            if (chosen) b.append(h("span", { class: "your", "aria-hidden": "true" }, "your pick"));
+            b.addEventListener("click", () => best(c.order));
+            return h("li", {}, b);
+          }),
+        );
+      });
+    }
     tickLastCall();
   }
 
@@ -1052,23 +1203,56 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     return li;
   }
 
+  // A past round's best card: the one with most best-pick votes, from what this page saw at its reveal.
+  function bestLine(p: Past): HTMLElement[] {
+    const order = bestSeen.get(p.round);
+    if (!order?.length) return [];
+    const cs = order.map((o) => p.cards.find((c) => c.order === o)).filter((c): c is Card => !!c);
+    return cs.length ? [h("span", { class: "t" }, `Best pick: ${cs.map((c) => `${c.title} (${c.picker})`).join(", ")}`)] : [];
+  }
+
   function renderReveal(on: boolean) {
     show("reveal", on);
     if (!on) return;
     const g = state!.game!;
     const r = g.reveal;
     const host = isHost();
-    $("reveal-h").textContent = g.winner ? "Game over" : `Round ${g.round}: the reveal`;
+    const four = g.format === "four";
+    $("reveal-h").textContent = g.winner ? "Game over" : four ? `Round ${g.round} of ${FOUR_ROUNDS}: the reveal` : `Round ${g.round}: the reveal`;
     const win = $("winner");
     win.hidden = !g.winner;
-    win.textContent = g.winner === "players" ? "Players win" : g.winner === "moles" ? "Moles win" : "";
+    const joint = (g.winners?.length ?? 0) > 1;
+    win.textContent = g.winner === "players" ? "Players win" : g.winner === "moles" ? "Moles win" : g.winner === "points" ? (joint ? "Joint winners" : "Winner") : "";
     win.classList.toggle("moles", g.winner === "moles");
     const moles = g.moles ?? [];
-    show("moles-end", !!g.winner);
-    once("moles", JSON.stringify([moles, g.winner]), () => {
+    // Four rounds deals new moles each round: at game over they are named per round below, not as one list.
+    show("moles-end", !!g.winner && !four);
+    once("moles", JSON.stringify([moles, g.winner, four]), () => {
       $("moles-end").replaceChildren(
         h("p", { class: "kicker" }, moles.length === 1 ? "The mole was" : "The moles were"),
         h("ul", { class: "mole-names" }, ...moles.map((n) => h("li", {}, face(n), h("strong", {}, n), h("span", { class: "stamp mole" }, "Mole")))),
+      );
+    });
+    // Four rounds game over: the winners and the final scores.
+    show("scoreboard", four && !!g.winner);
+    if (four && g.winner) {
+      once("board", JSON.stringify([g.scores, g.winners]), () => {
+        const rows = [...(g.scores ?? [])].sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+        $("board-list").replaceChildren(
+          ...rows.map((r) => h("li", { class: g.winners?.includes(r.name) ? "top" : "" }, face(r.name), h("strong", {}, r.name === myName ? `${r.name} (you)` : r.name),
+            ...(g.winners?.includes(r.name) ? [h("span", { class: "stamp win" }, "Winner")] : []), h("b", { class: "mono" }, String(r.score)))),
+        );
+      });
+    }
+    // Knockout game over: what each ghost guessed, and how many hit.
+    const gg = g.ghostGuesses ?? [];
+    show("ghost-results", !four && !!g.winner && gg.length > 0);
+    once("ghosts", JSON.stringify(gg), () => {
+      $("ghost-list").replaceChildren(
+        ...gg.map((x) => h("li", {},
+          face(x.ghost),
+          h("div", {}, h("strong", {}, `${x.ghost} guessed right ${x.hits} of ${x.guesses.length}`),
+            h("span", { class: "gl" }, x.guesses.map((q) => `Round ${q.round}: ${q.guess} (${q.hit ? "a mole" : "not a mole"})`).join(" \u00b7 "))))),
       );
     });
     show("reveal-prompt-wrap", !!r);
@@ -1078,7 +1262,15 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     }
     const eject = $("eject");
     if (!r) eject.textContent = "";
-    else {
+    else if (four) {
+      const ms = r.moles ?? [];
+      const parts = [`${ms.length === 1 ? "The mole this round was" : "The moles this round were"} ${ms.join(" and ") || "nobody"}.`];
+      if (r.wasMole) parts.push(r.stole ? `The room caught ${r.accused ?? "a mole"} and they stole the prompt.` : `The room caught ${r.accused ?? "a mole"}. They missed the steal.`);
+      else parts.push(r.accused ? `The room blamed ${r.accused}, who was not a mole. The moles got away.` : "The room did not agree on anyone. The moles got away.");
+      eject.textContent = parts.join(" ");
+      if (r.wasMole) eject.append(h("span", { class: "stamp win" }, "Caught"));
+      else eject.append(h("span", { class: "stamp moles" }, "Got away"));
+    } else {
       const parts: string[] = [];
       if (r.stole && r.accused) parts.push(`${r.accused} was a mole and stole it. The moles win.`);
       else if (r.ejected) {
@@ -1095,10 +1287,45 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
       $("reveal-cards").replaceChildren(...(r?.cards ?? []).map(revealCard));
       show("reveal-dead", !!r?.deadAir.length);
       $("reveal-dead").textContent = r?.deadAir.length ? `Dead air (no pick): ${r.deadAir.join(", ")}` : "";
+      $("reveal-votes-h").textContent = four ? "Who's the mole? votes" : "Votes";
       show("reveal-votes-wrap", !!r?.votes.length);
       $("reveal-votes").replaceChildren(
         ...(r?.votes ?? []).map((v) => h("li", {}, face(v.voter), h("strong", {}, v.voter), h("span", {}, v.choice === null ? "skipped" : `voted ${v.choice}`))),
       );
+      const bv = r?.bestVotes ?? [];
+      show("reveal-best-wrap", four && bv.length > 0);
+      $("reveal-best").replaceChildren(
+        ...bv.map((v) => h("li", {}, face(v.voter), h("strong", {}, v.voter), h("span", {}, `best: card ${v.order + 1}, ${v.picker}${v.lender ? ` (from ${v.lender})` : ""}`))),
+      );
+      // Points this round, with the reason for each. The reasons are worked out from what the
+      // reveal shows (votes by name, best votes, the moles, the steal), so they add up to the engine's points.
+      show("four-points", four && !!r?.points?.length);
+      const ms = new Set(r?.moles ?? []);
+      const rows = [...(r?.points ?? [])].sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
+      $("pts-list").replaceChildren(
+        ...rows.map((p) => {
+          const why: string[] = [];
+          const caught = (r?.votes ?? []).some((v) => v.voter === p.name && !ms.has(p.name) && v.choice !== null && ms.has(v.choice));
+          if (caught) why.push("+2 caught the mole");
+          const got = (r?.bestVotes ?? []).filter((b) => b.picker === p.name).length;
+          if (got) why.push(`+${got} best pick${got === 1 ? "" : "s"}`);
+          const lent = (r?.bestVotes ?? []).filter((b) => b.lender === p.name).length;
+          if (lent) why.push(`+${lent} lent a best pick`);
+          if (ms.has(p.name)) {
+            const rest = p.points - (caught ? 2 : 0) - got - lent;
+            if (rest >= 3 && r?.stole) why.push("+3 stole the prompt");
+            else if (rest >= 2 && !r?.wasMole) why.push("+2 got away");
+          }
+          return h("li", {}, face(p.name), h("strong", {}, p.name === myName ? `${p.name} (you)` : p.name), h("span", { class: "why" }, why.join(", ") || "no points"), h("b", { class: "mono" }, `+${p.points}`));
+        }),
+      );
+      // Remember this round's best card(s) for the game-over summary (past[] carries no best votes).
+      if (four && r && g.phase === "reveal") {
+        const tally = new Map<number, number>();
+        for (const v of r.bestVotes ?? []) tally.set(v.order, (tally.get(v.order) ?? 0) + 1);
+        const top = Math.max(0, ...tally.values());
+        if (top > 0) bestSeen.set(g.round, [...tally].filter(([, n]) => n === top).map(([o]) => o));
+      }
     });
     show("past-end", !!g.winner && g.past.length > 0);
     once("past", JSON.stringify([g.winner, g.past]), () => {
@@ -1108,7 +1335,10 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
             h("span", { class: "t" }, `Round ${p.round}, ${slotLabel(p.slot)}`),
             h("span", { class: "hand" }, p.prompt),
             h("ul", { class: "pcards" }, ...p.cards.map((c) => h("li", {}, h("strong", {}, c.picker), ` ${c.title}, ${c.artist}`, c.lender ? ` (from ${c.lender})` : "", c.clash ? " (clash)" : ""))),
-            h("span", { class: "t out" }, p.ejected ? `Out: ${p.ejected}${p.wasMole ? " (a mole)" : " (not a mole)"}` : "Nobody out")),
+            ...(four ? bestLine(p) : []),
+            h("span", { class: "t out" }, four
+              ? `${(p.moles ?? []).length === 1 ? "Mole" : "Moles"}: ${(p.moles ?? []).join(", ") || "none"} (${p.wasMole ? "caught" : "got away"})`
+              : p.ejected ? `Out: ${p.ejected}${p.wasMole ? " (a mole)" : " (not a mole)"}` : "Nobody out")),
         ),
       );
     });
@@ -1231,6 +1461,36 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
       return render();
     }
     $("vote-msg").textContent = res.status === 409 ? "Too late: voting is over." : (data.error ?? "Could not vote.");
+  }
+
+  let casting = false;
+  async function best(order: number) {
+    if (casting || !state?.game || !me) return;
+    casting = true;
+    const round = state.game.round;
+    $("vote-msg").textContent = "";
+    const { res, data } = await api("/api/tables/" + code + "/best", { order });
+    casting = false;
+    if (res.ok) {
+      if (me && state?.game?.round === round) me.best = { order };
+      announce(`Your best pick: card ${order + 1}. You can change it until it locks.`);
+      return render();
+    }
+    $("vote-msg").textContent = res.status === 409 ? "Too late: voting is over." : (data.error ?? "Could not send that best pick.");
+  }
+  async function guess(name: string) {
+    if (casting || !state?.game || !me) return;
+    casting = true;
+    const round = state.game.round;
+    $("vote-msg").textContent = "";
+    const { res, data } = await api("/api/tables/" + code + "/guess", { name });
+    casting = false;
+    if (res.ok) {
+      if (me && state?.game?.round === round) me.guess = { name };
+      announce(`Your guess: ${name}. Only you can see it.`);
+      return render();
+    }
+    $("vote-msg").textContent = res.status === 409 ? "Too late: voting is over." : (data.error ?? "Could not send that guess.");
   }
 
   $("start").addEventListener("click", async () => {
@@ -1535,6 +1795,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
       $("vote-msg").textContent = "";
       $("reveal-msg").textContent = "";
       if (g?.phase === "pick") borrowOpen = false;
+      if (g?.phase !== "vote") voteTab = "mole";
       if (g?.phase !== "steal") { stealGuessed = false; stealChoice = null; }
       if (newRound) {
         me = null;
@@ -1548,7 +1809,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           : "Listen.",
         );
       }
-      else if (g?.winner) announce(g.winner === "players" ? "Game over. The players caught every mole." : g.winner === "none" ? "Game abandoned: nobody picked." : "Game over. The moles took over.");
+      else if (g?.winner) announce(g.winner === "points" ? `Game over. ${g.winners && g.winners.length > 1 ? "Joint winners" : "Winner"}: ${(g.winners ?? []).join(", ")}.` : g.winner === "players" ? "Game over. The players caught every mole." : g.winner === "none" ? "Game abandoned: nobody picked." : "Game over. The moles took over.");
       void refreshMe();
       pendingEnter = true;
       // Keyboard and screen-reader users follow the game: land on the new phase's heading.
@@ -1599,7 +1860,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
   const conn = $("conn");
   // Anything that would fail while we can't reach the server. Buttons we turn off
   // are marked, so turning back on never touches one that was off for another reason.
-  const ACTIONS = "#start, #again, #im-in, #add-bot, #add-bot2, #moles-lobby button, #moles-over button, #next, #to-vote, #cards button, #pick-fit button, #pick-rest button, #borrow-panel button, #borrow-toggle, #vote-list button, #vote-skip-wrap button, #steal-options button";
+  const ACTIONS = "#start, #again, #im-in, #add-bot, #add-bot2, #moles-lobby button, #moles-over button, #next, #to-vote, #cards button, #pick-fit button, #pick-rest button, #borrow-panel button, #borrow-toggle, #vote-list button, #vote-skip-wrap button, #best-list button, #format-lobby button, #format-over button, #steal-options button";
   function syncActions() {
     const down = !connected || !navigator.onLine;
     for (const b of document.querySelectorAll<HTMLButtonElement>(ACTIONS)) {
