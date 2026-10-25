@@ -10,10 +10,10 @@
 // prompts, other players' roles, or this round's hidden picks, and a bot that is the mole
 // is handed a /me with no prompt in it. This file imports no database: seating bots (which needs one)
 // is in seats.ts, which nothing here may import. spec/bots-engine.test.ts checks both from outside.
-import { castSteal, castVote, myView, pickTrack } from "../game.ts";
+import { castBest, castGhostGuess, castSteal, castVote, myView, pickTrack } from "../game.ts";
 import { log } from "../log.ts";
 import { botSeats, notifyTable, onTableChange, setRematch, tableFrame } from "../tables.ts";
-import { decidePick, decideSteal, decideVote, DELAYS, thinkMs, type MeView, type Pub } from "./brain.ts";
+import { decideBest, decideGuess, decidePick, decideSteal, decideVote, DELAYS, thinkMs, type MeView, type Pub } from "./brain.ts";
 
 // ---- playing ----
 
@@ -94,9 +94,21 @@ function doPick(code: string, bot: Seat) {
 
 function doVote(code: string, bot: Seat, m: Mind, first: boolean) {
   const v = botView(code, bot.id);
-  if (!v || v.pub.game?.phase !== "vote" || (v.me.role !== "player" && v.me.role !== "mole")) return;
+  if (!v || v.pub.game?.phase !== "vote") return;
+  // A Knockout ghost can't vote; it makes its private guess. Spectators do nothing.
+  if (v.me.role === "ghost") {
+    const name = decideGuess(v.me, bot.name, v.pub);
+    if (name) castGhostGuess(code, bot.id, name);
+    return;
+  }
+  if (v.me.role !== "player" && v.me.role !== "mole") return;
   const choice = decideVote(v.me, bot.name, v.pub);
   castVote(code, bot.id, choice);
+  // Four rounds: the second ballot, a best pick that isn't its own card.
+  if (v.pub.game?.format === "four") {
+    const order = decideBest(v.me, bot.name, v.pub);
+    if (order !== null) castBest(code, bot.id, order);
+  }
   // Now and then it changes its mind once before the vote locks.
   if (first && Math.random() < 0.25) {
     const left = (v.pub.game?.deadline ?? Date.now() + 5000) - Date.now();

@@ -21,10 +21,11 @@ export type MeView = {
 export type Pub = {
   members: { name: string; crate?: { trackId: number; title?: string; slot: Slot | null }[] }[];
   game?: {
+    format?: string;
     phase?: string;
     deadline?: number | null;
     tally?: { name: string }[];
-    cards?: { picker: string; lender?: string; trackId: number; title?: string; artist?: string }[];
+    cards?: { order?: number; picker: string; lender?: string; trackId: number; title?: string; artist?: string }[];
   };
 };
 export type Rand = () => number;
@@ -75,6 +76,24 @@ export function decideVote(me: MeView, self: string, pub: Pub, rand: Rand = Math
   const silent = others.filter((n) => !cards.some((x) => x.picker === n));
   if (cards.length && silent.length && rand() < 0.5) return { name: pickOne(silent, rand)! };
   return rand() < 0.15 ? "skip" : { name: pickOne(others, rand)! };
+}
+
+// Four rounds' best pick: a card that isn't its own (picked or lent by the bot), preferring
+// the ones most on-mood (the song's crate slot is the round's mood). The order of the card.
+export function decideBest(me: MeView, self: string, pub: Pub, rand: Rand = Math.random): number | null {
+  const cards = (pub.game?.cards ?? []).filter((c) => c.picker !== self && c.lender !== self && typeof c.order === "number");
+  if (!cards.length) return null;
+  const moodOf = (c: { picker: string; lender?: string; trackId: number }) => pub.members.find((m) => m.name === (c.lender ?? c.picker))?.crate?.find((t) => t.trackId === c.trackId)?.slot ?? null;
+  const onMood = cards.filter((c) => me.slot && moodOf(c) === me.slot);
+  return pickOne(onMood.length ? onMood : cards, rand)!.order!;
+}
+
+// A ghost's private guess (Knockout): the same reading of the table as a vote, but always a name.
+export function decideGuess(me: MeView, self: string, pub: Pub, rand: Rand = Math.random): string | null {
+  const v = decideVote(me, self, pub, rand);
+  if (v !== "skip") return v.name;
+  const others = (pub.game?.tally ?? []).map((t) => t.name).filter((n) => n !== self);
+  return pickOne(others, rand) ?? null;
 }
 
 // A voted-out mole's guess: the option sharing the most words with the songs that
