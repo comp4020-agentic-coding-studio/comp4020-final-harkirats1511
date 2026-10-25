@@ -1,8 +1,6 @@
 import type { APIRoute } from "astro";
 import { json, personFromCookies } from "../../../lib/auth.ts";
-import {
-  createTable, DEFAULT_PICK_SECONDS, DEFAULT_SLOT_SECONDS, DEFAULT_VOTE_SECONDS,
-} from "../../../lib/tables.ts";
+import { createTable, isPace, PACES } from "../../../lib/tables.ts";
 import { refused } from "../../../lib/log.ts";
 
 const MIN_SECONDS = 2;
@@ -27,14 +25,18 @@ export const POST: APIRoute = async ({ cookies, request }) => {
   if (typeof autoplay !== "boolean") return json({ error: "autoplay is true or false." }, 400);
   const priv = body.private ?? false;
   if (typeof priv !== "boolean") return json({ error: "private is true or false." }, 400);
-  const slotSeconds = seconds(body.slotSeconds, DEFAULT_SLOT_SECONDS, 120);
+  // A pace preset ("quick" | "normal" | "chill") sets the three timings; a number sent
+  // alongside it still wins, so the form's Custom disclosure needs no preset.
+  if (body.pace !== undefined && !isPace(body.pace)) return json({ error: "pace is quick, normal or chill." }, 400);
+  const pace = PACES[body.pace === undefined ? "normal" : (body.pace as keyof typeof PACES)];
+  const slotSeconds = seconds(body.slotSeconds, pace.slotSeconds, 120);
   if (slotSeconds === null) return json({ error: "slotSeconds is a whole number of seconds." }, 400);
-  const pickSeconds = seconds(body.pickSeconds, DEFAULT_PICK_SECONDS);
-  const voteSeconds = seconds(body.voteSeconds, DEFAULT_VOTE_SECONDS);
+  const pickSeconds = seconds(body.pickSeconds, pace.pickSeconds);
+  const voteSeconds = seconds(body.voteSeconds, pace.voteSeconds);
   if (pickSeconds === null || voteSeconds === null) {
     return json({ error: "pickSeconds and voteSeconds are whole numbers of seconds." }, 400);
   }
-  // The number of moles is the rule (1 for 3 to 5 players, 2 for 6 to 8), not an option; a `moles` in the body is ignored.
+  // The mole count is chosen in the lobby (POST /api/tables/:code/moles), where the player count is known; a `moles` here is ignored.
   const moles = null;
   return json({ code: createTable(me.id, { pickSeconds, voteSeconds, moles, autoplay, slotSeconds, private: priv }) }, 201);
 };
