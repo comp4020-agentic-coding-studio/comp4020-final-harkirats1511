@@ -173,6 +173,11 @@ booths. See `docs/decisions/0004`, `0005` and `0006`.
 
 - Decisions: `docs/decisions/`. Write a new record when one changes.
 - Checks: `spec/`, run by `pnpm check` against the running app (`APP_URL`).
+  A full check is `APP_URL=… LOG_TOKEN=… DATABASE_PATH=… pnpm check` against a
+  fresh local build, and it must show 0 skipped. Without the token and the
+  database path the leak and legacy-crate specs skip, and a skip is not a pass.
+  CI runs it that way.
+- `pnpm typecheck:astro` must show 0 errors. `pnpm check` doesn't cover the pages.
 - Judged, not enforced: whether it is fun, and whether it teaches you something
   about your friends' taste. Those are argued in `README.md`.
 
@@ -180,3 +185,6 @@ booths. See `docs/decisions/0004`, `0005` and `0006`.
 
 Corrections go here or into `spec/`, not into re-prompting. When the same
 mistake happens twice, add the rule or the check that would have caught it.
+
+A new migration isn't done until it has booted on a database made by the
+previous release, with a game left running in it.
