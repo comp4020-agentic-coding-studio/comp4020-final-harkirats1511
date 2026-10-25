@@ -9,7 +9,7 @@ import { crateComplete, listTaste } from "./taste.ts";
 import { PROMPTS, SLOTS, type Slot } from "./prompts.ts";
 import { log, personTag, refused, tableScope, tag } from "./log.ts";
 import {
-  avatars, gamePlayers, gamePrompts, gameThemes, games, people, picks, tableMembers, tableRemovals, tableReports, tables, tasteTracks, votes,
+  avatars, bestVotes, gamePlayers, gamePrompts, gameThemes, games, ghostGuesses, people, picks, roundMoles, roundResults, roundScores, tableMembers, tableRemovals, tableReports, tables, tasteTracks, votes,
 } from "./schema.ts";
 
 // No I or O: they read as 1 and 0 when a code is shouted across a room.
@@ -36,7 +36,12 @@ export const isPace = (p: unknown): p is Pace => typeof p === "string" && Object
 export type TableOptions = {
   pickSeconds: number; voteSeconds: number; moles: number | null; autoplay: boolean; slotSeconds: number;
   private: boolean;
+  format?: Format;
 };
+// The two ways to play (decision 0010): vote someone out each round, or four rounds for points.
+export const FORMATS = ["knockout", "four"] as const;
+export type Format = (typeof FORMATS)[number];
+export const isFormat = (f: unknown): f is Format => typeof f === "string" && (FORMATS as readonly string[]).includes(f);
 export const REPORT_REASONS = ["rude names", "spam", "trolling the game", "something else"];
 
 export function normaliseCode(raw: unknown): string {
@@ -67,7 +72,7 @@ export function createTable(hostId: string, opts: TableOptions): string {
         tx.insert(tables).values({ code, hostPersonId: hostId, status: "open", ...opts, createdAt: now }).run();
         tx.insert(tableMembers).values({ tableCode: code, personId: hostId, joinedAt: now }).run();
       });
-      log(tableScope(code), `${personTag(hostId)} created the table · pick ${opts.pickSeconds}s, vote ${opts.voteSeconds}s${opts.autoplay ? `, autoplay ${opts.slotSeconds}s/track` : ""}${opts.private ? ", private" : ""}`);
+      log(tableScope(code), `${personTag(hostId)} created the table · pick ${opts.pickSeconds}s, vote ${opts.voteSeconds}s${opts.format === "four" ? ", four rounds" : ""}${opts.autoplay ? `, autoplay ${opts.slotSeconds}s/track` : ""}${opts.private ? ", private" : ""}`);
       notifyTable(code);
       return code;
     } catch {
@@ -170,6 +175,10 @@ export function isBotPerson(personId: string): boolean {
   return !!db.select({ b: people.isBot }).from(people).where(eq(people.id, personId)).get()?.b;
 }
 
+export function setFormat(code: string, format: Format) {
+  db.update(tables).set({ format }).where(eq(tables.code, code)).run();
+}
+
 export function setMoles(code: string, moles: number | null) {
   db.update(tables).set({ moles }).where(eq(tables.code, code)).run();
 }
@@ -222,8 +231,12 @@ export type PublicCard = {
 // may have left the table since; their name still shows.
 export type PastRound = {
   round: number; prompt: string; slot: Slot; cards: PublicCard[]; ejected: string | null; wasMole: boolean;
+  // Four rounds: this round's moles and what each player scored in it.
+  moles?: string[]; points?: { name: string; points: number }[];
 };
 export type PublicGame = {
+  // "knockout" or "four", fixed when the game started.
+  format: Format;
   round: number;
   phase: string;
   deadline: number | null;
@@ -239,6 +252,10 @@ export type PublicGame = {
   // Vote: a count per alive player and for skip, never who cast them.
   tally?: { name: string; votes: number }[];
   skips?: number;
+  // Four rounds, vote: a count per card (by its play order), never who cast them.
+  bestTally?: { order: number; votes: number }[];
+  // Four rounds: every player's score as of the last reveal (never changes during a vote).
+  scores?: { name: string; score: number }[];
   // True once everyone who can vote has: the deadline is the end of the last call.
   lastCall?: boolean;
   // Steal: who the room voted out. Never the options or the prompt.
@@ -255,6 +272,10 @@ export type PublicGame = {
     ejected: string | null;
     wasMole: boolean;
     stole: boolean;
+    // Four rounds: the round's moles, who chose which card as best, and what each player scored.
+    moles?: string[];
+    bestVotes?: { voter: string; order: number; picker: string; lender?: string }[];
+    points?: { name: string; points: number }[];
   };
   // Rounds already revealed, oldest first, never the round in play before its
   // reveal. At game over, every round.
@@ -263,8 +284,12 @@ export type PublicGame = {
   borrowed: string[];
   // Track ids heard in earlier rounds (this round's too once its picks are public).
   played: number[];
-  // "players", "moles", or "none" (abandoned: nobody picked).
+  // "players", "moles", "points" (Four rounds, finished: see `winners`), or "none" (abandoned).
   winner?: string;
+  // Four rounds, game over: the highest score(s), ties share.
+  winners?: string[];
+  // Knockout, game over: each ghost's guess per round, and how many hit a mole.
+  ghostGuesses?: { ghost: string; guesses: { round: number; guess: string; hit: boolean }[]; hits: number }[];
   // Why it ended, when not the plain win: "final-vote" | "round-cap" | "nobody-picked".
   ending?: string;
   // Who the moles were, only once the game is over; includes any who left.
@@ -286,6 +311,8 @@ export type PublicTable = {
   members: { name: string; avatar: Avatar; crateReady: boolean; crateCount: number; bot?: true; in?: true; crate?: PublicCrateTrack[] }[];
   // How many moles the host asked for (1 or 2), or null for the plain rule. A setting, not a role.
   moleChoice: number | null;
+  // The format the next game (or the lobby) is set to; the running game's own is game.format.
+  format: Format;
   game?: PublicGame;
 };
 
@@ -342,7 +369,9 @@ function publicGame(code: string): PublicGame | undefined {
     .where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.left, 0)))
     .orderBy(asc(tableMembers.joinedAt), asc(people.name))
     .all();
+  const four = g.format === "four";
   const out: PublicGame = {
+    format: four ? "four" : "knockout",
     round: g.round,
     phase: g.phase,
     deadline: g.deadline,
@@ -354,6 +383,10 @@ function publicGame(code: string): PublicGame | undefined {
     borrowed: [],
     played: playedTrackIds(db, g),
   };
+  // Four rounds: scores as of the last reveal (the column only changes in the transaction that opens a reveal).
+  if (four) out.scores = db.select({ name: people.name, score: gamePlayers.score }).from(gamePlayers).innerJoin(people, eq(people.id, gamePlayers.personId))
+    .innerJoin(tableMembers, and(eq(tableMembers.personId, gamePlayers.personId), eq(tableMembers.tableCode, code)))
+    .where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.left, 0))).orderBy(asc(tableMembers.joinedAt), asc(people.name)).all();
   // Borrows are public once their round's picks are closed; this round's, while
   // picking, are not.
   out.borrowed = [
@@ -383,7 +416,9 @@ function publicGame(code: string): PublicGame | undefined {
     out.winner = g.winner;
     if (g.endReason) out.ending = g.endReason;
     // From the game's own players, seated or not: a mole who left is still named.
-    out.moles = db
+    out.moles = four
+      ? [...new Set(db.select({ name: people.name }).from(roundMoles).innerJoin(people, eq(people.id, roundMoles.personId)).where(eq(roundMoles.gameId, g.id)).all().map((r) => r.name))].sort()
+      : db
       .select({ name: people.name })
       .from(gamePlayers)
       .innerJoin(people, eq(people.id, gamePlayers.personId))
@@ -391,6 +426,17 @@ function publicGame(code: string): PublicGame | undefined {
       .orderBy(asc(people.name))
       .all()
       .map((r) => r.name);
+    if (four) {
+      const top = Math.max(...out.scores!.map((p) => p.score));
+      out.winners = out.scores!.filter((p) => p.score === top).map((p) => p.name);
+    } else {
+      // A ghost's guesses were private all game; now each ghost's hits are shown.
+      const roleById = new Map(db.select({ id: gamePlayers.personId, role: gamePlayers.role }).from(gamePlayers).where(eq(gamePlayers.gameId, g.id)).all().map((r) => [r.id, r.role]));
+      const gs = db.select().from(ghostGuesses).where(eq(ghostGuesses.gameId, g.id)).orderBy(asc(ghostGuesses.round)).all();
+      const by = new Map<string, { round: number; guess: string; hit: boolean }[]>();
+      for (const x of gs) by.set(x.ghostPersonId, [...(by.get(x.ghostPersonId) ?? []), { round: x.round, guess: personName(x.guessPersonId) ?? "", hit: roleById.get(x.guessPersonId) === "mole" }]);
+      out.ghostGuesses = [...by].map(([id, guesses]) => ({ ghost: personName(id) ?? "", guesses, hits: guesses.filter((x) => x.hit).length })).sort((a, b) => a.ghost.localeCompare(b.ghost));
+    }
     out.prompts = db
       .select({ round: gamePrompts.round, promptId: gamePrompts.promptId, slot: gamePrompts.slot })
       .from(gamePrompts)
@@ -414,6 +460,10 @@ function publicGame(code: string): PublicGame | undefined {
       .filter((v) => here.has(v.voter));
     out.tally = inGame.filter((p) => p.ejected === null).map((p) => ({ name: p.name, votes: cast.filter((v) => v.choice === p.id).length }));
     out.skips = cast.filter((v) => v.choice === "skip").length;
+    if (four) {
+      const bests = db.select({ p: bestVotes.pickPersonId, v: bestVotes.voterPersonId }).from(bestVotes).where(and(eq(bestVotes.gameId, g.id), eq(bestVotes.round, g.round))).all().filter((b) => here.has(b.v));
+      out.bestTally = (out.cards ?? []).map((c) => ({ order: c.order, votes: bests.filter((b) => personName(b.p) === c.picker).length }));
+    }
     if (g.lastCall) out.lastCall = true;
   }
   {
@@ -427,6 +477,11 @@ function publicGame(code: string): PublicGame | undefined {
       .innerJoin(people, eq(people.id, gamePlayers.personId))
       .where(eq(gamePlayers.gameId, g.id))
       .all();
+    const results = new Map(db.select().from(roundResults).where(eq(roundResults.gameId, g.id)).all().map((r) => [r.round, r]));
+    const roundMoleNames = four ? db.select({ round: roundMoles.round, name: people.name }).from(roundMoles).innerJoin(people, eq(people.id, roundMoles.personId)).where(eq(roundMoles.gameId, g.id)).all() : [];
+    const roundPts = four
+      ? db.select({ round: roundScores.round, name: people.name, points: roundScores.points }).from(roundScores).innerJoin(people, eq(people.id, roundScores.personId)).where(eq(roundScores.gameId, g.id)).orderBy(asc(people.name)).all()
+      : [];
     out.past = db
       .select()
       .from(gamePrompts)
@@ -438,13 +493,21 @@ function publicGame(code: string): PublicGame | undefined {
         const ejected = everyone.find((p) => p.ejected === r.round);
         // A right steal ejects nobody, but the mole it names was the room's choice.
         const stoleIt = r.round === g.round && g.stole ? everyone.find((p) => p.id === g.stealPersonId) : undefined;
-        return {
+        const base = {
           round: r.round,
           prompt: promptById(r.promptId)?.text ?? "",
           slot: r.slot as Slot,
           cards: cardsOf(g.id, r.round),
           ejected: ejected?.name ?? null,
           wasMole: (ejected ?? stoleIt)?.role === "mole",
+        };
+        if (!four) return base;
+        // Four rounds: the round's moles and points are public once it has been revealed; wasMole is whether the room caught one.
+        return {
+          ...base,
+          wasMole: results.get(r.round)?.caught === 1,
+          moles: roundMoleNames.filter((m) => m.round === r.round).map((m) => m.name).sort(),
+          points: roundPts.filter((m) => m.round === r.round).map(({ name, points }) => ({ name, points })),
         };
       });
   }
@@ -474,6 +537,28 @@ function publicGame(code: string): PublicGame | undefined {
         wasMole: !!accusedId && roleOf(g.id, accusedId) === "mole",
         stole: !!g.stole,
       };
+      if (four) {
+        const res = db.select().from(roundResults).where(and(eq(roundResults.gameId, g.id), eq(roundResults.round, g.round))).get();
+        const mine = out.past.find((r) => r.round === g.round);
+        const cards = out.reveal.cards;
+        out.reveal.accused = nameOf(res?.accusedPersonId ?? null);
+        out.reveal.ejected = null;
+        out.reveal.wasMole = res?.caught === 1;
+        out.reveal.stole = res?.stole === 1;
+        out.reveal.moles = mine?.moles ?? [];
+        out.reveal.points = mine?.points ?? [];
+        out.reveal.bestVotes = db
+          .select({ voter: people.name, pick: bestVotes.pickPersonId })
+          .from(bestVotes)
+          .innerJoin(people, eq(people.id, bestVotes.voterPersonId))
+          .where(and(eq(bestVotes.gameId, g.id), eq(bestVotes.round, g.round)))
+          .orderBy(asc(people.name))
+          .all()
+          .flatMap((b) => {
+            const c = cards.find((x) => x.picker === personName(b.pick));
+            return c ? [{ voter: b.voter, order: c.order, picker: c.picker, ...(c.lender ? { lender: c.lender } : {}) }] : [];
+          });
+      }
     }
   }
   return out;
@@ -493,7 +578,7 @@ function roleOf(gameId: string, personId: string): string | undefined {
 
 export function publicState(code: string): PublicTable | null {
   const t = db
-    .select({ code: tables.code, status: tables.status, host: people.name, private: tables.private, moles: tables.moles })
+    .select({ code: tables.code, status: tables.status, host: people.name, private: tables.private, moles: tables.moles, format: tables.format })
     .from(tables)
     .innerJoin(people, eq(people.id, tables.hostPersonId))
     .where(eq(tables.code, code))
@@ -545,7 +630,7 @@ export function publicState(code: string): PublicTable | null {
     }));
   const game = publicGame(code);
   const { moles, ...rest } = t;
-  const head = { ...rest, moleChoice: moles };
+  const head = { ...rest, moleChoice: moles, format: (rest.format === "four" ? "four" : "knockout") as Format };
   return game ? { ...head, members, game } : { ...head, members };
 }
 
@@ -718,6 +803,7 @@ export function historyFor(personId: string, limit = 20): HistoryGame[] {
     .all();
   const themes = db.select().from(gameThemes).where(inArray(gameThemes.gameId, ids)).orderBy(asc(gameThemes.round)).all();
   const prompts = db.select().from(gamePrompts).where(inArray(gamePrompts.gameId, ids)).orderBy(asc(gamePrompts.round)).all();
+  const fourMoles = db.select().from(roundMoles).where(and(inArray(roundMoles.gameId, ids), eq(roundMoles.personId, personId))).all();
   const lender = alias(people, "lender");
   const myPicks = db
     .select({ gameId: picks.gameId, round: picks.round, title: picks.title, artist: picks.artist, lender: lender.name })
@@ -731,6 +817,7 @@ export function historyFor(personId: string, limit = 20): HistoryGame[] {
       ? old.map((t) => ({ round: t.round, majority: t.majority, mole: t.mole }))
       : prompts.filter((p) => p.gameId === g.id).map((p) => ({ round: p.round, prompt: promptById(p.promptId)?.text ?? "", slot: p.slot as Slot }));
     const wasMole = g.role === "mole";
+    const dealt = fourMoles.filter((m) => m.gameId === g.id);
     return {
       code: g.code,
       finishedAt: g.finishedAt,
@@ -748,7 +835,7 @@ export function historyFor(personId: string, limit = 20): HistoryGame[] {
           // Old games: their own side of the pair, the odd one while a mole and still in.
           const odd = wasMole && (g.ejected === null || p.round <= g.ejected);
           const theme = r.prompt ?? (odd ? r.mole : r.majority) ?? "";
-          return [{ round: p.round, theme, wasMole, title: p.title, artist: p.artist, ...(p.lender ? { lender: p.lender } : {}) }];
+          return [{ round: p.round, theme, wasMole: wasMole || dealt.some((m) => m.round === p.round), title: p.title, artist: p.artist, ...(p.lender ? { lender: p.lender } : {}) }];
         }),
     };
   });

@@ -1,7 +1,7 @@
 import { randomInt, randomUUID } from "node:crypto";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "./db.ts";
-import { gamePlayers, gamePrompts, games, people, picks, tableMembers, tableRemovals, tables, votes } from "./schema.ts";
+import { bestVotes, gamePlayers, gamePrompts, games, ghostGuesses, people, picks, roundMoles, roundResults, roundScores, tableMembers, tableRemovals, tables, votes } from "./schema.ts";
 import { log, personTag, tableScope } from "./log.ts";
 import { PROMPTS, SLOTS, type Slot } from "./prompts.ts";
 import { crateComplete, crateTrack, TASTE_MAX } from "./taste.ts";
@@ -31,6 +31,13 @@ export const STEAL_OPTIONS = 8;
 // A game never runs past this round: a crate has 12 songs, so by round 12 the
 // crates are nearly spent. The moles win if they are still in after its reveal.
 export const MAX_ROUNDS = TASTE_MAX;
+// Four rounds (decision 0010): one round per mood. Scoring, per round (CLAUDE.md "Formats").
+export const FOUR_ROUNDS = SLOTS.length;
+export const SCORE_CATCH = 2; // a non-mole who voted for a mole
+export const SCORE_BEST = 1; // a best-pick vote: to the card's picker, and again to its lender
+export const SCORE_LEND = 1;
+export const SCORE_ESCAPE = 2; // each mole, when the room's top mole vote isn't a mole
+export const SCORE_STEAL = 3; // a caught mole's right guess
 // The seats the moles win at: with this many left, a vote that ejects nobody ends the game.
 const FINAL_VOTE_ALIVE = 3;
 // Listening that the host doesn't move on gets this much slack past the tracks.
@@ -68,7 +75,7 @@ export const PHASES: Record<Phase, Entry> = {
   steal: { next: ["reveal", "over"], deadline: () => secs(STEAL_SECONDS), clear: { lastCall: 0 } },
   reveal: { next: ["pick", "over"], deadline: () => secs(REVEAL_SECONDS), clear: { lastCall: 0, stealOptions: null } },
   // A finished game is stored as phase "reveal" with a winner, so the public `phase` is unchanged.
-  over: { next: [], deadline: () => null, clear: { lastCall: 0 } },
+  over: { next: [], deadline: () => null, clear: { lastCall: 0, stealOptions: null } },
 };
 
 // The phase a game is in: "over" once it has a winner (including "none", abandoned).
@@ -133,6 +140,22 @@ function drawPrompt(d: Tx, g: { id: string; slotOrder: string | null }, round: n
 const promptOf = (d: Tx | typeof db, gameId: string, round: number) =>
   d.select().from(gamePrompts).where(and(eq(gamePrompts.gameId, gameId), eq(gamePrompts.round, round))).get();
 
+const isFour = (g: { format: string }) => g.format === "four";
+
+// Four rounds: deal this round's moles afresh from everyone in play (the same count rule as ever).
+function dealMoles(d: Tx, gameId: string, round: number, ids: string[], count: number) {
+  for (const id of shuffle(ids).slice(0, count)) d.insert(roundMoles).values({ gameId, round, personId: id }).run();
+}
+
+// Who is a mole in this round of a Four rounds game.
+const moleIdsOf = (d: Tx | typeof db, gameId: string, round: number): Set<string> =>
+  new Set(d.select({ p: roundMoles.personId }).from(roundMoles).where(and(eq(roundMoles.gameId, gameId), eq(roundMoles.round, round))).all().map((r) => r.p));
+
+// Whether this person is dealt as a mole in the round in play (either format).
+function isMoleNow(d: Tx | typeof db, g: Game, role: string, personId: string): boolean {
+  return isFour(g) ? moleIdsOf(d, g.id, g.round).has(personId) : role === "mole";
+}
+
 // ---- starting ----
 
 export type StartResult = { ok: true } | Fail;
@@ -158,21 +181,25 @@ export function startGame(code: string, by?: string): StartResult {
     const moleCount = effectiveMoles(members.length, t.moles);
     const id = randomUUID();
     const now = Date.now();
+    // Round n draws a prompt of slotOrder[n - 1]: in Four rounds that is each mood once, shuffled.
     const slotOrder = JSON.stringify(shuffle([...SLOTS]));
+    const format = t.format === "four" ? "four" : "knockout";
     tx.insert(games)
-      .values({ id, tableCode: code, round: 1, phase: "pick", deadline: PHASES.pick.deadline(t, { cards: 0 }), startedAt: now, slotOrder })
+      .values({ id, tableCode: code, round: 1, phase: "pick", deadline: PHASES.pick.deadline(t, { cards: 0 }), startedAt: now, slotOrder, format })
       .run();
-    // Roles are dealt after the crates lock (they lock the moment this row exists).
+    // Roles are dealt after the crates lock (they lock the moment this row exists). Four rounds
+    // keeps game_players.role "player" for everyone: its moles are dealt per round (round_moles).
     const moles = new Set(shuffle(members.map((m) => m.id)).slice(0, moleCount));
     for (const m of members) {
-      tx.insert(gamePlayers).values({ gameId: id, personId: m.id, role: moles.has(m.id) ? "mole" : "player" }).run();
+      tx.insert(gamePlayers).values({ gameId: id, personId: m.id, role: format === "knockout" && moles.has(m.id) ? "mole" : "player" }).run();
     }
+    if (format === "four") dealMoles(tx, id, 1, members.map((m) => m.id), moleCount);
     drawPrompt(tx, { id, slotOrder }, 1);
     tx.update(tables).set({ status: "playing" }).where(eq(tables.code, code)).run();
     // "I'm in" belonged to the game-over screen: a new game starts from nobody in.
     tx.update(tableMembers).set({ rematch: false }).where(eq(tableMembers.tableCode, code)).run();
     // Player count only: roles and prompts stay secret until the reveal.
-    log(tableScope(code), `${by ? `${by} ` : ""}started the game · ${members.length} players · round 1`);
+    log(tableScope(code), `${by ? `${by} ` : ""}started the game · ${members.length} players · ${format === "four" ? "four rounds · " : ""}round 1`);
     return { ok: true };
   });
   if (result.ok) {
@@ -210,22 +237,21 @@ function assignOrder(d: Tx, g: Game): number {
   return rows.length;
 }
 
-export type Winner = "players" | "moles" | "none";
+// "points" is the winner of a finished Four rounds game (who won is `winners` in the public state).
+export type Winner = "players" | "moles" | "none" | "points";
 // Why a game ended when it was not simply "every mole out" or "moles at parity":
 // the public state carries it so the screen can say so.
-export type Ending = "final-vote" | "round-cap" | "nobody-picked" | "update";
+export type Ending = "final-vote" | "round-cap" | "nobody-picked" | "update" | "too-few";
 
 // " · moles: A, B" for the game-over line: the game-over screen names every mole,
 // including any who left, so the log may too. An abandoned game (no winner) shows
 // no roles, so its line names none.
 function moleNames(d: Tx, g: Game, winner: Winner): string {
   if (winner === "none") return "";
-  const names = d
-    .select({ id: gamePlayers.personId })
-    .from(gamePlayers)
-    .where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.role, "mole")))
-    .all()
-    .map((r) => personTag(r.id));
+  const ids = isFour(g)
+    ? [...new Set(d.select({ p: roundMoles.personId }).from(roundMoles).where(eq(roundMoles.gameId, g.id)).all().map((r) => r.p))]
+    : d.select({ id: gamePlayers.personId }).from(gamePlayers).where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.role, "mole"))).all().map((r) => r.id);
+  const names = ids.map((id) => personTag(id));
   return names.length ? ` · moles: ${names.join(", ")}` : "";
 }
 
@@ -267,6 +293,7 @@ function logReveal(d: Tx, g: Game, accused: string | null, out: string | null, s
 // skip on top, or no votes, ejects nobody. A mole with a steal left gets to
 // guess the prompt before the verdict stands.
 function resolveVote(d: Tx, g: Game) {
+  if (isFour(g)) return resolveVoteFour(d, g);
   const alive = new Set(aliveIn(d, g.id).map((p) => p.personId));
   const tally = new Map<string, number>();
   for (const v of d.select().from(votes).where(and(eq(votes.gameId, g.id), eq(votes.round, g.round))).all()) {
@@ -301,6 +328,93 @@ function settleVerdict(d: Tx, g: Game, accused: string | null, stole: boolean) {
   if (g.round >= MAX_ROUNDS) return finish(d, done, "moles", "round-cap");
 }
 
+// ---- Four rounds ----
+
+// What the locked mole vote means for the round (pure, so the rule can be tested):
+//  - nobody, or skip, or a non-mole on top, or a tie that includes any of those: the moles got away;
+//  - one mole on top: caught, and they steal;
+//  - several moles tied on top and nobody else level with them: still "the top mole vote is a
+//    mole" (caught), and `pick` chooses which of the tied moles steals.
+export function judgeFour(tally: Map<string, number>, moles: Set<string>, pick: (n: number) => number = randomInt) {
+  const best = Math.max(0, ...tally.values());
+  const top = [...tally].filter(([, n]) => n === best).map(([c]) => c);
+  if (best > 0 && top.every((c) => c !== "skip" && moles.has(c))) return { caught: true as const, steal: top[pick(top.length)], tied: top.length > 1, accused: null };
+  const accused = best > 0 && top.length === 1 && top[0] !== "skip" ? top[0] : null;
+  return { caught: false as const, steal: null, tied: false, accused };
+}
+
+function resolveVoteFour(d: Tx, g: Game) {
+  const here = new Set(inPlay(d, g.id).map((p) => p.personId));
+  const tally = new Map<string, number>();
+  for (const v of d.select().from(votes).where(and(eq(votes.gameId, g.id), eq(votes.round, g.round))).all()) {
+    if (!here.has(v.voterPersonId)) continue;
+    const c = v.choice ?? "skip";
+    if (c === "skip" || here.has(c)) tally.set(c, (tally.get(c) ?? 0) + 1);
+  }
+  const j = judgeFour(tally, moleIdsOf(d, g.id, g.round));
+  if (j.caught) {
+    if (j.tied) log(tableScope(g.tableCode), `the top vote was tied between moles · one of them gets the steal · round ${g.round}`);
+    return toSteal(d, g, j.steal);
+  }
+  settleRoundFour(d, g, j.accused, false, false);
+}
+
+// The round's points, from its two ballots, the round's moles and the steal. Written once, in
+// the same transaction that opens the reveal, so a score never moves while a vote is open.
+export function roundPoints(o: {
+  moles: Set<string>; players: string[]; moleVotes: { voter: string; choice: string }[];
+  bestVotes: { voter: string; picker: string; lender: string | null }[]; caught: boolean; stole: string | null;
+}): Map<string, number> {
+  const pts = new Map<string, number>(o.players.map((p) => [p, 0]));
+  const add = (p: string | null, n: number) => {
+    if (p && pts.has(p)) pts.set(p, pts.get(p)! + n);
+  };
+  for (const v of o.moleVotes) if (!o.moles.has(v.voter) && o.moles.has(v.choice)) add(v.voter, SCORE_CATCH);
+  for (const b of o.bestVotes) {
+    add(b.picker, SCORE_BEST);
+    if (b.lender) add(b.lender, SCORE_LEND);
+  }
+  if (!o.caught) for (const m of o.moles) add(m, SCORE_ESCAPE);
+  if (o.stole) add(o.stole, SCORE_STEAL);
+  return pts;
+}
+
+function settleRoundFour(d: Tx, g: Game, accused: string | null, caught: boolean, stole: boolean) {
+  const play = inPlay(d, g.id).map((p) => p.personId);
+  const here = new Set(play);
+  const moles = new Set([...moleIdsOf(d, g.id, g.round)].filter((m) => here.has(m)));
+  const picksOf = d.select().from(picks).where(and(eq(picks.gameId, g.id), eq(picks.round, g.round))).all();
+  const pts = roundPoints({
+    moles,
+    players: play,
+    moleVotes: d.select().from(votes).where(and(eq(votes.gameId, g.id), eq(votes.round, g.round))).all()
+      .filter((v) => here.has(v.voterPersonId) && v.choice && v.choice !== "skip")
+      .map((v) => ({ voter: v.voterPersonId, choice: v.choice! })),
+    bestVotes: d.select().from(bestVotes).where(and(eq(bestVotes.gameId, g.id), eq(bestVotes.round, g.round))).all()
+      .filter((b) => here.has(b.voterPersonId))
+      .flatMap((b) => {
+        const card = picksOf.find((p) => p.personId === b.pickPersonId);
+        return card ? [{ voter: b.voterPersonId, picker: card.personId, lender: card.lenderPersonId }] : [];
+      }),
+    caught,
+    stole: stole ? accused : null,
+  });
+  d.insert(roundResults).values({ gameId: g.id, round: g.round, accusedPersonId: accused, caught: caught ? 1 : 0, stole: stole ? 1 : 0 }).run();
+  for (const [personId, points] of pts) {
+    d.insert(roundScores).values({ gameId: g.id, round: g.round, personId, points }).run();
+    if (points) d.update(gamePlayers).set({ score: sql`${gamePlayers.score} + ${points}` }).where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.personId, personId))).run();
+  }
+  enter(d, g, "reveal", { set: { ejectedPersonId: null, stole: stole ? 1 : 0 } });
+  // The reveal names the round's moles and the prompt; never who voted for whom or what anyone gained.
+  const names = [...moleIdsOf(d, g.id, g.round)].map(personTag);
+  const prompt = promptById(promptOf(d, g.id, g.round)?.promptId ?? "")?.text ?? "?";
+  log(
+    tableScope(g.tableCode),
+    `reveal · prompt "${prompt}" · moles: ${names.join(", ") || "none"} · ${caught ? (stole ? "caught, and stole it" : "caught") : "got away"} · round ${g.round}`,
+  );
+  if (g.round >= FOUR_ROUNDS) finish(d, { ...g, phase: "reveal" }, "points");
+}
+
 // A mole was voted out and has a steal: STEAL_OPTIONS prompts of the round's slot (the
 // real one and the rest decoys), shuffled, in a column only /me reads for them.
 function toSteal(d: Tx, g: Game, mole: string) {
@@ -326,6 +440,7 @@ function resolveSteal(d: Tx, g: Game) {
   const mole = g.stealPersonId!;
   const right = !!g.stealGuess && g.stealGuess === promptOf(d, g.id, g.round)?.promptId;
   log(tableScope(g.tableCode), `${personTag(mole)} ${right ? "stole it (guessed right)" : "missed the steal"} · round ${g.round}`);
+  if (isFour(g)) return settleRoundFour(d, g, mole, true, right);
   settleVerdict(d, g, mole, right);
 }
 
@@ -374,8 +489,15 @@ function step(d: Tx, g: Game, cause: string) {
     // settleVerdict ends the game at the round cap, so a reveal here is never the last.
     enter(d, g, "pick", { cause, note: ` (next round ${g.round + 1})`, set: { round: g.round + 1 } });
     drawPrompt(d, g, g.round + 1);
+    if (isFour(g)) {
+      const ids = inPlay(d, g.id).map((p) => p.personId);
+      dealMoles(d, g.id, g.round + 1, ids, effectiveMoles(ids.length, t.moles));
+    }
   }
 }
+
+// A card is "your own" if you picked it or lent the song it was picked with.
+const isOthersCard = (c: { personId: string; lenderPersonId: string | null }, me: string) => c.personId !== me && c.lenderPersonId !== me;
 
 function pickedThisRound(d: Tx | typeof db, g: Game): Set<string> {
   return new Set(d.select({ p: picks.personId }).from(picks).where(and(eq(picks.gameId, g.id), eq(picks.round, g.round))).all().map((r) => r.p));
@@ -388,6 +510,13 @@ function complete(d: Tx, g: Game): boolean {
   if (g.phase === "pick") {
     const done = pickedThisRound(d, g);
     return alive.every((p) => done.has(p.personId));
+  }
+  if (g.phase === "vote" && isFour(g)) {
+    const moleDone = new Set(d.select({ p: votes.voterPersonId }).from(votes).where(and(eq(votes.gameId, g.id), eq(votes.round, g.round))).all().map((r) => r.p));
+    const bestDone = new Set(d.select({ p: bestVotes.voterPersonId }).from(bestVotes).where(and(eq(bestVotes.gameId, g.id), eq(bestVotes.round, g.round))).all().map((r) => r.p));
+    const cards = d.select().from(picks).where(and(eq(picks.gameId, g.id), eq(picks.round, g.round))).all();
+    // Someone with no card to vote for (only their own are on the table) isn't waited on for best pick.
+    return alive.every((p) => moleDone.has(p.personId) && (bestDone.has(p.personId) || !cards.some((c) => isOthersCard(c, p.personId))));
   }
   if (g.phase === "vote") {
     const done = new Set(d.select({ p: votes.voterPersonId }).from(votes).where(and(eq(votes.gameId, g.id), eq(votes.round, g.round))).all().map((r) => r.p));
@@ -404,11 +533,13 @@ function settle(d: Tx, code: string, why: string) {
   if (!g || g.winner) return;
   // A steal in progress settles first (the guess, or a missed steal if the mole
   // has gone), so a leaving mole is named and ejected before the win is checked.
+  // Four rounds has no parity win; it is abandoned (no winner) when too few are left to play it.
+  if (isFour(g) && inPlay(d, g.id).length < MIN_PLAYERS) return finish(d, g, "none", "too-few");
   if (g.phase === "steal") {
     if (complete(d, g)) step(d, g, why);
     return;
   }
-  const winner = winnerOf(d, g.id);
+  const winner = isFour(g) ? null : winnerOf(d, g.id);
   if (winner) return finish(d, g, winner);
   if (!complete(d, g)) return;
   if (g.phase === "vote") return lastCall(d, g);
@@ -421,7 +552,7 @@ function lastCall(d: Tx, g: Game) {
   if (g.lastCall) return;
   const deadline = Math.min(g.deadline ?? Infinity, Date.now() + LAST_CALL_MS);
   d.update(games).set({ lastCall: 1, deadline }).where(eq(games.id, g.id)).run();
-  log(tableScope(g.tableCode), `last call · everyone has voted · round ${g.round}`);
+  log(tableScope(g.tableCode), `last call · everyone has voted${isFour(g) ? " on both" : ""} · round ${g.round}`);
 }
 
 // A change landed: tell every open session and re-arm the table's timer.
@@ -648,6 +779,63 @@ export function castVote(code: string, personId: string, choice: { name: string 
   return res;
 }
 
+// Four rounds: the best pick. `order` is a card's place in the round's play order (the
+// number on the public card); not your own card (picked by you, or lent by you).
+// Changeable until the vote locks, like the mole vote. Both ballots feed the last call.
+export function castBest(code: string, personId: string, order: number): { ok: true } | Fail {
+  const res = db.transaction((tx): { ok: true } | Fail => {
+    const game = currentGame(code);
+    if (!game || game.winner) return fail(409, "No vote is open.");
+    if (!isFour(game)) return fail(409, "There is no best pick in this format.");
+    const me = playerRow(game, personId);
+    if (!me) return fail(403, "You are watching this game.");
+    if (game.phase !== "vote" || (game.deadline !== null && Date.now() >= game.deadline)) return fail(409, "Voting is not open.");
+    const card = tx.select().from(picks).where(and(eq(picks.gameId, game.id), eq(picks.round, game.round), eq(picks.slot, order))).get();
+    if (!card) return fail(400, "No such card.");
+    if (!isOthersCard(card, personId)) return fail(400, "You can't pick your own card.");
+    const before = tx.select({ p: bestVotes.voterPersonId }).from(bestVotes)
+      .where(and(eq(bestVotes.gameId, game.id), eq(bestVotes.round, game.round), eq(bestVotes.voterPersonId, personId))).get();
+    tx.insert(bestVotes)
+      .values({ gameId: game.id, round: game.round, voterPersonId: personId, pickPersonId: card.personId })
+      .onConflictDoUpdate({ target: [bestVotes.gameId, bestVotes.round, bestVotes.voterPersonId], set: { pickPersonId: card.personId } })
+      .run();
+    // Who cast it, never for which card.
+    if (!before) log(tableScope(code), `${personTag(personId)} chose a best pick · round ${game.round}`);
+    touch(code);
+    settle(tx, code, "everyone voted");
+    return { ok: true };
+  });
+  if (res.ok) flush(code);
+  return res;
+}
+
+// Knockout: a ghost's private guess at who the mole is, once or changed any time during a
+// round's vote. It is stored and shown to nobody (it sends nothing on any stream) until the
+// game is over, when each ghost's guesses and hits are public.
+export function castGhostGuess(code: string, personId: string, name: string): { ok: true } | Fail {
+  return db.transaction((tx): { ok: true } | Fail => {
+    const game = currentGame(code);
+    if (!game || game.winner) return fail(409, "No vote is open.");
+    if (isFour(game)) return fail(409, "There are no ghosts in this format.");
+    const me = playerRow(game, personId);
+    if (!me) return fail(403, "You are watching this game.");
+    if (me.ejectedRound === null) return fail(403, "Only ghosts guess.");
+    if (game.phase !== "vote" || (game.deadline !== null && Date.now() >= game.deadline)) return fail(409, "Voting is not open.");
+    const who = playerByName(tx, game, name);
+    if (!who || who.ejected !== null) return fail(400, "Guess someone still in the game.");
+    if (who.id === personId) return fail(400, "You can't guess yourself.");
+    const before = tx.select({ p: ghostGuesses.ghostPersonId }).from(ghostGuesses)
+      .where(and(eq(ghostGuesses.gameId, game.id), eq(ghostGuesses.round, game.round), eq(ghostGuesses.ghostPersonId, personId))).get();
+    tx.insert(ghostGuesses)
+      .values({ gameId: game.id, round: game.round, ghostPersonId: personId, guessPersonId: who.id })
+      .onConflictDoUpdate({ target: [ghostGuesses.gameId, ghostGuesses.round, ghostGuesses.ghostPersonId], set: { guessPersonId: who.id } })
+      .run();
+    // Not who they guessed, and nothing is sent to anyone: a guess changes nothing public.
+    if (!before) log(tableScope(code), `${personTag(personId)} made a ghost guess · round ${game.round}`);
+    return { ok: true };
+  });
+}
+
 // The voted-out mole's one guess. Only them, only during the steal, only from
 // the options. It ends the steal at once.
 export function castSteal(code: string, personId: string, promptId: string): { ok: true } | Fail {
@@ -729,7 +917,11 @@ export type MyView = {
   // Every track played this game (public anyway), so a picker can skip them.
   played: number[];
   vote?: { name: string } | { skip: true };
-  // Only the voted-out mole during the steal.
+  // Four rounds: the card (its `order`) this person chose as best, during the vote.
+  best?: { order: number };
+  // Knockout ghosts: their own guess this round (private to them, in the vote only).
+  guess?: { name: string };
+  // Only the voted-out mole during the steal (in Four rounds, whoever the room caught).
   steal?: { options: { id: string; text: string }[] };
 };
 
@@ -741,8 +933,10 @@ export function myView(code: string, personId: string): MyView {
   }
   const ghost = me.ejectedRound !== null;
   const prompt = promptOf(db, g.id, g.round);
+  // Four rounds deals moles per round; the role here is for the round in play.
+  const mole = isMoleNow(db, g, me.role, personId);
   const view: MyView = {
-    role: ghost ? "ghost" : me.role === "mole" ? "mole" : "player",
+    role: ghost ? "ghost" : mole ? "mole" : "player",
     picked: pickedThisRound(db, g).has(personId),
     borrowUsed: !!me.borrowUsed,
     played: playedIds(db, g),
@@ -750,7 +944,7 @@ export function myView(code: string, personId: string): MyView {
   if (prompt) {
     view.slot = prompt.slot as Slot;
     // Keyed on the dealt role, so a voted-out mole (a ghost now) is still kept from it.
-    if (me.role !== "mole") view.prompt = promptById(prompt.promptId)?.text;
+    if (!mole) view.prompt = promptById(prompt.promptId)?.text;
   }
   if (g.phase === "vote" && !g.winner && !ghost) {
     const v = db.select({ c: votes.choice }).from(votes)
@@ -758,6 +952,19 @@ export function myView(code: string, personId: string): MyView {
     if (v) {
       const name = v.c && v.c !== "skip" ? db.select({ n: people.name }).from(people).where(eq(people.id, v.c)).get()?.n : undefined;
       view.vote = name ? { name } : { skip: true };
+    }
+  }
+  if (g.phase === "vote" && !g.winner) {
+    if (isFour(g)) {
+      const b = db.select({ p: bestVotes.pickPersonId }).from(bestVotes)
+        .where(and(eq(bestVotes.gameId, g.id), eq(bestVotes.round, g.round), eq(bestVotes.voterPersonId, personId))).get();
+      const order = b && db.select({ s: picks.slot }).from(picks).where(and(eq(picks.gameId, g.id), eq(picks.round, g.round), eq(picks.personId, b.p))).get()?.s;
+      if (order !== undefined && order !== null) view.best = { order };
+    } else if (ghost) {
+      const gu = db.select({ p: ghostGuesses.guessPersonId }).from(ghostGuesses)
+        .where(and(eq(ghostGuesses.gameId, g.id), eq(ghostGuesses.round, g.round), eq(ghostGuesses.ghostPersonId, personId))).get();
+      const n = gu && db.select({ n: people.name }).from(people).where(eq(people.id, gu.p)).get()?.n;
+      if (n) view.guess = { name: n };
     }
   }
   if (g.phase === "steal" && !g.winner && g.stealPersonId === personId) {
