@@ -1,7 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import { personFromCookies } from "../lib/auth.ts";
-import { listTaste, PER_SLOT, TASTE_MAX as MIN_CRATE } from "../lib/taste.ts";
+import { crateLocked, listTaste, PER_SLOT, TASTE_MAX as MIN_CRATE } from "../lib/taste.ts";
 import { SLOTS, SLOT_NAMES } from "../lib/prompts.ts";
 import { getAvatar } from "../lib/avatars.ts";
 import { PICK_SECONDS, SECONDS_PER_TRACK, VOTE_SECONDS } from "../lib/tables.ts";
@@ -12,12 +12,20 @@ const TRACK_OPTS = [15, 20, 30];
 const me = personFromCookies(Astro.cookies);
 const next = Astro.url.searchParams.get("next") ?? "";
 const safeNext = /^(\/t\/[A-Za-z]{4}|\/taste|\/me|\/shop)$/.test(next) ? next : "";
-if (me && safeNext) return Astro.redirect(safeNext);
 const mine = me ? getAvatar(me.id) : null;
 const crate = me ? listTaste(me.id) : [];
 const tasteCount = crate.length;
 const need = SLOTS.map((s) => ({ name: SLOT_NAMES[s], k: PER_SLOT - crate.filter((t) => t.slot === s).length })).filter((n) => n.k > 0);
 const sortedCount = crate.filter((t) => (SLOTS as readonly string[]).includes(t.slot ?? "")).length;
+// Straight after signing in (the form adds ?welcome=1), someone whose crate isn't
+// complete goes to build it, carrying a table link along as ?next. Only then: the
+// home page itself stays reachable for anyone who comes back to it.
+if (me && Astro.url.searchParams.has("welcome") && need.length > 0 && !crateLocked(me.id)) {
+  const to = new URLSearchParams({ welcome: "1" });
+  if (safeNext && safeNext !== "/taste") to.set("next", safeNext);
+  return Astro.redirect(`/taste?${to}`);
+}
+if (me && safeNext) return Astro.redirect(safeNext);
 ---
 <Base title="Mole Records" width="home">
   <div class="home">
@@ -142,7 +150,9 @@ const sortedCount = crate.filter((t) => (SLOTS as readonly string[]).includes(t.
       pin: (form.elements.namedItem("pin") as HTMLInputElement).value,
     });
     if (!res.ok) return say(data.error ?? "Could not sign in.");
-    location.href = form.dataset.next || "/";
+    // The home page decides: a crate under 12 goes to /taste, otherwise on to ?next.
+    const next = form.dataset.next;
+    location.href = next ? `/?welcome=1&next=${encodeURIComponent(next)}` : "/?welcome=1";
   });
 
   const auto = document.getElementById("autoplay") as HTMLInputElement;
