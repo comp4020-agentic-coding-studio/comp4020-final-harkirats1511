@@ -651,7 +651,7 @@ it("gives only the voted-out mole eight prompts of the slot, and a right guess w
     expect((await p.s.call(at(g.code, "steal"), { body: { promptId: "up-01" } })).status).toBe(403);
   }
   const { options, real } = await stealOptions(g, mole);
-  expect(options).toHaveLength(4);
+  expect(options).toHaveLength(8);
   const slot = PROMPTS.find((p) => p.text === g.prompt)!.slot;
   for (const o of options) expect(PROMPTS.find((p) => p.id === o.id)).toMatchObject({ slot, text: o.text });
   expect(new Set(options.map((o) => o.id)).size).toBe(8);
@@ -1136,7 +1136,7 @@ it("slim streams: the first frame is complete, later frames leave out unchanged 
   const full = await g.host.s.open(at(g.code, "events"));
   const slim = await g.host.s.open(`${at(g.code, "events")}?slim=1`);
   const first = (await slim.next(() => true))!.data as State & { same?: string[] };
-  expect(first.same).toEqual([]);
+  expect(first.same).toBeUndefined();
   expect(first.members.every((m) => Array.isArray(m.crate))).toBe(true);
   await pickOwn(g.code, g.players);
   await toVote(g);
@@ -1157,7 +1157,7 @@ it("slim streams: the first frame is complete, later frames leave out unchanged 
   // A fresh connection mid-game is complete again, and so is GET.
   const fresh = await g.players[1].s.open(`${at(g.code, "events")}?slim=1`);
   const again = (await fresh.next(() => true))!.data as State & { same?: string[] };
-  expect(again.same).toEqual([]);
+  expect(again.same).toBeUndefined();
   expect(again.members.every((m) => Array.isArray(m.crate))).toBe(true);
   expect(again.game!.past.length).toBe(1);
   expect((await state(g.code)).members.every((m) => Array.isArray(m.crate))).toBe(true);

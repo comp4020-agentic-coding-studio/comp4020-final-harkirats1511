@@ -18,7 +18,7 @@ export const POST: APIRoute = async ({ params, cookies, request }) => {
     refused(tableScope(code), tag(me), "vote", "not at this table");
     return json({ error: "You are not at this table." }, 403);
   }
-  if (actedTooFast(me.id, () => refused(tableScope(code), tag(me), "vote", "too many requests in a second"))) return json({ error: "Slow down." }, 429);
+  if (actedTooFast(`${me.id}:${code}`, () => refused(tableScope(code), tag(me), "vote", "too many requests in a second"))) return json({ error: "Slow down." }, 429);
   const body = ((await request.json().catch(() => ({}))) ?? {}) as { name?: unknown; skip?: unknown };
   let choice: { name: string } | "skip";
   if (body.skip === true) choice = "skip";

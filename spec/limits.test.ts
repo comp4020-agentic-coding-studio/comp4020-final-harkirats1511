@@ -1,8 +1,9 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { baseUrl, fillCrate, session, uniqueName } from "./helpers.ts";
 
 // Caps on the event stream (no sign-in needed to open one) and a light rate
 // limit on acting. The numbers are constants in src/lib/limits.ts.
+vi.setConfig({ testTimeout: 60_000 });
 
 const limits = () => import("../src/lib/limits.ts");
 

@@ -18,7 +18,7 @@ export const POST: APIRoute = async ({ params, cookies, request }) => {
     refused(tableScope(code), tag(me), "steal", "not at this table");
     return json({ error: "You are not at this table." }, 403);
   }
-  if (actedTooFast(me.id, () => refused(tableScope(code), tag(me), "steal", "too many requests in a second"))) return json({ error: "Slow down." }, 429);
+  if (actedTooFast(`${me.id}:${code}`, () => refused(tableScope(code), tag(me), "steal", "too many requests in a second"))) return json({ error: "Slow down." }, 429);
   const body = ((await request.json().catch(() => ({}))) ?? {}) as { promptId?: unknown };
   if (typeof body.promptId !== "string" || !body.promptId) return json({ error: "Say which prompt you are guessing." }, 400);
   const res = castSteal(code, me.id, body.promptId);

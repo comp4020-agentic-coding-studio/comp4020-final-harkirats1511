@@ -20,7 +20,7 @@ export const POST: APIRoute = async ({ params, cookies, request }) => {
     refused(tableScope(code), tag(me), "pick", "not at this table");
     return json({ error: "You are not at this table." }, 403);
   }
-  if (actedTooFast(me.id, () => refused(tableScope(code), tag(me), "pick", "too many requests in a second"))) return json({ error: "Slow down." }, 429);
+  if (actedTooFast(`${me.id}:${code}`, () => refused(tableScope(code), tag(me), "pick", "too many requests in a second"))) return json({ error: "Slow down." }, 429);
   const body = ((await request.json().catch(() => ({}))) ?? {}) as { trackId?: unknown; from?: unknown };
   const id = body.trackId;
   if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) return json({ error: "Bad track id." }, 400);
