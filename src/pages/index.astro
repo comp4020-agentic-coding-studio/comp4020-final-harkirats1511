@@ -65,6 +65,19 @@ if (me && safeNext) return Astro.redirect(safeNext);
           <label for="autoplay">Play the tracks automatically</label>
         </div>
         <p class="hint" id="autoplay-hint">Each track plays for <span id="autoplay-n">{SECONDS_PER_TRACK}</span> seconds, then voting opens. The host can still pick a track.</p>
+        <fieldset class="pace fmt">
+          <legend>Which game?</legend>
+          <div class="pace-row">
+            <div class="pace-opt">
+              <input type="radio" name="format" id="fmt-knockout" value="knockout" checked />
+              <label for="fmt-knockout"><b>Knockout</b><span>Vote someone out each round. Out players still guess.</span></label>
+            </div>
+            <div class="pace-opt">
+              <input type="radio" name="format" id="fmt-four" value="four" />
+              <label for="fmt-four"><b>Four rounds</b><span>One round per mood. Nobody is out. Score points.</span></label>
+            </div>
+          </div>
+        </fieldset>
         <fieldset class="pace">
           <legend>How fast?</legend>
           <div class="pace-row">
@@ -213,6 +226,7 @@ if (me && safeNext) return Astro.redirect(safeNext);
       autoplay: auto.checked,
       slotSeconds: Number(value("slot-s")),
       private: (document.getElementById("vis-private") as HTMLInputElement).checked,
+      format: (document.getElementById("fmt-four") as HTMLInputElement).checked ? "four" : "knockout",
     });
     if (!res.ok) return say(data.error ?? "Could not create a table.");
     location.href = `/t/${data.code}`;
