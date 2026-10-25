@@ -7,13 +7,21 @@ export function session() {
   let cookie = "";
   return {
     async call(path: string, init: { method?: string; body?: unknown } = {}) {
-      const res = await fetch(new URL(path, baseUrl), {
-        method: init.method ?? (init.body === undefined ? "GET" : "POST"),
-        headers: {
-          ...(init.body === undefined ? {} : { "content-type": "application/json" }),
-          ...(cookie ? { cookie } : {}),
-        },
-        body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      const method = init.method ?? (init.body === undefined ? "GET" : "POST");
+      const send = () =>
+        fetch(new URL(path, baseUrl), {
+          method,
+          headers: {
+            ...(init.body === undefined ? {} : { "content-type": "application/json" }),
+            ...(cookie ? { cookie } : {}),
+          },
+          body: init.body === undefined ? undefined : JSON.stringify(init.body),
+        });
+      // Node's server closes a kept-alive socket after 5 s idle; a GET sent on it at
+      // that moment dies before the app sees it. Seen only off loopback, under load.
+      const res = await send().catch((e: Error) => {
+        if (method === "GET" && /other side closed|socket hang up/i.test(String((e as { cause?: Error }).cause ?? e))) return send();
+        throw e;
       });
       const set = res.headers.getSetCookie?.() ?? [];
       if (set.length) cookie = set.map((c) => c.split(";")[0]).join("; ");
