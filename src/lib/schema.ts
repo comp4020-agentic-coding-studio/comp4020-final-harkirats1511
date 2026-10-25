@@ -48,6 +48,9 @@ export const tables = sqliteTable("tables", {
   voteSeconds: integer("vote_seconds").notNull().default(45),
   speaker: text("speaker").notNull().default("host"),
   moles: integer("moles"),
+  // "knockout" (vote someone out each round) or "four" (Four rounds: points, one round per
+  // mood, nobody out); decision 0010. Copied onto the game when it starts.
+  format: text("format").notNull().default("knockout"),
   // Autoplay: the server plays the round's slots in order, slotSeconds each.
   autoplay: integer("autoplay", { mode: "boolean" }).notNull().default(false),
   slotSeconds: integer("slot_seconds").notNull().default(30),
@@ -160,6 +163,8 @@ export const games = sqliteTable(
     // round n draws a prompt of slotOrder[(n - 1) % 4], so no slot repeats
     // before all four have come up.
     slotOrder: text("slot_order"),
+    // The table's format when this game started ("knockout" | "four"); never changes mid-game.
+    format: text("format").notNull().default("knockout"),
     // The steal phase: the voted-out mole, the four prompt ids they may guess
     // from (JSON, shuffled; moles only ever see them in /me), their guess, and
     // whether it was right (read at the reveal). Cleared when the next round begins.
@@ -192,6 +197,8 @@ export const gamePlayers = sqliteTable(
     // One borrow and one steal per game (1 once used).
     borrowUsed: integer("borrow_used").notNull().default(0),
     stealUsed: integer("steal_used").notNull().default(0),
+    // Four rounds: the running score, changed only inside the transaction that opens a reveal.
+    score: integer("score").notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.gameId, t.personId] })],
 );
@@ -286,3 +293,70 @@ export const avatars = sqliteTable("avatars", {
   mood: text("mood").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });
+
+// Four rounds: who the moles were in each round (roles are dealt again every round, so
+// game_players.role stays "player" there). Read for a round only by its own players' /me,
+// and public from that round's reveal.
+export const roundMoles = sqliteTable(
+  "round_moles",
+  {
+    gameId: text("game_id").notNull().references(() => games.id, { onDelete: "cascade" }),
+    round: integer("round").notNull(),
+    personId: text("person_id").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.gameId, t.round, t.personId] })],
+);
+
+// Four rounds: a person's best-pick vote, changeable until the vote locks. The card is
+// named by its picker (one card per picker per round).
+export const bestVotes = sqliteTable(
+  "best_votes",
+  {
+    gameId: text("game_id").notNull().references(() => games.id, { onDelete: "cascade" }),
+    round: integer("round").notNull(),
+    voterPersonId: text("voter_person_id").notNull(),
+    pickPersonId: text("pick_person_id").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.gameId, t.round, t.voterPersonId] })],
+);
+
+// Four rounds: the points each person got at a round's reveal (the score is their sum).
+export const roundScores = sqliteTable(
+  "round_scores",
+  {
+    gameId: text("game_id").notNull().references(() => games.id, { onDelete: "cascade" }),
+    round: integer("round").notNull(),
+    personId: text("person_id").notNull(),
+    points: integer("points").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.gameId, t.round, t.personId] })],
+);
+
+// Four rounds: how each round's mole vote came out, written at its reveal. accused is the
+// room's choice: a mole that got the top vote (or, in a tie between moles, the one chosen to
+// steal), or the one non-mole on top; null for a tie that includes a non-mole, or skip on top.
+// caught is 1 when the top mole vote was a mole; stole is 1 when that mole then guessed right.
+export const roundResults = sqliteTable(
+  "round_results",
+  {
+    gameId: text("game_id").notNull().references(() => games.id, { onDelete: "cascade" }),
+    round: integer("round").notNull(),
+    accusedPersonId: text("accused_person_id"),
+    caught: integer("caught").notNull().default(0),
+    stole: integer("stole").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.gameId, t.round] })],
+);
+
+// Knockout: a ghost's private guess at who the mole is, one per ghost per round, changeable
+// until the vote locks. Shown to nobody until the game is over.
+export const ghostGuesses = sqliteTable(
+  "ghost_guesses",
+  {
+    gameId: text("game_id").notNull().references(() => games.id, { onDelete: "cascade" }),
+    round: integer("round").notNull(),
+    ghostPersonId: text("ghost_person_id").notNull(),
+    guessPersonId: text("guess_person_id").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.gameId, t.round, t.ghostPersonId] })],
+);
