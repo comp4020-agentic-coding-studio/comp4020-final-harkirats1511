@@ -478,14 +478,91 @@ export function publicState(code: string): PublicTable | null {
 }
 
 // In-process pub/sub: the app runs as a single machine. A listener is told a
-// table changed and re-reads the state itself.
+// table changed and asks for the table's frame.
 const bus = new EventEmitter();
 bus.setMaxListeners(0);
+
+// One frame per table per change. publicState is the expensive part of a vote
+// (crates for every player, the cards of every past round), so it is computed
+// once after a notifyTable and every open stream of that table shares the
+// result. Nothing but notifyTable invalidates it: a pick sends no notify,
+// because it changes nothing public.
+export type Frame = {
+  // The complete public state, as the JSON every stream may send.
+  full: string;
+  // What the crates and past rounds look like, to tell whether a stream has them already.
+  crates: string;
+  past: string;
+  state: PublicTable;
+  slim: Map<string, string>;
+};
+const frames = new Map<string, Frame | null>();
+
+export function tableFrame(code: string): Frame | null {
+  const hit = frames.get(code);
+  if (hit !== undefined) return hit;
+  const state = publicState(code);
+  const frame: Frame | null = state
+    ? {
+        full: JSON.stringify(state),
+        crates: JSON.stringify(state.members.map((m) => m.crate ?? null)),
+        past: JSON.stringify(state.game?.past ?? null),
+        state,
+        slim: new Map(),
+      }
+    : null;
+  frames.set(code, frame);
+  return frame;
+}
+
+// The JSON for a stream that has already been sent `sent` (the crates and past
+// signatures of its last frame), or null on its first frame. A field it already
+// has is left out and named in `same`; the client keeps what it had. A field
+// that is gone (the crates once the game is over) is simply absent, not in `same`.
+function slimJson(frame: Frame, omitCrates: boolean, omitPast: boolean): string {
+  const key = `${+omitCrates}${+omitPast}`;
+  const hit = frame.slim.get(key);
+  if (hit !== undefined) return hit;
+  const same: string[] = [];
+  const out: Record<string, unknown> = { ...frame.state };
+  if (omitCrates) {
+    same.push("crates");
+    out.members = frame.state.members.map(({ crate: _crate, ...rest }) => rest);
+  }
+  if (omitPast && frame.state.game) {
+    same.push("past");
+    const { past: _past, ...game } = frame.state.game;
+    out.game = game;
+  }
+  out.same = same;
+  const text = JSON.stringify(out);
+  frame.slim.set(key, text);
+  return text;
+}
+
+// What one open stream sends. `slim` streams get crates and past only when they
+// changed since that stream's last frame (the first frame is always complete);
+// others get the full state every time. A frame identical to the stream's last
+// is never sent (null): it would only tell the viewer that something happened.
+export function frameFeed(code: string, slim: boolean) {
+  let lastFull = "";
+  let sent: { crates: string; past: string } | null = null;
+  return (): string | null => {
+    const frame = tableFrame(code);
+    if (!frame || frame.full === lastFull) return null;
+    lastFull = frame.full;
+    if (!slim) return frame.full;
+    const text = sent ? slimJson(frame, sent.crates === frame.crates && frame.state.members.some((m) => m.crate), sent.past === frame.past && !!frame.state.game) : frame.full;
+    sent = { crates: frame.crates, past: frame.past };
+    return text;
+  };
+}
 
 // Whoever wants to hear about any table (the shop's booth list) rather than one.
 const anyTable = new Set<() => void>();
 
 export function notifyTable(code: string) {
+  frames.delete(code);
   bus.emit(code);
   for (const fn of anyTable) fn();
 }
@@ -501,6 +578,7 @@ export function watchTable(code: string, fn: () => void): () => void {
   for (const f of anyTable) f();
   return () => {
     bus.off(code, fn);
+    if (!bus.listenerCount(code)) frames.delete(code);
     for (const f of anyTable) f();
   };
 }

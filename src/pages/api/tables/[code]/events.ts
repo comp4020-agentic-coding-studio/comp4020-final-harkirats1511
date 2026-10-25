@@ -1,16 +1,37 @@
 import type { APIRoute } from "astro";
-import { normaliseCode, publicState, watchTable } from "../../../../lib/tables.ts";
+import { frameFeed, normaliseCode, tableExists, tableWatchers, watchTable } from "../../../../lib/tables.ts";
+import { addressOf, firstSaying, MAX_STREAMS_PER_IP, MAX_WATCHERS_PER_TABLE, openStream } from "../../../../lib/limits.ts";
+import { refused } from "../../../../lib/log.ts";
 
 const HEARTBEAT_MS = 15_000;
 
 // Public table state only, readable without a session. Anything private to
 // one player must never be sent here; it belongs on an authenticated endpoint.
-export const GET: APIRoute = ({ params, request }) => {
+//
+// The frame is built once per change per table (tables.ts) and shared by every
+// stream. By default each frame is the complete public state. `?slim=1` is for
+// a client that keeps what it has: its first frame is complete, and a later
+// frame leaves out `members[].crate` or `game.past` when they are unchanged
+// since that stream's last frame, naming what it left out in `same`
+// (["crates"], ["past"]); the client keeps its last copy of those.
+export const GET: APIRoute = ({ params, request, clientAddress }) => {
   const code = normaliseCode(params.code);
-  if (!publicState(code)) return new Response("No such table.", { status: 404 });
+  if (!tableExists(code)) return new Response("No such table.", { status: 404 });
+
+  const ip = addressOf(request, clientAddress);
+  const slot = openStream(tableWatchers(code), ip);
+  if (slot === "table") {
+    if (firstSaying(`t${code}`)) refused("streams", null, `watch table ${code}`, `${MAX_WATCHERS_PER_TABLE} watchers already`);
+    return new Response("This table has too many watchers.", { status: 429 });
+  }
+  if (slot === "ip") {
+    if (firstSaying(`i${ip}`)) refused("streams", null, `watch table ${code}`, `${MAX_STREAMS_PER_IP} streams open from one address`);
+    return new Response("Too many open streams from your address.", { status: 429 });
+  }
 
   const encoder = new TextEncoder();
   let cleanup = () => {};
+  const slim = new URL(request.url).searchParams.get("slim") === "1";
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -20,14 +41,10 @@ export const GET: APIRoute = ({ params, request }) => {
       };
       // A frame identical to the last one on this connection is never sent: it
       // would only tell the viewer that something (a pick) happened.
-      let last = "";
+      const next = frameFeed(code, slim);
       const sendState = () => {
-        const state = publicState(code);
-        if (!state) return;
-        const data = JSON.stringify(state);
-        if (data === last) return;
-        last = data;
-        send(`event: state\ndata: ${data}\n\n`);
+        const data = next();
+        if (data !== null) send(`event: state\ndata: ${data}\n\n`);
       };
       const unwatch = watchTable(code, sendState);
       const beat = setInterval(() => send(": heartbeat\n\n"), HEARTBEAT_MS);
@@ -36,6 +53,7 @@ export const GET: APIRoute = ({ params, request }) => {
         closed = true;
         clearInterval(beat);
         unwatch();
+        slot.release();
         try { controller.close(); } catch { /* already closed */ }
       };
       request.signal.addEventListener("abort", cleanup);
