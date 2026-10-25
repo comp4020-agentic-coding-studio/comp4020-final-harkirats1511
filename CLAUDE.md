@@ -40,8 +40,18 @@ They are decisions, not defaults (see `docs/decisions/0009`).
   A song can't be picked once it has been heard in an earlier round. Two players
   picking the same song in the same round is allowed (refusing the second would
   reveal the first's hidden pick); both cards play and are marked as a clash.
-- Roles are assigned when the game starts, after crates lock: 1 mole for 3 to 5
-  players, 2 for 6 to 8. Moles don't know each other.
+- Roles are assigned when the game starts, after crates lock. The host may
+  choose 1 or 2 moles; the default is the plain rule, 1 mole for 3 to 5 players
+  and 2 for 6 to 8. Never more than a third of the table, rounded down, with a
+  minimum of 1, so 2 moles need 6 or more players: a choice that no longer fits
+  by the start is cut down to what does. Moles don't know each other.
+- **Bots.** The host may add bots to fill a table: up to 8 seats in all, and
+  never in a private booth unless the host adds them. A bot is labelled as a bot
+  everywhere (the name badge says "BOT") and can't be the host. It plays by the
+  same rules as a person and sees only what a player sees (its own `/me` and the
+  public state): a bot that is the mole never gets the prompt. The host can
+  remove them, they leave when the table has no people left, and they don't
+  appear in anyone's history as a person.
 - **Each round has one prompt from `src/lib/prompts.ts`**, tagged with a slot.
   Prompts cycle through the four slots before any slot repeats, and don't repeat
   within a game. Non-moles see the prompt; moles see only its slot.
