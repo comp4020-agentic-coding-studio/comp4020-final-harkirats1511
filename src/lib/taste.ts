@@ -12,10 +12,6 @@ export const CRATE_LOCKED = "Your crate is locked until the game ends.";
 
 export const isSlot = (s: unknown): s is Slot => typeof s === "string" && (SLOTS as readonly string[]).includes(s);
 
-export function crateSize(personId: string): number {
-  return db.select({ id: tasteTracks.trackId }).from(tasteTracks).where(eq(tasteTracks.personId, personId)).all().length;
-}
-
 // Complete means 3 in every slot. A row with no slot (from before slots) counts
 // for nothing, so its owner has to re-slot it.
 export function crateComplete(personId: string): boolean {

@@ -634,7 +634,7 @@ it("counts skip as a vote that ejects nobody when it leads, and a changed mind d
 
 // ---- steal ----
 
-it("gives only the voted-out mole four prompts of the slot, and a right guess wins the game for the moles", async () => {
+it("gives only the voted-out mole eight prompts of the slot, and a right guess wins the game for the moles", async () => {
   const g = await started(4, { voteSeconds: 15 });
   const mole = g.moles[0];
   await pickOwn(g.code, g.players);
@@ -654,7 +654,7 @@ it("gives only the voted-out mole four prompts of the slot, and a right guess wi
   expect(options).toHaveLength(4);
   const slot = PROMPTS.find((p) => p.text === g.prompt)!.slot;
   for (const o of options) expect(PROMPTS.find((p) => p.id === o.id)).toMatchObject({ slot, text: o.text });
-  expect(new Set(options.map((o) => o.id)).size).toBe(4);
+  expect(new Set(options.map((o) => o.id)).size).toBe(8);
   expect((await mole.s.call(at(g.code, "steal"), { body: { promptId: "not-a-prompt" } })).status).toBe(400);
   expect((await mole.s.call(at(g.code, "steal"), { body: { promptId: real.id } })).status).toBe(200);
   expect((await mole.s.call(at(g.code, "steal"), { body: { promptId: real.id } })).status).toBe(409);
@@ -1014,7 +1014,7 @@ it("steal decoys are never a prompt used earlier in the game", async () => {
     }
     await waitFor(code, (s) => s.game?.phase === "steal", 9000);
     const options = (await me(trio[moleAt], code)).steal!.options.map((o) => o.text);
-    expect(options).toHaveLength(4);
+    expect(options).toHaveLength(8);
     for (const earlier of used.slice(0, 4)) expect(options, "a decoy was an earlier round's prompt").not.toContain(earlier);
   };
   await Promise.all(Array.from({ length: 12 }, run));
@@ -1121,7 +1121,7 @@ it("clears the steal options once the steal is over", async () => {
   await toVote(g);
   await voteFor(g.code, g.players, g.moles[0].name);
   await waitFor(g.code, (s) => s.game?.phase === "steal", 9000);
-  expect((await me(g.moles[0], g.code)).steal?.options.length).toBe(4);
+  expect((await me(g.moles[0], g.code)).steal?.options.length).toBe(8);
   const { wrong } = await stealOptions(g, g.moles[0]);
   await g.moles[0].s.call(at(g.code, "steal"), { body: { promptId: wrong.id } });
   await waitFor(g.code, (s) => s.game?.phase === "reveal");
@@ -1129,4 +1129,37 @@ it("clears the steal options once the steal is over", async () => {
   expect(after.role).toBe("ghost");
   expect(after.steal).toBeUndefined();
   expect(textOf(after)).not.toContain(wrong.text);
+});
+
+it("slim streams: the first frame is complete, later frames leave out unchanged crates and past rounds and say so", async () => {
+  const g = await started(4, { voteSeconds: 15 });
+  const full = await g.host.s.open(at(g.code, "events"));
+  const slim = await g.host.s.open(`${at(g.code, "events")}?slim=1`);
+  const first = (await slim.next(() => true))!.data as State & { same?: string[] };
+  expect(first.same).toEqual([]);
+  expect(first.members.every((m) => Array.isArray(m.crate))).toBe(true);
+  await pickOwn(g.code, g.players);
+  await toVote(g);
+  const later = (await slim.next((e) => e.data.game?.phase === "vote"))!.data as State & { same?: string[] };
+  expect(later.same).toEqual(["crates", "past"]);
+  expect(later.members.some((m) => "crate" in m)).toBe(false);
+  expect(later.game).not.toHaveProperty("past");
+  // The full stream always carries both, and says nothing about omissions.
+  const whole = (await full.next((e) => e.data.game?.phase === "vote"))!.data as State & { same?: string[] };
+  expect(whole.same).toBeUndefined();
+  expect(whole.members.every((m) => Array.isArray(m.crate))).toBe(true);
+  expect(whole.game!.past).toEqual([]);
+  // A round revealed brings the past back, with the crates still left out.
+  await voteFor(g.code, g.players, "skip");
+  const reveal = (await slim.next((e) => e.data.game?.phase === "reveal", 9000))!.data as State & { same?: string[] };
+  expect(reveal.game!.past.length).toBe(1);
+  expect(reveal.same).toEqual(["crates"]);
+  // A fresh connection mid-game is complete again, and so is GET.
+  const fresh = await g.players[1].s.open(`${at(g.code, "events")}?slim=1`);
+  const again = (await fresh.next(() => true))!.data as State & { same?: string[] };
+  expect(again.same).toEqual([]);
+  expect(again.members.every((m) => Array.isArray(m.crate))).toBe(true);
+  expect(again.game!.past.length).toBe(1);
+  expect((await state(g.code)).members.every((m) => Array.isArray(m.crate))).toBe(true);
+  for (const s of [full, slim, fresh]) s.close();
 });

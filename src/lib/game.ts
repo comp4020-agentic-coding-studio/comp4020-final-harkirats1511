@@ -24,7 +24,7 @@ export const STEAL_SECONDS = 15;
 export const REVEAL_SECONDS = 30;
 export const LAST_CALL_MS = 5000;
 // How many prompts the voted-out mole chooses from (the real one and the rest decoys).
-export const STEAL_OPTIONS = 4;
+export const STEAL_OPTIONS = 8;
 // A game never runs past this round: a crate has 12 songs, so by round 12 the
 // crates are nearly spent. The moles win if they are still in after its reveal.
 export const MAX_ROUNDS = TASTE_MAX;
@@ -154,6 +154,20 @@ export type Winner = "players" | "moles" | "none";
 // the public state carries it so the screen can say so.
 export type Ending = "final-vote" | "round-cap" | "nobody-picked" | "update";
 
+// " · moles: A, B" for the game-over line: the game-over screen names every mole,
+// including any who left, so the log may too. An abandoned game (no winner) shows
+// no roles, so its line names none.
+function moleNames(d: Tx, g: Game, winner: Winner): string {
+  if (winner === "none") return "";
+  const names = d
+    .select({ id: gamePlayers.personId })
+    .from(gamePlayers)
+    .where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.role, "mole")))
+    .all()
+    .map((r) => personTag(r.id));
+  return names.length ? ` · moles: ${names.join(", ")}` : "";
+}
+
 function finish(d: Tx, g: Game, winner: Winner, ending: Ending | null = null) {
   // A game cut short while picking never closed that round: its hidden picks are
   // neither ordered nor logged.
@@ -166,7 +180,7 @@ function finish(d: Tx, g: Game, winner: Winner, ending: Ending | null = null) {
   const rounds = d.select().from(gamePrompts).where(eq(gamePrompts.gameId, g.id)).orderBy(asc(gamePrompts.round)).all();
   log(
     tableScope(g.tableCode),
-    `game finished · winner: ${winner}${ending ? ` (${ending})` : ""} · ${rounds.map((r) => `round ${r.round}: "${promptById(r.promptId)?.text ?? r.promptId}"`).join(" | ")}`,
+    `game finished · winner: ${winner}${ending ? ` (${ending})` : ""}${moleNames(d, g, winner)} · ${rounds.map((r) => `round ${r.round}: "${promptById(r.promptId)?.text ?? r.promptId}"`).join(" | ")}`,
   );
 }
 
@@ -230,13 +244,15 @@ function settleVerdict(d: Tx, g: Game, accused: string | null, stole: boolean) {
   if (g.round >= MAX_ROUNDS) return finish(d, done, "moles", "round-cap");
 }
 
-// A mole was voted out and has a steal: four prompts of the round's slot (the
-// real one and three others), shuffled, in a column only /me reads for them.
+// A mole was voted out and has a steal: STEAL_OPTIONS prompts of the round's slot (the
+// real one and the rest decoys), shuffled, in a column only /me reads for them.
 function toSteal(d: Tx, g: Game, mole: string) {
   const prompt = promptOf(d, g.id, g.round)!;
   // Decoys are prompts this game hasn't used: every used one was shown at its
   // reveal, so a used decoy could be struck out. A slot has far more prompts than
-  // a game has rounds of it; the fallback to used ones only keeps this total.
+  // a game has rounds of it (15 per slot, at most 3 rounds of a slot in a 12-round
+  // game, so 11 unused others at worst against the 7 decoys needed); the fallback
+  // to used ones, and then to fewer options, only keeps this total.
   const used = new Set(d.select({ id: gamePrompts.promptId }).from(gamePrompts).where(eq(gamePrompts.gameId, g.id)).all().map((r) => r.id));
   const ofSlot = PROMPTS.filter((p) => p.slot === prompt.slot && p.id !== prompt.promptId);
   const others = [...shuffle(ofSlot.filter((p) => !used.has(p.id))), ...shuffle(ofSlot.filter((p) => used.has(p.id)))].slice(0, STEAL_OPTIONS - 1);
@@ -286,7 +302,7 @@ function step(d: Tx, g: Game, cause: string) {
       return finish(d, g, "none", "nobody-picked");
     }
     logPhase(g, "listen", cause, ` · ${cards} track${cards === 1 ? "" : "s"}`);
-    if (t.autoplay && cards > 0) {
+    if (t.autoplay) {
       log(tableScope(g.tableCode), `autoplay · track 1 of ${cards} playing · round ${g.round}`);
       // The server plays card 0 now; the deadline is the next autoplay step.
       d.update(games)
@@ -317,8 +333,7 @@ function step(d: Tx, g: Game, cause: string) {
     logPhase(g, "reveal", cause);
     resolveSteal(d, g);
   } else if (g.phase === "reveal") {
-    // Normally the round cap already ended the game at this reveal; this is the net.
-    if (g.round >= MAX_ROUNDS) return finish(d, g, "moles", "round-cap");
+    // settleVerdict ends the game at the round cap, so a reveal here is never the last.
     logPhase(g, "pick", cause, ` (next round ${g.round + 1})`);
     d.update(games)
       .set({
@@ -420,6 +435,7 @@ function fire(code: string, round: number, phase: string) {
 // deadline from now rather than cascading through several at once.
 export function resumeGames() {
   const running = db.select({ code: tables.code }).from(tables).where(eq(tables.status, "playing")).all();
+  if (process.env.GIT_SHA) log("server", `build ${process.env.GIT_SHA.replace(/[^\w.-]/g, "").slice(0, 40)}`);
   log("server", `started · resuming ${running.length} running game${running.length === 1 ? "" : "s"}`);
   for (const { code } of running) {
     // A game this engine can't carry on (one begun by an older version: no slot
@@ -436,6 +452,12 @@ export function resumeGames() {
       db.update(tables).set({ status: g?.winner === "none" ? "open" : "finished" }).where(eq(tables.code, code)).run();
       log(tableScope(code), "table was marked playing with no running game · closed at boot");
       continue;
+    }
+    // A reveal with no deadline and no winner (an older build moved the game there
+    // and its reveal had no timer): give it the usual one, or it would sit forever.
+    if (g.phase === "reveal" && g.deadline === null) {
+      db.update(games).set({ deadline: Date.now() + REVEAL_SECONDS * 1000 }).where(eq(games.id, g.id)).run();
+      log(tableScope(code), `reveal had no deadline at boot · round ${g.round} moves on in ${REVEAL_SECONDS}s`);
     }
     schedule(code);
   }
@@ -544,6 +566,17 @@ export function pickTrack(code: string, personId: string, trackId: number, from?
   return res;
 }
 
+// Whether this is the first vote change of this person this round (memory only:
+// after a restart one more line is harmless). Only the latest round is kept.
+const changedVote = new Map<string, { round: number; who: Set<string> }>();
+function firstChange(gameId: string, round: number, personId: string): boolean {
+  let e = changedVote.get(gameId);
+  if (!e || e.round !== round) changedVote.set(gameId, (e = { round, who: new Set() }));
+  if (e.who.has(personId)) return false;
+  e.who.add(personId);
+  return true;
+}
+
 // choice is a player's name or "skip". A vote can be changed until the vote
 // locks: the voter's row is replaced, and the last one counts.
 export function castVote(code: string, personId: string, choice: { name: string } | "skip"): { ok: true } | Fail {
@@ -552,10 +585,10 @@ export function castVote(code: string, personId: string, choice: { name: string 
     if (!game || game.winner) return fail(409, "No vote is open.");
     const me = playerRow(game, personId);
     if (!me) return fail(403, "You are watching this game.");
-    if (me.ejectedRound !== null) return fail(403, "Ghosts can't vote.");
     if (game.phase !== "vote" || (game.deadline !== null && Date.now() >= game.deadline)) {
       return fail(409, "Voting is not open.");
     }
+    if (me.ejectedRound !== null) return fail(403, "Ghosts can't vote.");
     let target = "skip";
     if (choice !== "skip") {
       const who = playerByName(tx, game, choice.name);
@@ -573,7 +606,9 @@ export function castVote(code: string, personId: string, choice: { name: string 
       .onConflictDoUpdate({ target: [votes.gameId, votes.round, votes.voterPersonId], set: { choice: target, slot: null } })
       .run();
     // Who voted, never for whom.
-    log(tableScope(code), `${personTag(personId)} ${before ? "changed their vote" : "voted"} · round ${game.round}`);
+    // Once per person per round: a toggling voter doesn't fill the log.
+    if (!before) log(tableScope(code), `${personTag(personId)} voted · round ${game.round}`);
+    else if (firstChange(game.id, game.round, personId)) log(tableScope(code), `${personTag(personId)} changed their vote · round ${game.round}`);
     settle(tx, code, "everyone voted");
     return { ok: true };
   });
@@ -582,7 +617,7 @@ export function castVote(code: string, personId: string, choice: { name: string 
 }
 
 // The voted-out mole's one guess. Only them, only during the steal, only from
-// the four options. It ends the steal at once.
+// the options. It ends the steal at once.
 export function castSteal(code: string, personId: string, promptId: string): { ok: true } | Fail {
   const res = db.transaction((tx): { ok: true } | Fail => {
     const game = currentGame(code);
@@ -590,7 +625,7 @@ export function castSteal(code: string, personId: string, promptId: string): { o
     if (game.stealPersonId !== personId || !playerRow(game, personId)) return fail(403, "This steal isn't yours.");
     if (game.deadline !== null && Date.now() >= game.deadline) return fail(409, "The steal is over.");
     if (game.stealGuess !== null) return fail(409, "You already guessed.");
-    if (!(JSON.parse(game.stealOptions ?? "[]") as string[]).includes(promptId)) return fail(400, "Guess one of the four prompts.");
+    if (!(JSON.parse(game.stealOptions ?? "[]") as string[]).includes(promptId)) return fail(400, "Guess one of the prompts you were offered.");
     tx.update(games).set({ stealGuess: promptId }).where(eq(games.id, game.id)).run();
     settle(tx, code, "the mole guessed");
     return { ok: true };
