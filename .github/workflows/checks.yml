@@ -30,16 +30,27 @@ jobs:
         with:
           cache: true
       - run: pnpm install --frozen-lockfile
+      - name: Type-check the pages
+        run: pnpm typecheck:astro
       - name: Build and start the app
         # the same image Fly deploys, with a throwaway /data in place of the
-        # volume; the spec runs against it
+        # volume; the spec runs against it. /data is a host directory so the
+        # specs that plant old rows can open the app's database file, and the
+        # container runs as the runner's user so both can write to it. The
+        # admin token is made per run and only ever lives in this job's env.
+        env:
+          LOG_TOKEN: ci-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
-          docker build -t app .
-          docker run -d --init --name app -p 8080:8080 -e PORT=8080 --tmpfs /data app
+          mkdir -p "$RUNNER_TEMP/data"
+          docker build --build-arg GIT_SHA=${{ github.sha }} -t app .
+          docker run -d --init --name app --user "$(id -u):$(id -g)" -p 8080:8080 -e PORT=8080 \
+            -e LOG_TOKEN -v "$RUNNER_TEMP/data:/data" app
       - name: Run the spec
         run: pnpm check
         env:
           APP_URL: http://localhost:8080
+          LOG_TOKEN: ci-${{ github.run_id }}-${{ github.run_attempt }}
+          DATABASE_PATH: ${{ runner.temp }}/data/app.db
       - name: Show the app's output
         # what the container printed, so a crash or slow boot is visible
         if: ${{ failure() }}
@@ -89,7 +100,8 @@ jobs:
       - name: Deploy
         # --remote-only builds the Dockerfile on Fly's builders; --ha=false
         # keeps the app at one machine and one volume.
-        run: flyctl deploy --remote-only --ha=false -a ${{ github.event.repository.name }}
+        # --build-arg puts the commit in the image so the app logs it at boot.
+        run: flyctl deploy --remote-only --ha=false --build-arg GIT_SHA=${{ github.sha }} -a ${{ github.event.repository.name }}
       - name: Verify the deployed site is online
         run: |
           for i in 1 2 3 4 5; do
