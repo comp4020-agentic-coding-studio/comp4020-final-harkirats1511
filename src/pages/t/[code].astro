@@ -1023,7 +1023,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     const voter = active();
     const ghost = me.role === "ghost";
     // A Knockout ghost can't vote; it makes a private guess at who the mole is, with the same rows.
-    $("vote-h").textContent = four ? "Cast your votes" : ghost ? "Who do you think it is?" : "Vote someone out";
+    $("vote-h").textContent = four ? "Cast your votes" : ghost ? "Your guess" : "Vote someone out";
     $("vote-instr").textContent = four
       ? "Two votes: who is the mole (or skip), and the best pick, a song that isn't yours. Change either until it locks."
       : ghost ? "Who do you think it is? (only you see this)" : "Who is the mole? Vote for a player, or skip. You can change your vote until it locks.";
