@@ -2,10 +2,11 @@
 import Base from "../layouts/Base.astro";
 import { personFromCookies } from "../lib/auth.ts";
 import { historyFor } from "../lib/tables.ts";
+import { pointsResult } from "../lib/history.ts";
 import { SLOT_HINTS, SLOT_NAMES } from "../lib/prompts.ts";
 const me = personFromCookies(Astro.cookies);
 if (!me) return Astro.redirect("/?next=/history");
-const games = historyFor(me.id);
+const games = historyFor(me.id).map((g) => ({ ...g, result: g.winner === "points" ? pointsResult(g.code, g.finishedAt) : null }));
 ---
 <Base title="Your past games · Mole">
   <a class="back-link" href="/"><span aria-hidden="true">&larr;</span>Back</a>
@@ -26,9 +27,15 @@ const games = historyFor(me.id);
               <p class="hist-code">BOOTH {g.code}</p>
               <p class="hist-meta"><time datetime={new Date(g.finishedAt).toISOString()} data-ts={g.finishedAt}>{new Date(g.finishedAt).toISOString().slice(0, 10)}</time></p>
             </div>
-            <span class={`stamp ${g.winner === "moles" ? "moles" : "win"}`}>{g.winner === "moles" ? "Moles won" : g.winner === "none" ? "No winner" : "Players won"}</span>
+            <span class={`stamp ${g.winner === "moles" ? "moles" : "win"}`}>{g.winner === "moles" ? "Moles won" : g.winner === "none" ? "No winner" : g.winner === "points" ? ((g.result?.winners.length ?? 0) > 1 ? "Joint winners" : "Winner") : "Players won"}</span>
           </div>
           <p class="hist-players"><strong>Players:</strong> {g.players.join(", ")}{g.bots ? ` (and ${g.bots} bot${g.bots === 1 ? "" : "s"})` : ""}</p>
+          {g.winner === "points" && g.result && (
+            <>
+              <p class="hist-ending">{g.result.winners.length > 1 ? "Joint winners" : "Winner"}: {g.result.winners.join(", ")}</p>
+              <p class="hist-scores mono">{g.result.scores.map((x) => `${x.name} ${x.score}`).join(" \u00b7 ")}</p>
+            </>
+          )}
           {g.winner === "none" && (
             <p class="hist-ending">{g.ending === "nobody-picked" ? "Game abandoned: nobody picked." : "This game was left unfinished and ended with no winner."}</p>
           )}
@@ -47,7 +54,7 @@ const games = historyFor(me.id);
                   {m ? (
                     <>
                       {r.prompt !== undefined ? (
-                        m.wasMole && <p class="mine"><span class="stamp moles">You were the mole</span></p>
+                        m.wasMole && <p class="mine"><span class="stamp moles">{g.winner === "points" ? "You were the mole this round" : "You were the mole"}</span></p>
                       ) : (
                         <p class="mine">
                           <span>Your card said <strong>{m.theme}</strong></span>
