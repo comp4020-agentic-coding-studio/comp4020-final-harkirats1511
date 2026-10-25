@@ -16,6 +16,9 @@ import {
 // early finish lands cannot move the game on twice.
 //
 // Phases: pick -> listen -> vote -> (steal) -> reveal, then the next round's pick.
+// PHASES below is the one table of them: what each phase starts with (its deadline,
+// the columns it clears) and where it may go next. enter() is the only function that
+// moves a game between phases, and it is also what tells the table something changed.
 
 // Dials for playtests. A table's own pick/vote/track seconds override the first three.
 export { PICK_SECONDS, SECONDS_PER_TRACK, VOTE_SECONDS } from "./tables.ts";
@@ -33,10 +36,63 @@ const FINAL_VOTE_ALIVE = 3;
 // Listening that the host doesn't move on gets this much slack past the tracks.
 const LISTEN_SLACK_MS = 5_000;
 
+// A phase of a game. "over" is derived, not stored: a finished game is stored as
+// phase "reveal" with a winner (so the public `phase` clients read is unchanged),
+// and phaseOf() says "over" for it.
+export type Phase = "pick" | "listen" | "vote" | "steal" | "reveal" | "over";
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type Game = typeof games.$inferSelect;
 type Fail = { ok: false; status: number; error: string };
 const fail = (status: number, error: string): Fail => ({ ok: false, status, error });
+
+// ---- the phase table ----
+//
+// One row per phase: where it may go next, when it ends, and which columns are
+// reset on entering it. enter() is the only code that writes `phase`, `deadline` or
+// the per-round columns, and it marks the table as changed (see flush below).
+type Columns = Partial<typeof games.$inferInsert>;
+type Opts = ReturnType<typeof tableOptions> & object;
+type Entry = { next: Phase[]; deadline: (t: Opts, ctx: { cards: number }) => number | null; clear: Columns };
+const secs = (n: number) => Date.now() + n * 1000;
+const NEW_ROUND: Columns = { ejectedPersonId: null, lastCall: 0, nowPlaying: null, stealPersonId: null, stealOptions: null, stealGuess: null, stole: 0 };
+export const PHASES: Record<Phase, Entry> = {
+  pick: { next: ["listen", "over"], deadline: (t) => secs(t.pickSeconds), clear: NEW_ROUND },
+  // Autoplay plays card 0 at once and each card gets slotSeconds; otherwise the host moves it on.
+  listen: {
+    next: ["vote", "over"],
+    deadline: (t, { cards }) => (t.autoplay ? secs(t.slotSeconds) : secs(cards * SECONDS_PER_TRACK) + LISTEN_SLACK_MS),
+    clear: { lastCall: 0 },
+  },
+  vote: { next: ["steal", "reveal", "over"], deadline: (t) => secs(t.voteSeconds), clear: { lastCall: 0 } },
+  // The steal's options (decoys included) are cleared with it, when the reveal begins.
+  steal: { next: ["reveal", "over"], deadline: () => secs(STEAL_SECONDS), clear: { lastCall: 0 } },
+  reveal: { next: ["pick", "over"], deadline: () => secs(REVEAL_SECONDS), clear: { lastCall: 0, stealOptions: null } },
+  // A finished game is stored as phase "reveal" with a winner, so the public `phase` is unchanged.
+  over: { next: [], deadline: () => null, clear: { lastCall: 0 } },
+};
+
+// The phase a game is in: "over" once it has a winner (including "none", abandoned).
+export const phaseOf = (g: { phase: string; winner: string | null }): Phase => (g.winner ? "over" : (g.phase as Phase));
+
+// Tables whose public state changed inside a transaction that has not committed yet.
+const dirty = new Set<string>();
+const touch = (code: string) => void dirty.add(code);
+
+// Move a game to phase `to`: checks the move is allowed from `from`, sets the
+// phase, its deadline and its resets, then whatever `set` adds for this
+// particular move, and notes the table as changed. `cause` logs the move.
+function enter(d: Tx, g: { id: string; tableCode: string; round: number; phase: string; winner: string | null }, to: Phase, o: { set?: Columns; cause?: string; note?: string; cards?: number } = {}) {
+  const from = phaseOf(g);
+  if (!PHASES[from].next.includes(to)) throw new Error(`a game can't go from ${from} to ${to}`);
+  const entry = PHASES[to];
+  const t = tableOptions(g.tableCode)!;
+  if (o.cause !== undefined) log(tableScope(g.tableCode), `phase ${g.phase} → ${to === "over" ? "reveal" : to} (${o.cause}) · round ${g.round}${o.note ?? ""}`);
+  d.update(games)
+    .set({ ...entry.clear, phase: to === "over" ? "reveal" : to, deadline: entry.deadline(t, { cards: o.cards ?? 0 }), ...o.set })
+    .where(eq(games.id, g.id))
+    .run();
+  touch(g.tableCode);
+}
 
 function shuffle<T>(items: T[]): T[] {
   const a = [...items];
@@ -104,7 +160,7 @@ export function startGame(code: string, by?: string): StartResult {
     const now = Date.now();
     const slotOrder = JSON.stringify(shuffle([...SLOTS]));
     tx.insert(games)
-      .values({ id, tableCode: code, round: 1, phase: "pick", deadline: now + t.pickSeconds * 1000, startedAt: now, slotOrder })
+      .values({ id, tableCode: code, round: 1, phase: "pick", deadline: PHASES.pick.deadline(t, { cards: 0 }), startedAt: now, slotOrder })
       .run();
     // Roles are dealt after the crates lock (they lock the moment this row exists).
     const moles = new Set(shuffle(members.map((m) => m.id)).slice(0, moleCount));
@@ -119,7 +175,10 @@ export function startGame(code: string, by?: string): StartResult {
     log(tableScope(code), `${by ? `${by} ` : ""}started the game · ${members.length} players · round 1`);
     return { ok: true };
   });
-  if (result.ok) changed(code);
+  if (result.ok) {
+    touch(code);
+    flush(code);
+  }
   return result;
 }
 
@@ -174,7 +233,7 @@ function finish(d: Tx, g: Game, winner: Winner, ending: Ending | null = null) {
   // A game cut short while picking never closed that round: its hidden picks are
   // neither ordered nor logged.
   if (g.phase !== "pick") assignOrder(d, g);
-  d.update(games).set({ winner, endReason: ending, phase: "reveal", deadline: null, finishedAt: Date.now() }).where(eq(games.id, g.id)).run();
+  enter(d, g, "over", { set: { winner, endReason: ending, finishedAt: Date.now() } });
   // An abandoned game puts the table back in the lobby; any other ending leaves
   // the game-over screen up until the host plays again.
   d.update(tables).set({ status: winner === "none" ? "open" : "finished" }).where(eq(tables.code, g.tableCode)).run();
@@ -232,13 +291,9 @@ function settleVerdict(d: Tx, g: Game, accused: string | null, stole: boolean) {
   if (out) {
     d.update(gamePlayers).set({ ejectedRound: g.round }).where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.personId, out))).run();
   }
-  d.update(games)
-    // The steal is over: its options (decoys included) are cleared with it.
-    .set({ phase: "reveal", deadline: Date.now() + REVEAL_SECONDS * 1000, ejectedPersonId: out, stealPersonId: stole ? accused : g.stealPersonId, stealOptions: null, stole: stole ? 1 : 0, lastCall: 0 })
-    .where(eq(games.id, g.id))
-    .run();
+  enter(d, g, "reveal", { set: { ejectedPersonId: out, stealPersonId: stole ? accused : g.stealPersonId, stole: stole ? 1 : 0 } });
   logReveal(d, g, accused, out, stole);
-  const done = { ...g, ejectedPersonId: out };
+  const done = { ...g, phase: "reveal", ejectedPersonId: out };
   const winner = stole ? "moles" : winnerOf(d, g.id);
   if (winner) return finish(d, done, winner);
   // The last chance: with three left, a vote that ejects nobody hands it to the moles.
@@ -260,10 +315,7 @@ function toSteal(d: Tx, g: Game, mole: string) {
   const others = [...shuffle(ofSlot.filter((p) => !used.has(p.id))), ...shuffle(ofSlot.filter((p) => used.has(p.id)))].slice(0, STEAL_OPTIONS - 1);
   const options = shuffle([prompt.promptId, ...others.map((p) => p.id)]);
   d.update(gamePlayers).set({ stealUsed: 1 }).where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.personId, mole))).run();
-  d.update(games)
-    .set({ phase: "steal", deadline: Date.now() + STEAL_SECONDS * 1000, lastCall: 0, stealPersonId: mole, stealOptions: JSON.stringify(options), stealGuess: null, stole: 0 })
-    .where(eq(games.id, g.id))
-    .run();
+  enter(d, g, "steal", { set: { stealPersonId: mole, stealOptions: JSON.stringify(options), stealGuess: null, stole: 0 } });
   log(tableScope(g.tableCode), `${personTag(mole)} gets a steal · round ${g.round}`);
 }
 
@@ -285,12 +337,6 @@ function logPhase(g: Game, to: string, cause: string, extra = "") {
   log(tableScope(g.tableCode), `phase ${g.phase} → ${to} (${cause}) · round ${g.round}${extra}`);
 }
 
-function toVote(d: Tx, g: Game, cause: string) {
-  logPhase(g, "vote", cause);
-  const t = tableOptions(g.tableCode)!;
-  d.update(games).set({ phase: "vote", deadline: Date.now() + t.voteSeconds * 1000, lastCall: 0 }).where(eq(games.id, g.id)).run();
-}
-
 // Leave the phase the game is in for the next one. The caller has checked the
 // round and phase.
 function step(d: Tx, g: Game, cause: string) {
@@ -303,20 +349,9 @@ function step(d: Tx, g: Game, cause: string) {
       logPhase(g, "reveal", cause, " · nobody picked");
       return finish(d, g, "none", "nobody-picked");
     }
-    logPhase(g, "listen", cause, ` · ${cards} track${cards === 1 ? "" : "s"}`);
-    if (t.autoplay) {
-      log(tableScope(g.tableCode), `autoplay · track 1 of ${cards} playing · round ${g.round}`);
-      // The server plays card 0 now; the deadline is the next autoplay step.
-      d.update(games)
-        .set({ phase: "listen", nowPlaying: 0, deadline: now + t.slotSeconds * 1000 })
-        .where(eq(games.id, g.id))
-        .run();
-    } else {
-      d.update(games)
-        .set({ phase: "listen", nowPlaying: null, deadline: now + cards * SECONDS_PER_TRACK * 1000 + LISTEN_SLACK_MS })
-        .where(eq(games.id, g.id))
-        .run();
-    }
+    // Autoplay: the server plays card 0 now; the deadline is the next autoplay step.
+    if (t.autoplay) log(tableScope(g.tableCode), `autoplay · track 1 of ${cards} playing · round ${g.round}`);
+    enter(d, g, "listen", { cause, note: ` · ${cards} track${cards === 1 ? "" : "s"}`, cards, set: { nowPlaying: t.autoplay ? 0 : null } });
   } else if (g.phase === "listen") {
     // Autoplay: the deadline hit means the card's time is up, so play the next
     // one; only after the last does listening end. Cards are numbered 0..n-1.
@@ -324,9 +359,10 @@ function step(d: Tx, g: Game, cause: string) {
     const next = (g.nowPlaying ?? -1) + 1;
     if (t.autoplay && next < cards) {
       d.update(games).set({ nowPlaying: next, deadline: now + t.slotSeconds * 1000 }).where(eq(games.id, g.id)).run();
+      touch(g.tableCode);
       log(tableScope(g.tableCode), `autoplay · track ${next + 1} of ${cards} playing · round ${g.round}`);
     } else {
-      toVote(d, g, cause);
+      enter(d, g, "vote", { cause });
     }
   } else if (g.phase === "vote") {
     logPhase(g, "reveal", cause);
@@ -336,14 +372,7 @@ function step(d: Tx, g: Game, cause: string) {
     resolveSteal(d, g);
   } else if (g.phase === "reveal") {
     // settleVerdict ends the game at the round cap, so a reveal here is never the last.
-    logPhase(g, "pick", cause, ` (next round ${g.round + 1})`);
-    d.update(games)
-      .set({
-        round: g.round + 1, phase: "pick", deadline: now + t.pickSeconds * 1000, ejectedPersonId: null, lastCall: 0, nowPlaying: null,
-        stealPersonId: null, stealOptions: null, stealGuess: null, stole: 0,
-      })
-      .where(eq(games.id, g.id))
-      .run();
+    enter(d, g, "pick", { cause, note: ` (next round ${g.round + 1})`, set: { round: g.round + 1 } });
     drawPrompt(d, g, g.round + 1);
   }
 }
@@ -397,8 +426,17 @@ function lastCall(d: Tx, g: Game) {
 
 // A change landed: tell every open session and re-arm the table's timer.
 function changed(code: string) {
+  dirty.delete(code);
   schedule(code);
   notifyTable(code);
+}
+
+// After a transaction: tell everyone if anything public changed in it (a phase
+// move, via enter, or a touch), otherwise only re-arm the timer. A pick sends
+// nothing unless it moved the phase: even an identical frame would show how many picked.
+function flush(code: string) {
+  if (dirty.has(code)) changed(code);
+  else schedule(code);
 }
 
 // ---- timers ----
@@ -421,15 +459,14 @@ export function schedule(code: string) {
 // The deadline of (round, phase) arrived. Does nothing if that phase has
 // already been left, which is what makes a race with an early finish harmless.
 function fire(code: string, round: number, phase: string) {
-  const moved = db.transaction((tx) => {
+  db.transaction((tx) => {
     const g = currentGame(code);
-    if (!g || g.winner || g.round !== round || g.phase !== phase || g.deadline === null) return false;
-    if (g.deadline > Date.now()) return false;
+    if (!g || g.winner || g.round !== round || g.phase !== phase || g.deadline === null) return;
+    if (g.deadline > Date.now()) return;
     step(tx, g, "timer");
-    return true;
+    touch(code);
   });
-  if (moved) changed(code);
-  else schedule(code);
+  flush(code);
 }
 
 // At boot: re-arm every running game's timer. A deadline that passed while the
@@ -505,7 +542,8 @@ export function advance(code: string, by = "the host"): { ok: true } | Fail {
   const moved = db.transaction((tx) => {
     const now = currentGame(code);
     if (!now || now.winner || now.round !== g.round || now.phase !== g.phase) return false;
-    if (now.phase === "listen") toVote(tx, now, `by ${by}`);
+    // The host skips what is left of listening: straight to the vote, even on autoplay.
+    if (now.phase === "listen") enter(tx, now, "vote", { cause: `by ${by}` });
     else step(tx, now, `by ${by}`);
     return true;
   });
@@ -519,7 +557,6 @@ export function advance(code: string, by = "the host"): { ok: true } | Fail {
 // per game. Either way the song must not have been played yet; this round's
 // hidden picks don't count, so a refusal never says what someone else chose.
 export function pickTrack(code: string, personId: string, trackId: number, from?: string): { ok: true } | Fail {
-  let moved = false;
   const res = db.transaction((tx): { ok: true } | Fail => {
     const game = currentGame(code);
     if (!game || game.winner) return fail(409, "No round is running.");
@@ -555,16 +592,9 @@ export function pickTrack(code: string, personId: string, trackId: number, from?
     // Who picked, never what or how: the pick stays hidden until picking closes.
     log(tableScope(code), `${personTag(personId)} picked a track · round ${game.round}`);
     settle(tx, code, "everyone picked");
-    const now = currentGame(code);
-    moved = !now || !!now.winner || now.phase !== game.phase;
     return { ok: true };
   });
-  // A pick sends nothing on any stream unless the phase moved: the public state
-  // is the same, and even an identical frame would show how many have picked.
-  if (res.ok) {
-    if (moved) changed(code);
-    else schedule(code);
-  }
+  if (res.ok) flush(code);
   return res;
 }
 
