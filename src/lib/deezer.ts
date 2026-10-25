@@ -1,3 +1,5 @@
+import { log } from "./log.ts";
+
 // Deezer's public catalogue API (no key). We only ever store ids and metadata;
 // preview URLs are signed and expire, so they are fetched fresh and never kept.
 const BASE = "https://api.deezer.com";
@@ -9,6 +11,11 @@ export type Track = { id: number; title: string; artist: string; album?: string;
 export class DeezerDown extends Error {}
 // Thrown when Deezer says we are asking too fast (its error code 4); routes turn it into a 503.
 export class DeezerBusy extends DeezerDown {}
+// One log line when Deezer fails a route ("busy" is its quota, "down" anything else).
+// The message is ours, never Deezer's body or a URL.
+export function logDeezer(route: string, e: unknown): void {
+  log("deezer", `${route}: ${e instanceof DeezerBusy ? "busy (quota used up)" : "down"}`);
+}
 export const DEEZER_BUSY = "Deezer is busy, try again in a moment.";
 
 type Raw = {
@@ -75,8 +82,28 @@ export async function getTrack(id: number): Promise<Track | null> {
   return track;
 }
 
-// Always fresh: the URL is signed and expires.
+// The URL is signed and expires, so it is kept only in memory and only briefly:
+// a whole table asking for the same card in the same second costs Deezer one call.
+// Never the audio, never in the database.
+const PREVIEW_TTL_MS = 60_000;
+const PREVIEW_MAX = 200;
+const previews = new Map<number, { url: string; at: number }>();
+const inflight = new Map<number, Promise<string | null>>();
+
 export async function getPreviewUrl(id: number): Promise<string | null> {
-  const body = (await get(`/track/${id}`)) as Raw | null;
-  return body?.preview || null;
+  const hit = previews.get(id);
+  if (hit && Date.now() - hit.at < PREVIEW_TTL_MS) return hit.url;
+  const pending = inflight.get(id);
+  if (pending) return pending;
+  const p = (async () => {
+    const body = (await get(`/track/${id}`)) as Raw | null;
+    const url = body?.preview || null;
+    if (url) {
+      if (previews.size >= PREVIEW_MAX) previews.delete(previews.keys().next().value!);
+      previews.set(id, { url, at: Date.now() });
+    }
+    return url;
+  })().finally(() => inflight.delete(id));
+  inflight.set(id, p);
+  return p;
 }
