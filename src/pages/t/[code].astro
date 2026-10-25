@@ -113,12 +113,13 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
             <p><strong>Picked.</strong> Waiting for the others.</p>
           </div>
           <div id="pick-ui" hidden>
-            <div id="pick-lists"></div>
+            <div id="pick-fit"></div>
             <div id="borrow-wrap">
               <button id="borrow-toggle" type="button" class="secondary" aria-expanded="false" aria-controls="borrow-panel">Borrow instead</button>
               <p class="hint" id="borrow-note"></p>
               <div id="borrow-panel" hidden></div>
             </div>
+            <div id="pick-rest"></div>
           </div>
           <p id="pick-msg" class="error" role="alert"></p>
         </section>
@@ -261,14 +262,24 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
 
         <details class="card howto" id="howto" hidden>
           <summary>How to play</summary>
-          <ol>
-            <li>Bring a crate of 12 songs, 3 each for Up, Down, Out and In. Everyone sees every crate.</li>
-            <li>Each round has a prompt. You all get it except one or two moles, who only get its mood.</li>
-            <li>Pick a song from your crate that answers the prompt. Everyone, the mole too, can borrow one song a game from someone else's crate.</li>
-            <li>Every pick plays with its picker's name. A song can only be heard once a game.</li>
-            <li>Vote out the player whose song doesn't fit. A mole who is caught can steal the win by guessing the prompt.</li>
-            <li>Players win when every mole is out. Moles win when they are as many as everyone left, when a steal lands, when a vote with three left ejects nobody, or if they are still in after round 12. A round nobody picks in ends the game with no winner.</li>
-          </ol>
+          <h3>Your turn</h3>
+          <ul>
+            <li>Everyone but the mole gets a prompt, like "a song for a long drive".</li>
+            <li>The mole knows they are the mole. They only get the prompt's mood.</li>
+            <li>Pick a song from your crate that fits.</li>
+            <li>Once a game, anyone, the mole too, can borrow a song from someone else's crate.</li>
+            <li>Every pick plays with its picker's name.</li>
+            <li>Then vote someone out (not yourself). You see live counts, and a short last call runs once everyone has voted.</li>
+          </ul>
+          <h3>How it ends</h3>
+          <ul>
+            <li>A mole who is voted out gets a steal: 15 seconds to guess the prompt from 8. A right guess wins the game for the moles.</li>
+            <li>Players who are voted out watch.</li>
+            <li>Players win when every mole is out.</li>
+            <li>Moles win when they are as many as everyone left in, if nobody is voted out with three left, or if they survive round 12.</li>
+            <li>The reveal moves on by itself after 30 seconds.</li>
+          </ul>
+          <p class="hint">Playing an obvious song for the prompt helps a caught mole guess it.</p>
         </details>
       </aside>
     </div>
@@ -423,7 +434,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     show("v-lobby", !inGame);
     show("to-shop", !inGame || over);
     // How to play: open until a game has been played here, then folded away.
-    show("howto", !inGame || over);
+    show("howto", true);
     if (!howtoSet || playing) {
       howtoSet = true;
       ($("howto") as HTMLDetailsElement).open = !g;
@@ -647,17 +658,22 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
       // Nothing to pick from your own crate: drop the "pick from your crate" line too.
       $("pick-instr").hidden = spent;
       if (spent) {
-        $("pick-lists").replaceChildren(
+        $("pick-rest").replaceChildren();
+        $("pick-fit").replaceChildren(
           h("p", { class: "empty-crate" },
             `Your crate is empty: every song has been heard. ${used ? "You've used your borrow; sit this one out." : canBorrow ? "You can still borrow once." : "There is nothing left to borrow either; sit this one out."}`),
         );
       } else {
-        $("pick-lists").replaceChildren(
+        $("pick-fit").replaceChildren(
           h("h3", {}, `Fits the mood: ${slotLabel(slot)}`),
           h("ul", { class: "tracks pickable", "aria-label": "Songs that fit the mood" }, ...fit.map((c) => row(c, true))),
-          h("h3", {}, "The rest of your crate"),
-          h("ul", { class: "tracks pickable", "aria-label": "The rest of your crate" }, ...rest.map((c) => row(c, false))),
         );
+        const restD = h("details", { class: "restcrate" },
+          h("summary", { "data-fk": "rest-crate" }, "The rest of your crate", h("span", { class: "cleft mono" }, `${rest.length} songs`)),
+          h("ul", { class: "tracks pickable", "aria-label": "The rest of your crate" }, ...rest.map((c) => row(c, false)))) as HTMLDetailsElement;
+        restD.open = restOpen;
+        restD.addEventListener("toggle", () => { restOpen = restD.open; });
+        $("pick-rest").replaceChildren(restD);
       }
       show("borrow-wrap", !used || !spent);
       const bt = $<HTMLButtonElement>("borrow-toggle");
@@ -684,6 +700,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     });
   }
   const borrowOpened = new Map<string, boolean>();
+  let restOpen = false;
 
   // ---- listen ----
 
@@ -878,8 +895,8 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     const accused = g.accused ?? "";
     const mineToGuess = !!me?.steal;
     $("steal-line").textContent = accused === myName
-      ? `You were voted out, and you were the mole. You have 15 s to guess the prompt and steal the game.`
-      : `${accused} was the mole. They have 15 s to guess the prompt and steal the game.`;
+      ? `You were voted out, and you were the mole. You have 15 s to guess the prompt from 8 and steal the game.`
+      : `${accused} was the mole. They have 15 s to guess the prompt from 8 and steal the game.`;
     const box = $("steal-options");
     show("steal-options", mineToGuess);
     show("steal-wait", !mineToGuess);
@@ -1452,7 +1469,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
   const conn = $("conn");
   // Anything that would fail while we can't reach the server. Buttons we turn off
   // are marked, so turning back on never touches one that was off for another reason.
-  const ACTIONS = "#start, #again, #next, #to-vote, #cards button, #pick-lists button, #borrow-panel button, #borrow-toggle, #vote-list button, #vote-skip-wrap button, #steal-options button";
+  const ACTIONS = "#start, #again, #next, #to-vote, #cards button, #pick-fit button, #pick-rest button, #borrow-panel button, #borrow-toggle, #vote-list button, #vote-skip-wrap button, #steal-options button";
   function syncActions() {
     const down = !connected || !navigator.onLine;
     for (const b of document.querySelectorAll<HTMLButtonElement>(ACTIONS)) {

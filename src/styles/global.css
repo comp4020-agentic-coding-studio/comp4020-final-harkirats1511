@@ -458,7 +458,8 @@ ol.pairs .hand.odd, .hist-rounds .hand.odd { color: var(--neon-ink); }
 .bar .hint { margin: 0; }
 details.howto { padding: 0 1.1rem; }
 details.howto[open] { padding-bottom: 0.5rem; }
-details.howto ol { margin: 0 0 0.75rem; padding-left: 1.4rem; }
+details.howto ul { margin: 0 0 0.5rem; padding-left: 1.3rem; }
+details.howto h3 { margin: 0.75rem 0 0.4rem; }
 details.howto li { margin-bottom: 0.5rem; }
 details.howto summary { font-weight: 800; font-size: var(--step-1); }
 
@@ -641,6 +642,14 @@ li.prow.fits { background: rgba(244, 184, 96, 0.14); box-shadow: inset 4px 0 0 v
 li.prow.fits .slot-tag::after { content: " \00b7 fits the mood"; color: var(--lamp); }
 #pick h3 { margin-top: 1.25rem; }
 #pick h3:first-child { margin-top: 0; }
+#pick-fit ul.tracks { margin-bottom: 0; }
+#pick-rest { margin-top: 1rem; }
+details.restcrate { border-radius: 10px; background: rgba(239, 231, 215, 0.06); }
+details.restcrate > summary { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; padding: 0.55rem 0.75rem; min-height: 52px; cursor: pointer; font-weight: 700; list-style: none; }
+details.restcrate > summary::-webkit-details-marker { display: none; }
+details.restcrate > summary::after { content: "+"; font: 600 1.25rem/1 var(--cat); color: var(--lamp); margin-left: auto; }
+details.restcrate[open] > summary::after { content: "\2212"; }
+details.restcrate ul.tracks { padding: 0 0.4rem 0.4rem; margin: 0; }
 #borrow-wrap { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px dashed var(--wood); }
 #borrow-wrap .hint { margin: 0.5rem 0 0.75rem; }
 #borrow-panel { display: grid; gap: 0.6rem; }
@@ -698,8 +707,9 @@ div.skipbtn.ro { border-radius: 999px; box-shadow: inset 0 0 0 1.5px var(--line)
 .steal .instr { margin-inline: auto; }
 .steal-clock { font: 600 clamp(4.5rem, 26vw, 7rem)/1 var(--cat); font-variant-numeric: tabular-nums; color: var(--lamp); margin: 0 0 1rem; }
 .steal-clock.low { color: var(--bad); }
-.steal-options { display: grid; gap: 0.75rem; text-align: left; }
-.steal-opt { justify-content: flex-start; text-align: left; font: 600 1.125rem/1.25 var(--ui); padding: 1rem 1.1rem; min-height: 64px; border-radius: 14px; }
+.steal-options { display: grid; gap: 0.5rem; text-align: left; }
+.steal-opt { justify-content: flex-start; text-align: left; font: 600 1rem/1.25 var(--ui); padding: 0.55rem 0.9rem; min-height: 44px; border-radius: 12px; }
+@media (min-width: 900px) { .steal-options { grid-template-columns: 1fr 1fr; } }
 .steal-opt:disabled { opacity: 0.8; }
 
 /* Reveal and game over */
@@ -735,3 +745,10 @@ ol.past .t.out { color: var(--neon-ink); }
 .steal-opt { position: relative; }
 .steal-opt .your { position: absolute; top: -0.55rem; right: 0.8rem; font: 600 0.625rem/1 var(--cat); letter-spacing: 0.08em; text-transform: uppercase; padding: 0.25rem 0.4rem; border-radius: 3px; background: var(--ink); color: var(--lamp); box-shadow: inset 0 0 0 1.5px var(--lamp); }
 .steal-opt.chosen:disabled { opacity: 1; box-shadow: inset 0 0 0 3px var(--lamp); }
+
+/* Pick rows: Pick is a compact pill on the right; the mood list has no per-row tag (the heading says it). */
+ul.tracks.pickable > li.prow { grid-template-columns: 3.5rem minmax(0, 1fr) auto; }
+ul.tracks.pickable > li.prow > .acts { grid-column: 3; grid-row: 1; flex: none; }
+ul.tracks.pickable > li.prow > .acts button { flex: none; min-width: 5rem; }
+#pick-fit li.prow > .slot-tag { display: none; }
+ul.tracks.pickable > li.prow > .slot-tag { grid-column: 2 / -1; }
