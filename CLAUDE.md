@@ -53,9 +53,10 @@ They are decisions, not defaults (see `docs/decisions/0009`).
   player has, never who cast them, and may change their vote until it locks.
   Once everyone who can vote has voted, a 5-second last call runs, then it
   locks. The most votes ejects that player; a tie, or skip on top, ejects nobody.
-- **Steal.** When a mole is voted out, they get one guess from 4 prompts of that
-  round's slot: the real one and 3 decoys never used earlier in the game, in
-  random order. Right: **the moles win the game** (as in The Chameleon). Wrong
+- **Steal.** When a mole is voted out, they get one guess from 8 prompts of that
+  round's slot: the real one and 7 decoys never used earlier in the game, in
+  random order. (Eight, not four: at four, a lucky guess decided too many
+  games the room had won.) Right: **the moles win the game** (as in The Chameleon). Wrong
   or out of time: they're out and the game goes on. The steal opening shows the
   accused was a mole; that's the point of the moment.
 - Voted-out players are ghosts: they watch, don't pick and don't vote. Their crate
