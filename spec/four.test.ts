@@ -43,8 +43,9 @@ async function until(s: Session, code: string, ok: (st: Pub) => boolean, ms = 60
     await sleep(250);
   }
 }
+// Private booths: another spec's quick seat must not sit a stranger at a table we mean to start.
 async function newTable(h: { s: Session }, body: Record<string, unknown> = {}) {
-  return ((await (await h.s.call("/api/tables", { body })).json()) as { code: string }).code;
+  return ((await (await h.s.call("/api/tables", { body: { private: true, ...body } })).json()) as { code: string }).code;
 }
 async function addBots(h: { s: Session }, code: string, n: number) {
   for (let i = 0; i < n; i++) expect((await h.s.call(at(code, "bots"), { body: {} })).status).toBe(201);
