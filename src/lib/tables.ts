@@ -6,10 +6,10 @@ import { type Avatar, defaultAvatar, PARTS } from "./avatar.ts";
 import type { Person } from "./auth.ts";
 import { db } from "./db.ts";
 import { crateComplete, listTaste } from "./taste.ts";
-import { PROMPTS, type Slot } from "./prompts.ts";
+import { PROMPTS, SLOTS, type Slot } from "./prompts.ts";
 import { log, personTag, refused, tableScope, tag } from "./log.ts";
 import {
-  avatars, gamePlayers, gamePrompts, gameThemes, games, people, picks, tableMembers, tableRemovals, tableReports, tables, votes,
+  avatars, gamePlayers, gamePrompts, gameThemes, games, people, picks, tableMembers, tableRemovals, tableReports, tables, tasteTracks, votes,
 } from "./schema.ts";
 
 // No I or O: they read as 1 and 0 when a code is shouted across a room.
@@ -25,6 +25,14 @@ export const SECONDS_PER_TRACK = 20;
 export const DEFAULT_PICK_SECONDS = PICK_SECONDS;
 export const DEFAULT_VOTE_SECONDS = VOTE_SECONDS;
 export const DEFAULT_SLOT_SECONDS = SECONDS_PER_TRACK;
+// Pace presets on the create form: [pick, per track, vote] seconds. Normal is the server defaults.
+export const PACES = {
+  quick: { pickSeconds: 30, slotSeconds: 15, voteSeconds: 20 },
+  normal: { pickSeconds: DEFAULT_PICK_SECONDS, slotSeconds: DEFAULT_SLOT_SECONDS, voteSeconds: DEFAULT_VOTE_SECONDS },
+  chill: { pickSeconds: 60, slotSeconds: 30, voteSeconds: 45 },
+} as const;
+export type Pace = keyof typeof PACES;
+export const isPace = (p: unknown): p is Pace => typeof p === "string" && Object.hasOwn(PACES, p);
 export type TableOptions = {
   pickSeconds: number; voteSeconds: number; moles: number | null; autoplay: boolean; slotSeconds: number;
   private: boolean;
@@ -41,8 +49,14 @@ function randomCode(): string {
   return code;
 }
 
-// The number of moles is a rule, not a setting: 1 for 3 to 5 players, 2 for 6 to 8.
+// The plain rule: 1 mole for 3 to 5 players, 2 for 6 to 8. It is what a table plays
+// unless its host chose a number (tables.moles).
 export const defaultMoles = (players: number) => (players <= 5 ? 1 : 2);
+// Never more than a third of the table, rounded down, with a minimum of 1: 2 moles need 6 players.
+export const maxMoles = (players: number) => Math.max(1, Math.floor(players / 3));
+// What a game of `players` deals: the host's choice if there is one, cut down to what the table can hold.
+export const effectiveMoles = (players: number, chosen: number | null) => Math.min(chosen ?? defaultMoles(players), maxMoles(players));
+export const MOLE_CHOICES = [1, 2];
 
 export function createTable(hostId: string, opts: TableOptions): string {
   for (let attempt = 0; attempt < 50; attempt++) {
@@ -129,6 +143,43 @@ export function setPrivate(code: string, value: boolean) {
 
 export function isHost(code: string, personId: string): boolean {
   return db.select({ h: tables.hostPersonId }).from(tables).where(eq(tables.code, code)).get()?.h === personId;
+}
+
+// People at the table, bots left out.
+export function humanCount(code: string): number {
+  return db
+    .select({ n: sql<number>`count(*)` })
+    .from(tableMembers)
+    .innerJoin(people, eq(people.id, tableMembers.personId))
+    .where(and(eq(tableMembers.tableCode, code), eq(people.isBot, false)))
+    .get()!.n;
+}
+
+// The bots seated at a table: ids and names, in seat order.
+export function botSeats(code: string): { id: string; name: string }[] {
+  return db
+    .select({ id: people.id, name: people.name })
+    .from(tableMembers)
+    .innerJoin(people, eq(people.id, tableMembers.personId))
+    .where(and(eq(tableMembers.tableCode, code), eq(people.isBot, true)))
+    .orderBy(asc(tableMembers.joinedAt), asc(people.name))
+    .all();
+}
+
+export function isBotPerson(personId: string): boolean {
+  return !!db.select({ b: people.isBot }).from(people).where(eq(people.id, personId)).get()?.b;
+}
+
+export function setMoles(code: string, moles: number | null) {
+  db.update(tables).set({ moles }).where(eq(tables.code, code)).run();
+}
+
+export function setRematch(code: string, personId: string, value: boolean) {
+  return db
+    .update(tableMembers)
+    .set({ rematch: value })
+    .where(and(eq(tableMembers.tableCode, code), eq(tableMembers.personId, personId)))
+    .run().changes > 0;
 }
 
 export function memberCount(code: string): number {
@@ -230,7 +281,11 @@ export type PublicTable = {
   private: boolean;
   // crateReady: 3 in every slot (public; never the tracks). crate is the
   // player's locked crate, present only while a game is running.
-  members: { name: string; avatar: Avatar; crateReady: boolean; crate?: PublicCrateTrack[] }[];
+  // crateCount is how many sorted songs they have (0 to 12), public at the table like crateReady.
+  // bot marks a bot the server plays for; in is "I'm in" for the next game (set at game over only).
+  members: { name: string; avatar: Avatar; crateReady: boolean; crateCount: number; bot?: true; in?: true; crate?: PublicCrateTrack[] }[];
+  // How many moles the host asked for (1 or 2), or null for the plain rule. A setting, not a role.
+  moleChoice: number | null;
   game?: PublicGame;
 };
 
@@ -438,7 +493,7 @@ function roleOf(gameId: string, personId: string): string | undefined {
 
 export function publicState(code: string): PublicTable | null {
   const t = db
-    .select({ code: tables.code, status: tables.status, host: people.name, private: tables.private })
+    .select({ code: tables.code, status: tables.status, host: people.name, private: tables.private, moles: tables.moles })
     .from(tables)
     .innerJoin(people, eq(people.id, tables.hostPersonId))
     .where(eq(tables.code, code))
@@ -453,8 +508,20 @@ export function publicState(code: string): PublicTable | null {
       ? db.select({ p: gamePlayers.personId }).from(gamePlayers).where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.left, 0))).all().map((r) => r.p)
       : [],
   );
+  const here = db.select({ p: tableMembers.personId }).from(tableMembers).where(eq(tableMembers.tableCode, code)).all().map((r) => r.p);
+  const counts = new Map(
+    here.length
+      ? db
+          .select({ p: tasteTracks.personId, n: sql<number>`count(*)` })
+          .from(tasteTracks)
+          .where(and(inArray(tasteTracks.personId, here), inArray(tasteTracks.slot, [...SLOTS])))
+          .groupBy(tasteTracks.personId)
+          .all()
+          .map((r) => [r.p, r.n] as const)
+      : [],
+  );
   const members = db
-    .select({ id: people.id, name: people.name, a: avatars })
+    .select({ id: people.id, name: people.name, a: avatars, bot: people.isBot, rematch: tableMembers.rematch })
     .from(tableMembers)
     .innerJoin(people, eq(people.id, tableMembers.personId))
     .leftJoin(avatars, eq(avatars.personId, people.id))
@@ -464,6 +531,9 @@ export function publicState(code: string): PublicTable | null {
     .map((m) => ({
       name: m.name,
       crateReady: crateComplete(m.id),
+      crateCount: counts.get(m.id) ?? 0,
+      ...(m.bot ? { bot: true as const } : {}),
+      ...(m.rematch ? { in: true as const } : {}),
       avatar: m.a ? (Object.fromEntries(PARTS.map((p) => [p, m.a![p]])) as Avatar) : defaultAvatar(m.id),
       ...(playing.has(m.id)
         ? {
@@ -474,7 +544,9 @@ export function publicState(code: string): PublicTable | null {
         : {}),
     }));
   const game = publicGame(code);
-  return game ? { ...t, members, game } : { ...t, members };
+  const { moles, ...rest } = t;
+  const head = { ...rest, moleChoice: moles };
+  return game ? { ...head, members, game } : { ...head, members };
 }
 
 // In-process pub/sub: the app runs as a single machine. A listener is told a
@@ -561,10 +633,24 @@ export function frameFeed(code: string, slim: boolean) {
 // Whoever wants to hear about any table (the shop's booth list) rather than one.
 const anyTable = new Set<() => void>();
 
+// Server-side listeners (the bots) told of every table change, apart from the
+// streams: they are not a watcher, so they never make a booth look open.
+const changeHooks = new Set<(code: string) => void>();
+export function onTableChange(fn: (code: string) => void) {
+  changeHooks.add(fn);
+}
+
 export function notifyTable(code: string) {
   frames.delete(code);
   bus.emit(code);
   for (const fn of anyTable) fn();
+  for (const fn of changeHooks) {
+    try {
+      fn(code);
+    } catch {
+      // a listener never breaks the change that woke it
+    }
+  }
 }
 
 export function watchAnyTable(fn: () => void): () => void {
@@ -597,7 +683,9 @@ export type HistoryGame = {
   winner: string;
   // Why it ended, when not the plain win (see PublicGame.ending).
   ending?: string;
+  // People only: bots are counted in `bots`, never listed as a person.
   players: string[];
+  bots: number;
   rounds: { round: number; majority?: string; mole?: string; prompt?: string; slot?: Slot }[];
   // theme is this person's own card: the old game's theme, or the new game's prompt.
   mine: { round: number; theme: string; wasMole: boolean; title: string; artist: string; lender?: string }[];
@@ -622,7 +710,7 @@ export function historyFor(personId: string, limit = 20): HistoryGame[] {
   if (!mineGames.length) return [];
   const ids = mineGames.map((g) => g.id);
   const names = db
-    .select({ gameId: gamePlayers.gameId, name: people.name })
+    .select({ gameId: gamePlayers.gameId, name: people.name, bot: people.isBot })
     .from(gamePlayers)
     .innerJoin(people, eq(people.id, gamePlayers.personId))
     .where(and(inArray(gamePlayers.gameId, ids), eq(gamePlayers.left, 0)))
@@ -648,7 +736,8 @@ export function historyFor(personId: string, limit = 20): HistoryGame[] {
       finishedAt: g.finishedAt,
       winner: g.winner!,
       ...(g.ending ? { ending: g.ending } : {}),
-      players: names.filter((n) => n.gameId === g.id).map((n) => n.name),
+      players: names.filter((n) => n.gameId === g.id && !n.bot).map((n) => n.name),
+      bots: names.filter((n) => n.gameId === g.id && n.bot).length,
       rounds,
       mine: myPicks
         .filter((p) => p.gameId === g.id)

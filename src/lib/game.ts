@@ -6,7 +6,7 @@ import { log, personTag, tableScope } from "./log.ts";
 import { PROMPTS, SLOTS, type Slot } from "./prompts.ts";
 import { crateComplete, crateTrack, TASTE_MAX } from "./taste.ts";
 import {
-  currentGame, defaultMoles, MAX_PLAYERS, MIN_PLAYERS, notifyTable, playedTrackIds, promptById, SECONDS_PER_TRACK, tableOptions,
+  botSeats, currentGame, effectiveMoles, humanCount, isBotPerson, MAX_PLAYERS, MIN_PLAYERS, notifyTable, playedTrackIds, promptById, SECONDS_PER_TRACK, tableOptions,
 } from "./tables.ts";
 
 // The game engine. Every piece of state is a row in SQLite; the only thing held
@@ -98,8 +98,8 @@ export function startGame(code: string, by?: string): StartResult {
     // Everyone who would play needs a complete crate: nobody is quietly made a spectator.
     const short = members.filter((m) => !crateComplete(m.id));
     if (short.length) return fail(409, `Waiting on crates: ${short.map((m) => m.name).join(", ")}`);
-    // The rule, not a dial: 1 mole for 3 to 5 players, 2 for 6 to 8.
-    const moleCount = defaultMoles(members.length);
+    // The host's choice (1 or 2) if there is one, else the plain rule; never more than a third of the table.
+    const moleCount = effectiveMoles(members.length, t.moles);
     const id = randomUUID();
     const now = Date.now();
     const slotOrder = JSON.stringify(shuffle([...SLOTS]));
@@ -113,6 +113,8 @@ export function startGame(code: string, by?: string): StartResult {
     }
     drawPrompt(tx, { id, slotOrder }, 1);
     tx.update(tables).set({ status: "playing" }).where(eq(tables.code, code)).run();
+    // "I'm in" belonged to the game-over screen: a new game starts from nobody in.
+    tx.update(tableMembers).set({ rematch: false }).where(eq(tableMembers.tableCode, code)).run();
     // Player count only: roles and prompts stay secret until the reveal.
     log(tableScope(code), `${by ? `${by} ` : ""}started the game · ${members.length} players · round 1`);
     return { ok: true };
@@ -644,19 +646,23 @@ export function leaveTable(code: string, personId: string, removedBy?: string): 
       .where(and(eq(tableMembers.tableCode, code), eq(tableMembers.personId, personId)))
       .run();
     if (!gone.changes) return false;
+    const bot = isBotPerson(personId);
     if (removedBy) {
-      tx.insert(tableRemovals).values({ tableCode: code, personId, at: Date.now() }).onConflictDoNothing().run();
-      log(tableScope(code), `${personTag(removedBy)} removed ${personTag(personId)}`);
+      // A bot is only seated again by the host adding one: no removal row to keep it out.
+      if (!bot) tx.insert(tableRemovals).values({ tableCode: code, personId, at: Date.now() }).onConflictDoNothing().run();
+      log(tableScope(code), `${personTag(removedBy)} removed ${bot ? "a bot " : ""}${personTag(personId)}`);
     } else {
       log(tableScope(code), `${personTag(personId)} left the table`);
     }
     const t = tableOptions(code)!;
     if (t.hostPersonId === personId) {
+      // A bot can't be the host: the role passes to the longest-seated person.
       const next = tx
         .select({ id: tableMembers.personId })
         .from(tableMembers)
-        .where(eq(tableMembers.tableCode, code))
-        .orderBy(asc(tableMembers.joinedAt), sql`rowid`)
+        .innerJoin(people, eq(people.id, tableMembers.personId))
+        .where(and(eq(tableMembers.tableCode, code), eq(people.isBot, false)))
+        .orderBy(asc(tableMembers.joinedAt), sql`table_members.rowid`)
         .get();
       if (next) {
         tx.update(tables).set({ hostPersonId: next.id }).where(eq(tables.code, code)).run();
@@ -672,6 +678,12 @@ export function leaveTable(code: string, personId: string, removedBy?: string): 
     return true;
   });
   if (left) changed(code);
+  // A table with nobody but bots left is over for them: they go too (each leaves like anyone).
+  if (left && humanCount(code) === 0) {
+    const bots = botSeats(code);
+    if (bots.length) log(tableScope(code), "nobody but bots left: the bots leave too");
+    for (const b of bots) leaveTable(code, b.id);
+  }
   return left;
 }
 

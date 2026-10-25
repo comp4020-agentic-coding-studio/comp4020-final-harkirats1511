@@ -16,6 +16,8 @@ export const people = sqliteTable(
     // how every hash made before this column existed was computed.
     pinParams: text("pin_params"),
     createdAt: integer("created_at").notNull(),
+    // A bot the server plays for (src/lib/bots). It has no session and no PIN that matches anything.
+    isBot: integer("is_bot", { mode: "boolean" }).notNull().default(false),
   },
   (t) => [uniqueIndex("people_name_nocase").on(sql`lower(${t.name})`)],
 );
@@ -64,6 +66,8 @@ export const tableMembers = sqliteTable(
       .notNull()
       .references(() => people.id),
     joinedAt: integer("joined_at").notNull(),
+    // "I'm in" for the next game, tapped on the game-over screen. Public, harmless, reset when a game starts.
+    rematch: integer("rematch", { mode: "boolean" }).notNull().default(false),
   },
   (t) => [primaryKey({ columns: [t.tableCode, t.personId] })],
 );

@@ -16,6 +16,8 @@ export type Booth = {
   code?: string;
   host: string;
   seated: number;
+  // How many of the seated are bots (they count as seats).
+  bots: number;
   max: number;
   status: "waiting" | "playing";
   round?: number;
@@ -34,6 +36,7 @@ function rows(): Row[] {
       status: tables.status,
       createdAt: tables.createdAt,
       seated: sql<number>`(select count(*) from ${tableMembers} where ${tableMembers.tableCode} = ${tables.code})`,
+      bots: sql<number>`(select count(*) from ${tableMembers} inner join ${people} on ${people.id} = ${tableMembers.personId} where ${tableMembers.tableCode} = ${tables.code} and ${people.isBot} = 1)`,
     })
     .from(tables)
     .innerJoin(people, eq(people.id, tables.hostPersonId))
@@ -64,6 +67,7 @@ function rows(): Row[] {
         code: t.code,
         host: t.host,
         seated: t.seated,
+        bots: t.bots,
         max: MAX_PLAYERS,
         status: playing ? ("playing" as const) : ("waiting" as const),
         ...(round === undefined ? {} : { round }),
