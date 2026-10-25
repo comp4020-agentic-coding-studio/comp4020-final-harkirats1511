@@ -11,6 +11,11 @@
 // is a test tool. Ctrl+C makes every bot leave the table, then exits. Without
 // --stay the script also exits when the game finishes.
 
+// The brain is the server's own (src/lib/bots/brain.ts): the same picking, borrowing, voting and
+// stealing, deciding only from /me and the public state. The app can also seat bots itself now
+// (the host's "Add a bot" button); this script is for testing against any server over HTTP.
+import { decidePick, decideSteal, decideVote, type MeView, type Pub } from "../src/lib/bots/brain.ts";
+
 const PIN = "2580";
 // A crate is 3 songs in each of 4 slots; the app refuses a start until every player has one.
 const SLOTS = ["up", "down", "out", "in"] as const;
@@ -167,25 +172,6 @@ class Bot {
     else if (g.phase === "reveal") log(this.name, `round ${g.round} reveal`);
   }
 
-  // Bots play from their own crate, preferring unplayed songs in the round's slot
-  // (a mole only knows the slot too). About one round in four, once per game, a
-  // bot borrows an unplayed song from someone else's crate instead.
-  chooseTrack(me: Me): { track: Track; from?: string } | undefined {
-    const unplayed = <T extends { slot?: string | null }>(xs: T[], id: (x: T) => number) => xs.filter((x) => !me.played.includes(id(x)));
-    if (!me.borrowUsed && Math.random() < 0.25) {
-      const lenders = this.members.filter((m) => m.name !== this.name && m.crate?.some((c) => !me.played.includes(c.trackId)));
-      const lender = pickOne(lenders);
-      if (lender) {
-        const open = unplayed(lender.crate!, (c) => c.trackId);
-        const song = pickOne(open.filter((c) => c.slot === me.slot)) ?? pickOne(open);
-        if (song) return { track: { id: song.trackId, title: song.title, artist: "", slot: song.slot }, from: lender.name };
-      }
-    }
-    const fresh = unplayed(this.taste, (t) => t.id);
-    const track = pickOne(fresh.filter((t) => t.slot === me.slot)) ?? pickOne(fresh);
-    return track && { track };
-  }
-
   async pick(g: Game, mine: number) {
     const me = (await this.call(`/api/tables/${code}/me`)).data as Me | null;
     if (!me) return;
@@ -198,9 +184,14 @@ class Bot {
     await sleep(wait);
     if (mine !== this.run) return;
     // The crate may be short of unplayed songs late in a long game; then it sits out.
-    const choice = this.chooseTrack((await this.call(`/api/tables/${code}/me`)).data as Me);
+    const view = (await this.call(`/api/tables/${code}/me`)).data as Me;
+    const pub = (await this.call(`/api/tables/${code}`)).data as Pub;
+    // Its own crate is in the public state only while a game runs; it also knows it from building it.
+    const own = pub.members.find((m) => m.name === this.name);
+    if (own && !own.crate) own.crate = this.taste.map((t) => ({ trackId: t.id, title: t.title, slot: (t.slot as MeView["slot"]) ?? null }));
+    const choice = decidePick(view as MeView, this.name, pub);
     if (!choice) return;
-    const r = await this.call(`/api/tables/${code}/pick`, { trackId: choice.track.id, ...(choice.from ? { from: choice.from } : {}) });
+    const r = await this.call(`/api/tables/${code}/pick`, { trackId: choice.trackId, ...(choice.from ? { from: choice.from } : {}) });
     if (r.ok) log(this.name, "picked a track");
   }
 
@@ -210,12 +201,12 @@ class Bot {
     if (me.role !== "player" && me.role !== "mole") return;
     await sleep(this.delay(3, 12, g.deadline));
     if (mine !== this.run) return;
-    // Votes are on names: a random player still in, or skip.
+    // A player whose song is off the round's mood first, else a random name.
     const cast = async () => {
-      const names = ((await this.call(`/api/tables/${code}`)).data as { game?: { tally?: { name: string }[] } } | null)?.game?.tally ?? [];
-      const others = names.filter((n) => n.name !== this.name);
-      const choice = others.length && Math.random() < 0.85 ? { name: pickOne(others)!.name } : { skip: true };
-      const r = await this.call(`/api/tables/${code}/vote`, choice);
+      const pub = (await this.call(`/api/tables/${code}`)).data as Pub;
+      const view = (await this.call(`/api/tables/${code}/me`)).data as Me;
+      const pick = decideVote(view as MeView, this.name, pub);
+      const r = await this.call(`/api/tables/${code}/vote`, pick === "skip" ? { skip: true } : pick);
       if (r.ok) log(this.name, "voted");
     };
     await cast();
@@ -226,14 +217,15 @@ class Bot {
     }
   }
 
-  // A voted-out mole guesses one of the four prompts at random.
+  // A voted-out mole guesses one of the eight prompts, leaning on the songs just played.
   async steal(g: Game, mine: number) {
     const me = (await this.call(`/api/tables/${code}/me`)).data as Me | null;
     if (!me?.steal || mine !== this.run) return;
     await sleep(this.delay(2, 8, g.deadline));
     if (mine !== this.run) return;
-    const guess = pickOne(me.steal.options)!;
-    const r = await this.call(`/api/tables/${code}/steal`, { promptId: guess.id });
+    const guess = decideSteal(me as MeView, (await this.call(`/api/tables/${code}`)).data as Pub);
+    if (!guess) return;
+    const r = await this.call(`/api/tables/${code}/steal`, { promptId: guess });
     if (r.ok) log(this.name, "guessed");
   }
 }
