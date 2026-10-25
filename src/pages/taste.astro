@@ -25,6 +25,7 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
 
   <section class="progress sticky-progress" aria-label="Crate progress">
     <p class="line"><span class="count mono" id="count" aria-live="off"></span><span class="need" id="need"></span></p>
+    <button type="button" id="keep-all" class="sm" hidden>Keep all suggestions</button>
     <div class="done" id="done" hidden>
       <p><strong>Complete: you can play.</strong></p>
       {back ? <a class="btn big" href={back}>Back to the table</a> : <a class="btn ghost" href="/">Back home</a>}
@@ -67,7 +68,6 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
       <button type="submit" id="starter-go">Suggest songs</button>
     </form>
     <p class="hint" id="starter-status" role="status"></p>
-    <button type="button" id="keep-all" hidden>Keep all</button>
   </section>
 
   <div class="dividers" id="dividers">
@@ -131,7 +131,7 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
 
   /* ---- /taste: search first, starter, sort-old (stage 2a) ---- */
   .sticky-progress { position: sticky; top: 0; z-index: 20; margin: 0 calc(var(--gutter) * -1) 1rem; padding: 0.55rem var(--gutter); background: var(--wall); border-bottom: 1px solid var(--rule); }
-  .sticky-progress .line { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.2rem; }
+  .sticky-progress .line { margin: 0; }
   .sticky-progress .count { font-size: var(--step-2); }
   .sticky-progress .need { font-size: var(--step--1); }
   .sticky-progress .done { margin-top: 0.4rem; padding: 0.4rem 0.8rem; }
@@ -149,7 +149,7 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
   .sleeve .acts button.swap { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--ink-2); }
   .sleeve .acts button.sortit { background: var(--lamp); color: var(--ink); flex: 1 1 auto; }
   .starter form, .sortold form { margin: 0; }
-  .starter #keep-all { margin-top: 0.4rem; }
+  #keep-all { margin: 0.35rem 0 0; min-height: 44px; }
   .sortold .bin { margin-top: 0.8rem; }
   .sleeve .chips { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.35rem; }
   .sleeve .chips .chip { min-height: 44px; padding: 0.2rem; margin: 0; background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--ink-2); }
@@ -291,6 +291,7 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
     const short = slots.filter((s) => room(s.slot) > 0).map((s) => `${s.name} needs ${room(s.slot)}`);
     const done = short.length === 0;
     $("need").textContent = done ? "" : ` · ${short.join(", ")}`;
+    $("count").setAttribute("aria-label", `${n} of ${max} songs${done ? ", complete" : ""}`);
     $("need").hidden = done;
     $("done").hidden = !done;
     $("locked").hidden = !locked;
