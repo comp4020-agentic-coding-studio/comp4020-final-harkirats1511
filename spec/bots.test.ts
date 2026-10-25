@@ -97,7 +97,8 @@ it("starts a Quick table with 30 s to pick, and Chill with 60", async () => {
   for (const [pace, secs] of [["quick", 30], ["chill", 60]] as const) {
     const host = await human(`bq${pace[0]}`);
     await fillCrate(host.s, 3);
-    const code = await newTable(host, { pace });
+    // Private: another spec's quick seat must not sit a stranger at a table we mean to start.
+    const code = await newTable(host, { pace, private: true });
     await addBots(host, code, 2);
     const started = await host.s.call(at(code, "start"), { body: {} });
     expect(started.status, JSON.stringify(await started.clone().json())).toBeLessThan(300);
