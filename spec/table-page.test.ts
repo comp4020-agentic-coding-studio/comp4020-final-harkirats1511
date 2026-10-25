@@ -53,3 +53,17 @@ it("renders the crate game's sections in the page shell", async () => {
   expect(text).not.toContain("Your theme");
   expect(text).not.toContain("house record");
 });
+
+// Contract (decision 0010): the page shell holds the format choice, the score strip, the two ballots
+// and the Four rounds parts of How to play; the create form offers both formats.
+it("renders the format controls and the Four rounds shell", async () => {
+  const host = await signedIn("tblfmt");
+  const { code } = (await (await host.s.call("/api/tables", { body: { format: "four" } })).json()) as { code: string };
+  const text = await html(host.s, `/t/${code}`);
+  for (const id of ["format-lobby", "format-guest", "scores", "vote-tabs", "best-list", "four-points", "scoreboard", "ghost-results"]) expect(text).toContain(`id="${id}"`);
+  expect(text).toContain("Four rounds");
+  expect(text).toContain("Knockout");
+  const home = await html(host.s, "/");
+  expect(home).toContain('id="fmt-four"');
+  expect(home).toContain('id="fmt-knockout"');
+});
