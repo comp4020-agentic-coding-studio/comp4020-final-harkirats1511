@@ -24,11 +24,26 @@ async function signedIn(name = uniqueName("tst"), pin = "8642") {
   return { s, name, pin };
 }
 
+// Deezer throttles bursts, and the app answers 503 when it does: wait and ask
+// again (fillCrate does the same), so a busy runner can't fail a deploy.
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+async function retry503(go: () => Promise<Response>): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await go();
+    if (res.status !== 503 || attempt >= 6) return res;
+    await sleep(1500);
+  }
+}
+
 async function search(s: ReturnType<typeof session>, q: string): Promise<Track[]> {
-  const res = await s.call(`/api/search?q=${encodeURIComponent(q)}`);
+  const res = await retry503(() => s.call(`/api/search?q=${encodeURIComponent(q)}`));
   expect(res.status).toBe(200);
   return (await res.json()) as Track[];
 }
+
+// POST /api/taste goes to Deezer for the details, so it gets the same retry.
+const add = (s: ReturnType<typeof session>, body: Record<string, unknown>) =>
+  retry503(() => s.call("/api/taste", { body }));
 
 it("searches the catalogue for tracks to add", async () => {
   const { s } = await signedIn();
@@ -42,8 +57,8 @@ it("searches the catalogue for tracks to add", async () => {
 it("keeps a taste file that a returning person finds again", async () => {
   const { s, name, pin } = await signedIn();
   const [first, second] = await search(s, "radiohead");
-  expect((await s.call("/api/taste", { body: { trackId: first.id, slot: "up" } })).status).toBeLessThan(300);
-  expect((await s.call("/api/taste", { body: { trackId: second.id, slot: "down" } })).status).toBeLessThan(300);
+  expect((await add(s, { trackId: first.id, slot: "up" })).status).toBeLessThan(300);
+  expect((await add(s, { trackId: second.id, slot: "down" })).status).toBeLessThan(300);
 
   // The same person on another device.
   const again = session();
@@ -56,14 +71,14 @@ it("keeps a taste file that a returning person finds again", async () => {
 it("takes the track's details from the catalogue, not from the client", async () => {
   const { s } = await signedIn();
   const [track] = await search(s, "fleetwood mac dreams");
-  await s.call("/api/taste", { body: { trackId: track.id, slot: "in", title: "forged title" } });
+  await add(s, { trackId: track.id, slot: "in", title: "forged title" });
   const taste = (await (await s.call("/api/taste")).json()) as Track[];
   expect(taste.find((t) => t.id === track.id)?.title).toBe(track.title);
 });
 
 it("refuses a track id the catalogue doesn't know", async () => {
   const { s } = await signedIn();
-  const res = await s.call("/api/taste", { body: { trackId: 1, slot: "up" } });
+  const res = await add(s, { trackId: 1, slot: "up" });
   expect(res.status).toBeGreaterThanOrEqual(400);
   expect(res.status).toBeLessThan(500);
 });
@@ -71,9 +86,9 @@ it("refuses a track id the catalogue doesn't know", async () => {
 it("removes a track, and adding one twice keeps one copy", async () => {
   const { s } = await signedIn();
   const [a, b] = await search(s, "beyonce");
-  await s.call("/api/taste", { body: { trackId: a.id, slot: "out" } });
-  await s.call("/api/taste", { body: { trackId: a.id, slot: "out" } });
-  await s.call("/api/taste", { body: { trackId: b.id, slot: "out" } });
+  await add(s, { trackId: a.id, slot: "out" });
+  await add(s, { trackId: a.id, slot: "out" });
+  await add(s, { trackId: b.id, slot: "out" });
   expect(((await (await s.call("/api/taste")).json()) as Track[]).filter((t) => t.id === a.id)).toHaveLength(1);
 
   expect((await s.call(`/api/taste/${a.id}`, { method: "DELETE" })).status).toBeLessThan(300);
@@ -89,22 +104,22 @@ it("holds 3 per slot and 12 in all: a fourth in a slot is a 409, and a full crat
   for (const slot of ["up", "down", "out", "in"]) expect(taste.filter((t) => t.slot === slot)).toHaveLength(3);
   // Every slot is full, so one more anywhere is a 409 (slot full) and nothing is added.
   const [extra] = await search(s, "love");
-  const res = await s.call("/api/taste", { body: { trackId: extra.id, slot: "up" } });
+  const res = await add(s, { trackId: extra.id, slot: "up" });
   expect(res.status).toBe(409);
   expect(((await (await s.call("/api/taste")).json()) as Track[]).length).toBe(MAX);
   // Free a place in "out" and a track fits there but still not in "up".
   await s.call(`/api/taste/${ids[6]}`, { method: "DELETE" });
-  expect((await s.call("/api/taste", { body: { trackId: extra.id, slot: "up" } })).status).toBe(409);
-  expect((await s.call("/api/taste", { body: { trackId: extra.id, slot: "out" } })).status).toBe(201);
+  expect((await add(s, { trackId: extra.id, slot: "up" })).status).toBe(409);
+  expect((await add(s, { trackId: extra.id, slot: "out" })).status).toBe(201);
 });
 
 it("refuses a missing or unknown slot, and moves a track only to a slot with room", async () => {
   const { s } = await signedIn();
   const [a, b] = await search(s, "queen");
-  expect((await s.call("/api/taste", { body: { trackId: a.id } })).status).toBe(400);
-  expect((await s.call("/api/taste", { body: { trackId: a.id, slot: "sideways" } })).status).toBe(400);
-  await s.call("/api/taste", { body: { trackId: a.id, slot: "up" } });
-  await s.call("/api/taste", { body: { trackId: b.id, slot: "up" } });
+  expect((await add(s, { trackId: a.id })).status).toBe(400);
+  expect((await add(s, { trackId: a.id, slot: "sideways" })).status).toBe(400);
+  await add(s, { trackId: a.id, slot: "up" });
+  await add(s, { trackId: b.id, slot: "up" });
   const moved = await s.call(`/api/taste/${a.id}`, { method: "PATCH", body: { slot: "down" } });
   expect(moved.status).toBe(200);
   expect(((await moved.json()) as Track[]).find((t) => t.id === a.id)?.slot).toBe("down");
@@ -113,7 +128,7 @@ it("refuses a missing or unknown slot, and moves a track only to a slot with roo
   expect((await s.call("/api/taste/999999999", { method: "PATCH", body: { slot: "up" } })).status).toBe(404);
   // Fill "down" with three others and a fourth move into it is a 409.
   const more = (await search(s, "abba")).slice(0, 4);
-  for (const t of more.slice(0, 3)) await s.call("/api/taste", { body: { trackId: t.id, slot: "down" } });
+  for (const t of more.slice(0, 3)) await add(s, { trackId: t.id, slot: "down" });
   expect((await s.call(`/api/taste/${a.id}`, { method: "PATCH", body: { slot: "down" } })).status).toBe(409);
 });
 
@@ -170,5 +185,5 @@ it.skipIf(!process.env.DATABASE_PATH)("a person with only unsorted songs isn't r
   expect(pub.members.find((m) => m.name === name)?.crateReady).toBe(false);
   // And one sorted song still goes in.
   const [first] = await search(s, "radiohead");
-  expect((await s.call("/api/taste", { body: { trackId: first.id, slot: "up" } })).status).toBe(201);
+  expect((await add(s, { trackId: first.id, slot: "up" })).status).toBe(201);
 });
