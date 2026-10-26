@@ -127,8 +127,15 @@ holds in both unless this section says otherwise.
   - **A mole who leaves during the round** counts as caught for everyone who had
     voted for them (+2 each); there is no steal. Anyone else who leaves just
     drops out: their votes and their card's best-pick votes count for nothing.
+    A mole who leaves during their own steal was already caught by the vote: the
+    steal is missed (no +3) and the same rule pays their voters. The reveal says
+    "X left. Everyone who had voted for them catches them."
   - The reveal's points and their reasons come from the server, so what the
-    screen says always matches the score.
+    screen says always matches the score. Each revealed round is
+    stored as it was shown (moles, who had left, the ballots that counted, points
+    with reasons, the best card), and the final scores and winners are stored when
+    the game ends, so a later leave or a reload never changes a finished round or
+    the winner.
   - **Scores change only at the reveal**, never while a vote is open, so a score
     can't leak who voted for what.
   - After round 4 the highest score wins; a tie shares the win. A round nobody

@@ -150,11 +150,12 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           <p class="instr" id="vote-instr">Who is the mole? Vote for a player, or skip. You can change your vote until it locks.</p>
           <p class="hint" id="vote-note"></p>
           <div class="vtabs" id="vote-tabs" role="tablist" aria-label="The two votes" hidden></div>
-          <div id="vote-mole-panel" role="tabpanel" aria-labelledby="tab-mole">
+          <p class="vote-todo" id="vote-todo" hidden></p>
+          <div id="vote-mole-panel">
             <ul class="ballot" id="vote-list" aria-label="Players to vote for"></ul>
             <div class="skipbar" id="vote-skip-wrap"></div>
           </div>
-          <div id="vote-best-panel" role="tabpanel" aria-labelledby="tab-best" hidden>
+          <div id="vote-best-panel" hidden>
             <ul class="ballot best" id="best-list" aria-label="Songs to pick as best"></ul>
           </div>
           <p class="lastcall mono" id="last-call" role="status" hidden></p>
@@ -224,6 +225,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           </div>
           <ol class="plays reveal" id="reveal-cards" aria-label="Who picked what"></ol>
           <p class="deadair" id="reveal-dead" hidden></p>
+          <p class="deadair" id="reveal-left" hidden></p>
           <div id="reveal-votes-wrap" class="votes-note" hidden>
             <h3 id="reveal-votes-h">Votes</h3>
             <ul class="votelist" id="reveal-votes"></ul>
@@ -336,7 +338,10 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           <ul>
             <li>Four rounds, one per mood. Nobody is voted out. The moles are dealt again every round.</li>
             <li>Two votes at once: who is the mole, and the best pick (a song, not your own). Change either until it locks.</li>
-            <li>Points: +2 for voting for a mole. +1 for each best-pick vote your song gets, and +1 to whoever lent it. A mole gets +2 if the room's top vote isn't a mole, and +3 for a right steal.</li>
+            <li>Moles are dealt without repeats: nobody is the mole twice until everyone at the table has been once.</li>
+            <li>Points: +2 for voting for a mole (a mole's own mole vote scores nothing). +1 for each best-pick vote your song gets, and +1 to whoever lent it. You can't best-pick a song you lent.</li>
+            <li>Each mole is judged on their own. A mole the room didn't catch gets +2, even if the other mole was caught. The room catches a mole when the top vote is that mole, or a tie made only of moles. A caught mole gets the steal: +3 for a right guess.</li>
+            <li>A mole who leaves counts as caught for everyone who had voted for them (+2 each), with no steal. Anyone else who leaves just drops out: their votes count for nothing.</li>
             <li>Scores change only at the reveal. After round 4 the most points wins; a tie shares it.</li>
           </ul>
           <p class="hint">The reveal moves on by itself after 30 seconds. Playing an obvious song for the prompt helps a caught mole guess it.</p>
@@ -351,12 +356,18 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
   type Slot = "up" | "down" | "out" | "in";
   type CrateTrack = { trackId: number; title: string; artist: string; cover?: string; slot: Slot | null };
   type Card = { order: number; picker: string; lender?: string; trackId: number; title: string; artist: string; cover?: string; clash?: true };
-  type Points = { name: string; points: number };
-  type Past = { round: number; prompt: string; slot: Slot; cards: Card[]; ejected: string | null; wasMole: boolean; moles?: string[]; points?: Points[] };
+  type Reason = { kind: "caught" | "best" | "lend" | "escaped" | "stole"; n: number; points: number };
+  type Points = { name: string; points: number; reasons: Reason[] };
+  type BestCard = { order: number; picker: string; lender?: string; votes: number };
+  type Past = {
+    round: number; prompt: string; slot: Slot; cards: Card[]; ejected: string | null; wasMole: boolean;
+    moles?: string[]; points?: Points[]; left?: string[]; leftMoles?: string[]; best?: BestCard[];
+  };
   type Reveal = {
     prompt: string; slot: Slot; cards: Card[]; deadAir: string[]; votes: { voter: string; choice: string | null }[];
     accused: string | null; ejected: string | null; wasMole: boolean; stole: boolean;
-    moles?: string[]; points?: Points[]; bestVotes?: { voter: string; order: number; picker: string; lender?: string }[];
+    moles?: string[]; left?: string[]; leftMoles?: string[]; caught?: string[]; escaped?: string[];
+    points?: Points[]; bestVotes?: { voter: string; order: number; picker: string; lender?: string }[];
   };
   type Game = {
     format?: "knockout" | "four";
@@ -476,8 +487,6 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
   let stealGuessed = false;
   const FOUR_ROUNDS = 4;
   let voteTab: "mole" | "best" = "mole";
-  // Best cards seen at a reveal this session (the public state only holds the current round's votes).
-  const bestSeen = new Map<number, number[]>();
 
   const announce = (t: string) => { $("announce").textContent = t; };
   const isHost = () => state?.host === myName;
@@ -1037,18 +1046,40 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     const myBest = me.best?.order ?? null;
     const tally = g.tally ?? [];
     const cards = g.cards ?? [];
-    // Two tabs in Four rounds: both ballots stay a tap apart, each marked done once cast.
+    // Two tabs in Four rounds: both ballots stay a tap apart, each marked done once cast, and a line
+    // under them says what is still to cast. Casting one ballot moves you on to the other (see vote, best).
     show("vote-tabs", four);
     show("vote-mole-panel", !four || voteTab === "mole");
     show("vote-best-panel", four && voteTab === "best");
+    // Proper tabs in Four rounds; in Knockout there is one list and no tab pattern at all.
+    for (const key of ["mole", "best"] as const) {
+      const panel = $(`vote-${key}-panel`);
+      if (four) { panel.setAttribute("role", "tabpanel"); panel.setAttribute("aria-labelledby", `tab-${key}`); }
+      else { panel.removeAttribute("role"); panel.removeAttribute("aria-labelledby"); }
+    }
+    const todo = $("vote-todo");
+    const moleDone = !!mine;
+    const bestNeeded = cards.some((c) => c.picker !== myName && c.lender !== myName);
+    const bestDone = myBest !== null || !bestNeeded;
+    const left = four && voter ? [...(moleDone ? [] : ["Who's the mole?"]), ...(bestDone ? [] : ["Best pick"])] : [];
+    todo.hidden = !left.length;
+    todo.textContent = left.length ? `You still need to vote: ${left.join(" and ")}` : "";
     if (four) {
-      const moleDone = !!mine, bestDone = myBest !== null;
       once("vtabs", JSON.stringify([voteTab, voter, moleDone, bestDone]), () => {
         const tab = (key: "mole" | "best", label: string, done: boolean) => {
           const on = voteTab === key;
-          const b = h("button", { type: "button", role: "tab", id: `tab-${key}`, class: "vtab" + (on ? " on" : ""), "aria-selected": String(on), "aria-controls": `vote-${key}-panel`, "data-fk": `tab:${key}` },
-            h("span", {}, label), ...(voter ? [h("span", { class: "vt-state mono" + (done ? " done" : "") }, done ? "cast" : "to cast")] : [])) as HTMLButtonElement;
-          b.addEventListener("click", () => { voteTab = key; sigs.delete("vtabs"); render(); });
+          const b = h("button", { type: "button", role: "tab", id: `tab-${key}`, class: "vtab" + (on ? " on" : "") + (voter && !done ? " todo" : ""), "aria-selected": String(on), "aria-controls": `vote-${key}-panel`, tabindex: on ? "0" : "-1", "data-fk": `tab:${key}` },
+            h("span", {}, label), ...(voter ? [h("span", { class: "vt-state mono" + (done ? " done" : " open") }, done ? "Cast" : "To cast")] : [])) as HTMLButtonElement;
+          const go = (to: "mole" | "best") => { voteTab = to; sigs.delete("vtabs"); render(); $(`tab-${to}`).focus(); };
+          b.addEventListener("click", () => go(key));
+          // Arrow keys, Home and End move between the two tabs (the selected one is the only one in the Tab order).
+          b.addEventListener("keydown", (e) => {
+            const k = (e as KeyboardEvent).key;
+            const to = k === "ArrowRight" || k === "ArrowLeft" ? (key === "mole" ? "best" : "mole") : k === "Home" ? "mole" : k === "End" ? "best" : null;
+            if (!to) return;
+            e.preventDefault();
+            go(to);
+          });
           return b;
         };
         $("vote-tabs").replaceChildren(tab("mole", "Who's the mole?", moleDone), tab("best", "Best pick", bestDone));
@@ -1203,13 +1234,22 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     return li;
   }
 
-  // A past round's best card: the one with most best-pick votes, from what this page saw at its reveal.
+  // A past round's best card(s): the most best-pick votes that counted, from the server's past[].
   function bestLine(p: Past): HTMLElement[] {
-    const order = bestSeen.get(p.round);
-    if (!order?.length) return [];
-    const cs = order.map((o) => p.cards.find((c) => c.order === o)).filter((c): c is Card => !!c);
-    return cs.length ? [h("span", { class: "t" }, `Best pick: ${cs.map((c) => `${c.title} (${c.picker})`).join(", ")}`)] : [];
+    const cs = (p.best ?? []).map((b) => ({ b, c: p.cards.find((c) => c.order === b.order) })).filter((x): x is { b: BestCard; c: Card } => !!x.c);
+    return cs.length ? [h("span", { class: "t" }, `Best pick: ${cs.map(({ b, c }) => `${c.title} (${c.picker}${c.lender ? `, lent by ${c.lender}` : ""}, ${b.votes} vote${b.votes === 1 ? "" : "s"})`).join(", ")}`)] : [h("span", { class: "t" }, "Best pick: no votes")];
   }
+
+  // One line per reason the server sent, "+2 caught the mole". The client works out nothing itself.
+  const REASON: Record<Reason["kind"], (n: number) => string> = {
+    caught: () => "caught the mole",
+    best: (n) => `best pick vote${n === 1 ? "" : "s"}`,
+    lend: (n) => `lent a best pick${n === 1 ? "" : " x" + n}`,
+    escaped: () => "got away",
+    stole: () => "stole the prompt",
+  };
+  const reasonText = (r: Reason) => `+${r.points} ${r.kind === "best" || r.kind === "lend" ? (r.n > 1 ? `${r.n} ` : "") : ""}${REASON[r.kind](r.n)}`;
+  const leftMark = (name: string, left: string[] | undefined) => (left?.includes(name) ? `${name} (left)` : name);
 
   function renderReveal(on: boolean) {
     show("reveal", on);
@@ -1255,20 +1295,28 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
             h("span", { class: "gl" }, x.guesses.map((q) => `Round ${q.round}: ${q.guess} (${q.hit ? "a mole" : "not a mole"})`).join(" \u00b7 "))))),
       );
     });
-    show("reveal-prompt-wrap", !!r);
+    // Four rounds at game over: the scores and a compact summary of each round, not the last reveal again.
+    const compact = four && !!g.winner;
+    show("reveal-prompt-wrap", !!r && !compact);
     if (r) {
       $("reveal-slot").textContent = `The prompt, ${slotLabel(r.slot)}`;
       $("reveal-prompt").textContent = r.prompt;
     }
     const eject = $("eject");
     if (!r) eject.textContent = "";
+    else if (four && g.winner) eject.textContent = "";
     else if (four) {
-      const ms = r.moles ?? [];
+      const left = r.left ?? [];
+      const ms = (r.moles ?? []).map((m) => leftMark(m, left));
       const parts = [`${ms.length === 1 ? "The mole this round was" : "The moles this round were"} ${ms.join(" and ") || "nobody"}.`];
       if (r.wasMole) parts.push(r.stole ? `The room caught ${r.accused ?? "a mole"} and they stole the prompt.` : `The room caught ${r.accused ?? "a mole"}. They missed the steal.`);
-      else parts.push(r.accused ? `The room blamed ${r.accused}, who was not a mole. The moles got away.` : "The room did not agree on anyone. The moles got away.");
+      else if (r.accused) parts.push(`The room blamed ${r.accused}, who was not a mole.`);
+      else if (!(r.leftMoles ?? []).length || (r.escaped ?? []).length) parts.push("The room did not agree on anyone.");
+      for (const m of r.leftMoles ?? []) parts.push(`${m} left. Everyone who had voted for them catches them.`);
+      const esc = r.escaped ?? [];
+      if (esc.length) parts.push(`${esc.join(" and ")} got away.`);
       eject.textContent = parts.join(" ");
-      if (r.wasMole) eject.append(h("span", { class: "stamp win" }, "Caught"));
+      if (r.wasMole || !esc.length) eject.append(h("span", { class: "stamp win" }, "Caught"));
       else eject.append(h("span", { class: "stamp moles" }, "Got away"));
     } else {
       const parts: string[] = [];
@@ -1283,63 +1331,54 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
       // The stamp repeats what the sentence says: colour is never the only signal.
       if (r.wasMole || r.stole) eject.append(h("span", { class: "stamp mole" }, "Mole"));
     }
-    once("reveal", JSON.stringify([r ?? null, state!.members.map((m) => m.name)]), () => {
-      $("reveal-cards").replaceChildren(...(r?.cards ?? []).map(revealCard));
-      show("reveal-dead", !!r?.deadAir.length);
+    once("reveal", JSON.stringify([r ?? null, state!.members.map((m) => m.name), compact]), () => {
+      $("reveal-cards").replaceChildren(...(compact ? [] : r?.cards ?? []).map(revealCard));
+      show("reveal-cards", !compact);
+      show("reveal-dead", !compact && !!r?.deadAir.length);
       $("reveal-dead").textContent = r?.deadAir.length ? `Dead air (no pick): ${r.deadAir.join(", ")}` : "";
+      const left = r?.left ?? [];
+      show("reveal-left", !compact && four && left.length > 0);
+      $("reveal-left").textContent = left.length ? `Left the game: ${left.join(", ")}. Their votes, and best-pick votes for their song, count for nothing.` : "";
       $("reveal-votes-h").textContent = four ? "Who's the mole? votes" : "Votes";
-      show("reveal-votes-wrap", !!r?.votes.length);
+      show("reveal-votes-wrap", !compact && !!r?.votes.length);
       $("reveal-votes").replaceChildren(
-        ...(r?.votes ?? []).map((v) => h("li", {}, face(v.voter), h("strong", {}, v.voter), h("span", {}, v.choice === null ? "skipped" : `voted ${v.choice}`))),
+        ...(r?.votes ?? []).map((v) => h("li", {}, face(v.voter), h("strong", {}, v.voter), h("span", {}, v.choice === null ? "skipped" : `voted ${four ? leftMark(v.choice, left) : v.choice}`))),
       );
       const bv = r?.bestVotes ?? [];
-      show("reveal-best-wrap", four && bv.length > 0);
+      show("reveal-best-wrap", four && !compact && bv.length > 0);
       $("reveal-best").replaceChildren(
         ...bv.map((v) => h("li", {}, face(v.voter), h("strong", {}, v.voter), h("span", {}, `best: card ${v.order + 1}, ${v.picker}${v.lender ? ` (from ${v.lender})` : ""}`))),
       );
-      // Points this round, with the reason for each. The reasons are worked out from what the
-      // reveal shows (votes by name, best votes, the moles, the steal), so they add up to the engine's points.
-      show("four-points", four && !!r?.points?.length);
-      const ms = new Set(r?.moles ?? []);
+      // Points this round with the reason for each: all of it from the server, computed where the points are.
+      show("four-points", four && !compact && !!r?.points?.length);
       const rows = [...(r?.points ?? [])].sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
       $("pts-list").replaceChildren(
-        ...rows.map((p) => {
-          const why: string[] = [];
-          const caught = (r?.votes ?? []).some((v) => v.voter === p.name && !ms.has(p.name) && v.choice !== null && ms.has(v.choice));
-          if (caught) why.push("+2 caught the mole");
-          const got = (r?.bestVotes ?? []).filter((b) => b.picker === p.name).length;
-          if (got) why.push(`+${got} best pick${got === 1 ? "" : "s"}`);
-          const lent = (r?.bestVotes ?? []).filter((b) => b.lender === p.name).length;
-          if (lent) why.push(`+${lent} lent a best pick`);
-          if (ms.has(p.name)) {
-            const rest = p.points - (caught ? 2 : 0) - got - lent;
-            if (rest >= 3 && r?.stole) why.push("+3 stole the prompt");
-            else if (rest >= 2 && !r?.wasMole) why.push("+2 got away");
-          }
-          return h("li", {}, face(p.name), h("strong", {}, p.name === myName ? `${p.name} (you)` : p.name), h("span", { class: "why" }, why.join(", ") || "no points"), h("b", { class: "mono" }, `+${p.points}`));
-        }),
+        ...rows.map((p) => h("li", {}, face(p.name), h("strong", {}, p.name === myName ? `${p.name} (you)` : p.name),
+          h("span", { class: "why" }, p.reasons.map(reasonText).join(", ") || "no points"), h("b", { class: "mono" }, `+${p.points}`))),
       );
-      // Remember this round's best card(s) for the game-over summary (past[] carries no best votes).
-      if (four && r && g.phase === "reveal") {
-        const tally = new Map<number, number>();
-        for (const v of r.bestVotes ?? []) tally.set(v.order, (tally.get(v.order) ?? 0) + 1);
-        const top = Math.max(0, ...tally.values());
-        if (top > 0) bestSeen.set(g.round, [...tally].filter(([, n]) => n === top).map(([o]) => o));
-      }
     });
     show("past-end", !!g.winner && g.past.length > 0);
     once("past", JSON.stringify([g.winner, g.past]), () => {
       $("past-list").replaceChildren(
-        ...g.past.map((p) =>
-          h("li", {},
+        ...g.past.map((p) => {
+          if (four) {
+            // Compact: the prompt, the moles, the best card and who scored most that round.
+            const left = p.left ?? [];
+            const top = Math.max(0, ...(p.points ?? []).map((x) => x.points));
+            const tops = (p.points ?? []).filter((x) => x.points === top && top > 0).map((x) => x.name);
+            return h("li", {},
+              h("span", { class: "t" }, `Round ${p.round}, ${slotLabel(p.slot)}`),
+              h("span", { class: "hand" }, p.prompt),
+              h("span", { class: "t out" }, `${(p.moles ?? []).length === 1 ? "Mole" : "Moles"}: ${(p.moles ?? []).map((m) => leftMark(m, left)).join(", ") || "none"} (${p.wasMole || (p.leftMoles ?? []).length ? "caught" : "got away"})`),
+              ...bestLine(p),
+              h("span", { class: "t" }, tops.length ? `Top scorer: ${tops.join(", ")} (+${top})` : "Nobody scored"));
+          }
+          return h("li", {},
             h("span", { class: "t" }, `Round ${p.round}, ${slotLabel(p.slot)}`),
             h("span", { class: "hand" }, p.prompt),
             h("ul", { class: "pcards" }, ...p.cards.map((c) => h("li", {}, h("strong", {}, c.picker), ` ${c.title}, ${c.artist}`, c.lender ? ` (from ${c.lender})` : "", c.clash ? " (clash)" : ""))),
-            ...(four ? bestLine(p) : []),
-            h("span", { class: "t out" }, four
-              ? `${(p.moles ?? []).length === 1 ? "Mole" : "Moles"}: ${(p.moles ?? []).join(", ") || "none"} (${p.wasMole ? "caught" : "got away"})`
-              : p.ejected ? `Out: ${p.ejected}${p.wasMole ? " (a mole)" : " (not a mole)"}` : "Nobody out")),
-        ),
+            h("span", { class: "t out" }, p.ejected ? `Out: ${p.ejected}${p.wasMole ? " (a mole)" : " (not a mole)"}` : "Nobody out"));
+        }),
       );
     });
     show("next", host && !g.winner);
@@ -1447,6 +1486,9 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     render();
   });
 
+  // Whether this person still has a card they could best-pick (someone with only their own cards on the table isn't waited on).
+  const bestStillNeeded = () => (state?.game?.cards ?? []).some((c) => c.picker !== myName && c.lender !== myName);
+
   let voting = false;
   async function vote(choice: { name: string } | "skip") {
     if (voting || !state?.game || !me) return;
@@ -1457,7 +1499,10 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     voting = false;
     if (res.ok) {
       if (me && state?.game?.round === round) me.vote = choice === "skip" ? { skip: true } : { name: choice.name };
-      announce(choice === "skip" ? "Your vote: skip." : `Your vote: ${choice.name}. You can change it until it locks.`);
+      const next = state.game?.format === "four" && me?.best === undefined && bestStillNeeded() ? "Now your best pick." : "";
+      announce(`${choice === "skip" ? "Your vote: skip." : `Your vote: ${choice.name}. You can change it until it locks.`} ${next}`.trim());
+      // Four rounds: the mole vote is in and the best pick isn't, so go to it.
+      if (next) voteTab = "best";
       return render();
     }
     $("vote-msg").textContent = res.status === 409 ? "Too late: voting is over." : (data.error ?? "Could not vote.");
@@ -1473,7 +1518,10 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     casting = false;
     if (res.ok) {
       if (me && state?.game?.round === round) me.best = { order };
-      announce(`Your best pick: card ${order + 1}. You can change it until it locks.`);
+      const next = me?.vote === undefined ? "Now who the mole is." : "";
+      announce(`Your best pick: card ${order + 1}. You can change it until it locks. ${next}`.trim());
+      // The best pick is in and the mole vote isn't, so go to it.
+      if (next) voteTab = "mole";
       return render();
     }
     $("vote-msg").textContent = res.status === 409 ? "Too late: voting is over." : (data.error ?? "Could not send that best pick.");
@@ -1776,6 +1824,14 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     $("removed-h").focus();
   }
 
+  // Four rounds, at a reveal: "You scored 3 this round, 7 in all." (from the server's points and scores).
+  function scoredLine(g: Game): string {
+    const mine = g.reveal?.points?.find((p) => p.name === myName);
+    const total = g.scores?.find((x) => x.name === myName);
+    if (g.format !== "four" || !mine || !total) return "";
+    return `You scored ${mine.points} this round, ${total.score} in all.`;
+  }
+
   let removed = false;
   let wasMember = false;
   let refusedJoin = false;
@@ -1805,11 +1861,11 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           g.phase === "pick" ? `Round ${g.round}. Picking: ${secondsLeft(g)} seconds.`
           : g.phase === "vote" ? `Vote. ${secondsLeft(g)} seconds.`
           : g.phase === "steal" ? "Steal! The mole has 15 seconds to guess the prompt."
-          : g.phase === "reveal" ? "Reveal."
+          : g.phase === "reveal" ? `Reveal. ${scoredLine(g)}`.trim()
           : "Listen.",
         );
       }
-      else if (g?.winner) announce(g.winner === "points" ? `Game over. ${g.winners && g.winners.length > 1 ? "Joint winners" : "Winner"}: ${(g.winners ?? []).join(", ")}.` : g.winner === "players" ? "Game over. The players caught every mole." : g.winner === "none" ? "Game abandoned: nobody picked." : "Game over. The moles took over.");
+      else if (g?.winner) announce(g.winner === "points" ? `Game over. ${g.winners && g.winners.length > 1 ? "Joint winners" : "Winner"}: ${(g.winners ?? []).join(", ")}. ${scoredLine(g)}`.trim() : g.winner === "players" ? "Game over. The players caught every mole." : g.winner === "none" ? "Game abandoned: nobody picked." : "Game over. The moles took over.");
       void refreshMe();
       pendingEnter = true;
       // Keyboard and screen-reader users follow the game: land on the new phase's heading.

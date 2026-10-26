@@ -804,6 +804,15 @@ button.fmt-opt span { font-size: 0.8125rem; line-height: 1.25; color: var(--mute
 button.fmt-opt:hover:not(:disabled) { background: rgba(244, 184, 96, 0.1); color: var(--text); filter: none; }
 button.fmt-opt.on { box-shadow: inset 0 0 0 3px var(--lamp); background: rgba(244, 184, 96, 0.12); }
 button.fmt-opt:disabled { background: transparent; opacity: 0.5; }
+/* On paper (the game-over card is a .liner): `.liner button:not(.secondary)` paints every button ink on
+   paper-coloured text, which beat these rules on specificity and left the selected card's own text
+   (sleeve on a 12% lamp wash over paper) nearly invisible. Say it again for paper. */
+.liner button.fmt-opt { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--ink-2); }
+.liner button.fmt-opt span { color: var(--ink-2); }
+.liner button.fmt-opt:hover:not(:disabled) { background: rgba(27, 20, 32, 0.06); color: var(--ink); }
+.liner button.fmt-opt.on { background: var(--lamp); color: var(--ink); box-shadow: inset 0 0 0 3px var(--ink); }
+.liner button.fmt-opt.on span { color: var(--ink); }
+.liner button.fmt-opt:disabled { background: transparent; opacity: 0.55; }
 .fmt-guest { display: grid; gap: 0.1rem; margin: 0; }
 .fmt-guest b { font-size: var(--step-1); }
 .fmt-guest .hint { margin: 0; }
@@ -833,6 +842,12 @@ button.vtab.on:hover:not(:disabled) { color: var(--ink); background: var(--lamp)
 .vt-state { font: 600 0.625rem/1 var(--cat); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .vtab.on .vt-state { color: var(--ink); }
 .vt-state.done::before { content: "\2713 "; }
+/* A ballot still to cast: a dot and the words "To cast", louder than a chip, and a line under the tabs. */
+.vt-state.open { font-size: 0.75rem; color: var(--lamp); }
+.vt-state.open::before { content: ""; display: inline-block; width: 0.55em; height: 0.55em; margin-right: 0.35em; border-radius: 50%; background: currentColor; vertical-align: 0.05em; }
+.vtab.on .vt-state.open { color: var(--ink); }
+.vtab.todo:not(.on) { box-shadow: inset 0 0 0 2px var(--lamp); }
+.vote-todo { margin: 0 0 0.75rem; font-weight: 700; font-size: var(--step-0); color: var(--lamp); }
 /* Best-pick rows: the card number in the badge's place; counts in the same big mono. */
 ul.ballot.best .brow { grid-template-columns: 1.75rem minmax(0, 1fr) auto; min-height: 60px; }
 ul.ballot.best .n { font: 600 var(--step-1)/1 var(--cat); color: var(--muted); text-align: center; }

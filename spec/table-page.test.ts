@@ -67,3 +67,21 @@ it("renders the format controls and the Four rounds shell", async () => {
   expect(home).toContain('id="fmt-four"');
   expect(home).toContain('id="fmt-knockout"');
 });
+
+// Contract (stage 3 review): How to play says the rules a player could otherwise only learn by losing points,
+// and the vote shell has the line that says which ballot is still to cast.
+it("says the Four rounds rules in How to play and has the 'still to cast' line", async () => {
+  const host = await signedIn("tblhow");
+  const { code } = (await (await host.s.call("/api/tables", { body: { format: "four" } })).json()) as { code: string };
+  const text = (await html(host.s, `/t/${code}`)).replace(/\s+/g, " ");
+  expect(text).toContain("a mole's own mole vote scores nothing");
+  expect(text).toContain("a tie made only of moles");
+  expect(text).toContain("You can't best-pick a song you lent");
+  expect(text).toContain("without repeats");
+  expect(text).toContain("Each mole is judged on their own");
+  expect(text).toContain("A mole who leaves counts as caught");
+  expect(text).toContain('id="vote-todo"');
+  // The tab panels get their role and labels from the script, only in Four rounds: none is baked in pointing at a missing id.
+  expect(text).not.toMatch(/id="vote-mole-panel"[^>]*aria-labelledby/);
+  expect(text).not.toMatch(/id="vote-best-panel"[^>]*aria-labelledby/);
+});
