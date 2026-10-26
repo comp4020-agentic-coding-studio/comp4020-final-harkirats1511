@@ -7,6 +7,7 @@ import type { Person } from "./auth.ts";
 import { db } from "./db.ts";
 import { crateComplete, listTaste } from "./taste.ts";
 import { PROMPTS, SLOTS, type Slot } from "./prompts.ts";
+import type { RoundSnapshot } from "./game.ts";
 import { log, personTag, refused, tableScope, tag } from "./log.ts";
 import {
   avatars, bestVotes, gamePlayers, gamePrompts, gameThemes, games, ghostGuesses, people, picks, roundMoles, roundResults, roundScores, tableMembers, tableRemovals, tableReports, tables, tasteTracks, votes,
@@ -231,9 +232,14 @@ export type PublicCard = {
 // may have left the table since; their name still shows.
 export type PastRound = {
   round: number; prompt: string; slot: Slot; cards: PublicCard[]; ejected: string | null; wasMole: boolean;
-  // Four rounds: this round's moles and what each player scored in it.
-  moles?: string[]; points?: { name: string; points: number }[];
+  // Four rounds: this round's moles and what each player scored in it, with why (frozen at its reveal).
+  moles?: string[]; points?: PointsRow[];
+  // Four rounds: who had left by this reveal (shown "(left)"), the moles caught only by leaving, and the best card(s).
+  left?: string[]; leftMoles?: string[]; caught?: string[]; escaped?: string[]; best?: BestCard[];
 };
+// Why someone scored, from the engine in the same code that scored it: `n` times the kind's unit sums to `points`.
+export type PointsRow = { name: string; points: number; reasons: { kind: "caught" | "best" | "lend" | "escaped" | "stole"; n: number; points: number }[] };
+export type BestCard = { order: number; picker: string; lender?: string; votes: number };
 export type PublicGame = {
   // "knockout" or "four", fixed when the game started.
   format: Format;
@@ -274,8 +280,15 @@ export type PublicGame = {
     stole: boolean;
     // Four rounds: the round's moles, who chose which card as best, and what each player scored.
     moles?: string[];
+    // Who of them had left when the reveal opened (their ballots and their card's best votes count for nothing),
+    // and the moles who were caught only by leaving.
+    left?: string[];
+    leftMoles?: string[];
+    // Each mole on their own: caught (by the vote or by leaving) or got away.
+    caught?: string[];
+    escaped?: string[];
     bestVotes?: { voter: string; order: number; picker: string; lender?: string }[];
-    points?: { name: string; points: number }[];
+    points?: PointsRow[];
   };
   // Rounds already revealed, oldest first, never the round in play before its
   // reveal. At game over, every round.
@@ -384,9 +397,18 @@ function publicGame(code: string): PublicGame | undefined {
     played: playedTrackIds(db, g),
   };
   // Four rounds: scores as of the last reveal (the column only changes in the transaction that opens a reveal).
-  if (four) out.scores = db.select({ name: people.name, score: gamePlayers.score }).from(gamePlayers).innerJoin(people, eq(people.id, gamePlayers.personId))
-    .innerJoin(tableMembers, and(eq(tableMembers.personId, gamePlayers.personId), eq(tableMembers.tableCode, code)))
-    .where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.left, 0))).orderBy(asc(tableMembers.joinedAt), asc(people.name)).all();
+  // Once the game is over they are the ones finish() stored, so nobody leaving afterwards changes them.
+  const final = four && g.finalResult ? (JSON.parse(g.finalResult) as { scores: { name: string; score: number }[]; winners: string[] }) : null;
+  if (four) {
+    out.scores = final
+      ? final.scores
+      : g.winner
+        ? db.select({ name: people.name, score: gamePlayers.score }).from(gamePlayers).innerJoin(people, eq(people.id, gamePlayers.personId))
+            .where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.left, 0))).orderBy(sql`game_players.rowid`).all()
+        : db.select({ name: people.name, score: gamePlayers.score }).from(gamePlayers).innerJoin(people, eq(people.id, gamePlayers.personId))
+            .innerJoin(tableMembers, and(eq(tableMembers.personId, gamePlayers.personId), eq(tableMembers.tableCode, code)))
+            .where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.left, 0))).orderBy(asc(tableMembers.joinedAt), asc(people.name)).all();
+  }
   // Borrows are public once their round's picks are closed; this round's, while
   // picking, are not.
   out.borrowed = [
@@ -427,8 +449,8 @@ function publicGame(code: string): PublicGame | undefined {
       .all()
       .map((r) => r.name);
     if (four) {
-      const top = Math.max(...out.scores!.map((p) => p.score));
-      out.winners = out.scores!.filter((p) => p.score === top).map((p) => p.name);
+      const top = Math.max(0, ...out.scores!.map((p) => p.score));
+      out.winners = final ? final.winners : out.scores!.filter((p) => p.score === top).map((p) => p.name);
     } else {
       // A ghost's guesses were private all game; now each ghost's hits are shown.
       const roleById = new Map(db.select({ id: gamePlayers.personId, role: gamePlayers.role }).from(gamePlayers).where(eq(gamePlayers.gameId, g.id)).all().map((r) => [r.id, r.role]));
@@ -478,10 +500,8 @@ function publicGame(code: string): PublicGame | undefined {
       .where(eq(gamePlayers.gameId, g.id))
       .all();
     const results = new Map(db.select().from(roundResults).where(eq(roundResults.gameId, g.id)).all().map((r) => [r.round, r]));
-    const roundMoleNames = four ? db.select({ round: roundMoles.round, name: people.name }).from(roundMoles).innerJoin(people, eq(people.id, roundMoles.personId)).where(eq(roundMoles.gameId, g.id)).all() : [];
-    const roundPts = four
-      ? db.select({ round: roundScores.round, name: people.name, points: roundScores.points }).from(roundScores).innerJoin(people, eq(people.id, roundScores.personId)).where(eq(roundScores.gameId, g.id)).orderBy(asc(people.name)).all()
-      : [];
+    // Four rounds: everything a revealed round shows was frozen when its reveal opened (RoundSnapshot in game.ts).
+    const snaps = new Map(four ? [...results].map(([round, r]) => [round, r.snapshot ? (JSON.parse(r.snapshot) as RoundSnapshot) : null]) : []);
     out.past = db
       .select()
       .from(gamePrompts)
@@ -502,12 +522,19 @@ function publicGame(code: string): PublicGame | undefined {
           wasMole: (ejected ?? stoleIt)?.role === "mole",
         };
         if (!four) return base;
-        // Four rounds: the round's moles and points are public once it has been revealed; wasMole is whether the room caught one.
+        // Four rounds: the round's moles and points are public once it has been revealed; wasMole is whether the
+        // room caught one by its vote, `leftMoles` the ones caught only by leaving.
+        const snap = snaps.get(r.round);
         return {
           ...base,
           wasMole: results.get(r.round)?.caught === 1,
-          moles: roundMoleNames.filter((m) => m.round === r.round).map((m) => m.name).sort(),
-          points: roundPts.filter((m) => m.round === r.round).map(({ name, points }) => ({ name, points })),
+          moles: snap?.moles ?? [],
+          points: snap?.points ?? [],
+          left: snap?.left ?? [],
+          leftMoles: snap?.leftMoles ?? [],
+          caught: snap?.caught ?? [],
+          escaped: snap?.escaped ?? [],
+          best: snap?.best ?? [],
         };
       });
   }
@@ -539,25 +566,21 @@ function publicGame(code: string): PublicGame | undefined {
       };
       if (four) {
         const res = db.select().from(roundResults).where(and(eq(roundResults.gameId, g.id), eq(roundResults.round, g.round))).get();
-        const mine = out.past.find((r) => r.round === g.round);
-        const cards = out.reveal.cards;
+        const snap = res?.snapshot ? (JSON.parse(res.snapshot) as RoundSnapshot) : null;
         out.reveal.accused = nameOf(res?.accusedPersonId ?? null);
         out.reveal.ejected = null;
         out.reveal.wasMole = res?.caught === 1;
         out.reveal.stole = res?.stole === 1;
-        out.reveal.moles = mine?.moles ?? [];
-        out.reveal.points = mine?.points ?? [];
-        out.reveal.bestVotes = db
-          .select({ voter: people.name, pick: bestVotes.pickPersonId })
-          .from(bestVotes)
-          .innerJoin(people, eq(people.id, bestVotes.voterPersonId))
-          .where(and(eq(bestVotes.gameId, g.id), eq(bestVotes.round, g.round)))
-          .orderBy(asc(people.name))
-          .all()
-          .flatMap((b) => {
-            const c = cards.find((x) => x.picker === personName(b.pick));
-            return c ? [{ voter: b.voter, order: c.order, picker: c.picker, ...(c.lender ? { lender: c.lender } : {}) }] : [];
-          });
+        // The ballots that counted, the moles, who had left and every person's points with their reasons: all as
+        // frozen when the reveal opened, so they agree with the scoring and don't move if someone leaves later.
+        out.reveal.votes = snap?.votes ?? [];
+        out.reveal.moles = snap?.moles ?? [];
+        out.reveal.left = snap?.left ?? [];
+        out.reveal.leftMoles = snap?.leftMoles ?? [];
+        out.reveal.caught = snap?.caught ?? [];
+        out.reveal.escaped = snap?.escaped ?? [];
+        out.reveal.points = snap?.points ?? [];
+        out.reveal.bestVotes = snap?.bestVotes ?? [];
       }
     }
   }

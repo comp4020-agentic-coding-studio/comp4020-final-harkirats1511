@@ -172,6 +172,13 @@ export const games = sqliteTable(
     stealOptions: text("steal_options"),
     stealGuess: text("steal_guess"),
     stole: integer("stole").notNull().default(0),
+    // Four rounds, steal: the moles the room caught this round (JSON array of person ids). A tie
+    // between moles catches them all and one of them steals; if that one leaves mid-steal the
+    // others stay caught, so the verdict is kept here rather than re-judged. Cleared each round.
+    caughtMoles: text("caught_moles"),
+    // Four rounds, game over: the final scores and winners, written once by finish() (JSON:
+    // {scores: {name, score}[], winners: string[]}), so a leaver after the end changes nothing.
+    finalResult: text("final_result"),
     startedAt: integer("started_at").notNull(),
     // Epoch ms the game ended; null while it runs. Games that ended before this
     // column existed carry their startedAt.
@@ -344,6 +351,10 @@ export const roundResults = sqliteTable(
     accusedPersonId: text("accused_person_id"),
     caught: integer("caught").notNull().default(0),
     stole: integer("stole").notNull().default(0),
+    // What the reveal shows, frozen when it opens (JSON, by display name): the round's moles, who
+    // had left, the ballots that counted, each person's points with their reasons, the best card.
+    // Frozen so a later leaver, or a reload, never changes a round that was already revealed.
+    snapshot: text("snapshot"),
   },
   (t) => [primaryKey({ columns: [t.gameId, t.round] })],
 );

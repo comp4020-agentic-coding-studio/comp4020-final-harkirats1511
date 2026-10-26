@@ -9,11 +9,16 @@ export type PointsResult = { winners: string[]; scores: { name: string; score: n
 
 export function pointsResult(code: string, finishedAt: number): PointsResult | null {
   const game = db
-    .select({ id: games.id })
+    .select({ id: games.id, final: games.finalResult })
     .from(games)
     .where(and(eq(games.tableCode, code), eq(games.winner, "points"), sql`coalesce(${games.finishedAt}, ${games.startedAt}) = ${finishedAt}`))
     .get();
   if (!game) return null;
+  // The result stored when the game ended; older games (before it was stored) are read from the scores.
+  if (game.final) {
+    const f = JSON.parse(game.final) as PointsResult;
+    return { winners: f.winners, scores: [...f.scores].sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)) };
+  }
   const scores = db
     .select({ name: people.name, score: gamePlayers.score })
     .from(gamePlayers)

@@ -19,6 +19,8 @@ import {
 // PHASES below is the one table of them: what each phase starts with (its deadline,
 // the columns it clears) and where it may go next. enter() is the only function that
 // moves a game between phases, and it is also what tells the table something changed.
+// The clock inside a phase moves in one more place only: setDeadline (autoplay's next
+// track, last call, the boot repair, and the host playing a card on an autoplay table).
 
 // Dials for playtests. A table's own pick/vote/track seconds override the first three.
 export { PICK_SECONDS, SECONDS_PER_TRACK, VOTE_SECONDS } from "./tables.ts";
@@ -55,13 +57,14 @@ const fail = (status: number, error: string): Fail => ({ ok: false, status, erro
 // ---- the phase table ----
 //
 // One row per phase: where it may go next, when it ends, and which columns are
-// reset on entering it. enter() is the only code that writes `phase`, `deadline` or
-// the per-round columns, and it marks the table as changed (see flush below).
+// reset on entering it. enter() is the only code that writes `phase` or the per-round
+// columns, and it marks the table as changed (see flush below). `deadline` is written by
+// enter (a phase's own clock) and by setDeadline (a clock change inside a phase), nowhere else.
 type Columns = Partial<typeof games.$inferInsert>;
 type Opts = ReturnType<typeof tableOptions> & object;
 type Entry = { next: Phase[]; deadline: (t: Opts, ctx: { cards: number }) => number | null; clear: Columns };
 const secs = (n: number) => Date.now() + n * 1000;
-const NEW_ROUND: Columns = { ejectedPersonId: null, lastCall: 0, nowPlaying: null, stealPersonId: null, stealOptions: null, stealGuess: null, stole: 0 };
+const NEW_ROUND: Columns = { caughtMoles: null, ejectedPersonId: null, lastCall: 0, nowPlaying: null, stealPersonId: null, stealOptions: null, stealGuess: null, stole: 0 };
 export const PHASES: Record<Phase, Entry> = {
   pick: { next: ["listen", "over"], deadline: (t) => secs(t.pickSeconds), clear: NEW_ROUND },
   // Autoplay plays card 0 at once and each card gets slotSeconds; otherwise the host moves it on.
@@ -77,6 +80,13 @@ export const PHASES: Record<Phase, Entry> = {
   // A finished game is stored as phase "reveal" with a winner, so the public `phase` is unchanged.
   over: { next: [], deadline: () => null, clear: { lastCall: 0, stealOptions: null } },
 };
+
+// Move the clock of the phase a game is already in (never the phase): `extra` is whatever
+// goes with it (autoplay's now-playing card, the last-call flag). With enter, the only
+// code that writes `deadline`. The caller touches the table when the change is public.
+function setDeadline(d: Tx | typeof db, gameId: string, deadline: number, extra: Columns = {}) {
+  d.update(games).set({ ...extra, deadline }).where(eq(games.id, gameId)).run();
+}
 
 // The phase a game is in: "over" once it has a winner (including "none", abandoned).
 export const phaseOf = (g: { phase: string; winner: string | null }): Phase => (g.winner ? "over" : (g.phase as Phase));
@@ -142,9 +152,37 @@ const promptOf = (d: Tx | typeof db, gameId: string, round: number) =>
 
 const isFour = (g: { format: string }) => g.format === "four";
 
-// Four rounds: deal this round's moles afresh from everyone in play (the same count rule as ever).
+// Who is dealt as a mole next, without repeats (CLAUDE.md "Formats"): nobody is a mole twice
+// until everyone seated has been once. `history` is the moles of each earlier round, oldest
+// first, `ids` everyone in play now (a leaver is simply not in it; someone new is eligible
+// at once), `count` how many to deal. A cycle is the set of people who have been a mole since
+// everyone last had; when the pool empties, in the middle of a round or not, a new cycle starts
+// (so a 2-mole round can take the last of one cycle and the first of the next, never the same
+// person twice). Pure apart from `mix`, so it can be tested.
+export function dealOrder(history: string[][], ids: string[], count: number, mix: <T>(a: T[]) => T[] = shuffle): string[] {
+  let seen = new Set<string>();
+  const full = () => ids.every((i) => seen.has(i));
+  // Replay the earlier rounds, mole by mole, resetting whenever everyone has had a turn.
+  for (const round of history) for (const m of round) {
+    seen.add(m);
+    if (full()) seen = new Set();
+  }
+  const chosen: string[] = [];
+  while (chosen.length < Math.min(count, ids.length)) {
+    const pool = ids.filter((i) => !seen.has(i) && !chosen.includes(i));
+    const pick = mix(pool.length ? pool : ids.filter((i) => !chosen.includes(i)))[0];
+    chosen.push(pick);
+    seen.add(pick);
+    if (full()) seen = new Set();
+  }
+  return chosen;
+}
+
+// Four rounds: deal this round's moles afresh from everyone in play (the same count rule as ever), without repeats.
 function dealMoles(d: Tx, gameId: string, round: number, ids: string[], count: number) {
-  for (const id of shuffle(ids).slice(0, count)) d.insert(roundMoles).values({ gameId, round, personId: id }).run();
+  const rows = d.select().from(roundMoles).where(eq(roundMoles.gameId, gameId)).orderBy(asc(roundMoles.round)).all().filter((r) => r.round < round);
+  const history = Array.from({ length: Math.max(0, round - 1) }, (_, i) => rows.filter((r) => r.round === i + 1).map((r) => r.personId));
+  for (const id of dealOrder(history, ids, count)) d.insert(roundMoles).values({ gameId, round, personId: id }).run();
 }
 
 // Who is a mole in this round of a Four rounds game.
@@ -259,7 +297,16 @@ function finish(d: Tx, g: Game, winner: Winner, ending: Ending | null = null) {
   // A game cut short while picking never closed that round: its hidden picks are
   // neither ordered nor logged.
   if (g.phase !== "pick") assignOrder(d, g);
-  enter(d, g, "over", { set: { winner, endReason: ending, finishedAt: Date.now() } });
+  // Four rounds: the final scores and winners are stored now, so nothing after the end (a leaver, a
+  // restart) can change who won. Only people still in the game, in the order they sat down.
+  let finalResult: string | undefined;
+  if (winner === "points") {
+    const scores = d.select({ name: people.name, score: gamePlayers.score }).from(gamePlayers).innerJoin(people, eq(people.id, gamePlayers.personId))
+      .where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.left, 0))).orderBy(sql`game_players.rowid`).all();
+    const top = Math.max(0, ...scores.map((x) => x.score));
+    finalResult = JSON.stringify({ scores, winners: scores.filter((x) => x.score === top).map((x) => x.name) });
+  }
+  enter(d, g, "over", { set: { winner, endReason: ending, finishedAt: Date.now(), ...(finalResult ? { finalResult } : {}) } });
   // An abandoned game puts the table back in the lobby; any other ending leaves
   // the game-over screen up until the host plays again.
   d.update(tables).set({ status: winner === "none" ? "open" : "finished" }).where(eq(tables.code, g.tableCode)).run();
@@ -330,17 +377,19 @@ function settleVerdict(d: Tx, g: Game, accused: string | null, stole: boolean) {
 
 // ---- Four rounds ----
 
-// What the locked mole vote means for the round (pure, so the rule can be tested):
-//  - nobody, or skip, or a non-mole on top, or a tie that includes any of those: the moles got away;
-//  - one mole on top: caught, and they steal;
-//  - several moles tied on top and nobody else level with them: still "the top mole vote is a
-//    mole" (caught), and `pick` chooses which of the tied moles steals.
+// What the locked mole vote means for the round (pure, so the rule can be tested). Each mole
+// is judged on their own: a mole is caught when the top mole vote is that mole, or a tie made
+// only of moles (all of the tied moles are caught, and `pick` chooses which of them steals).
+//  - nobody, or skip, or a non-mole on top, or a tie that includes any of those: no mole is caught;
+//  - the moles who are not caught get away, whoever else was caught (that is the caller's +2).
 export function judgeFour(tally: Map<string, number>, moles: Set<string>, pick: (n: number) => number = randomInt) {
   const best = Math.max(0, ...tally.values());
   const top = [...tally].filter(([, n]) => n === best).map(([c]) => c);
-  if (best > 0 && top.every((c) => c !== "skip" && moles.has(c))) return { caught: true as const, steal: top[pick(top.length)], tied: top.length > 1, accused: null };
+  if (best > 0 && top.every((c) => c !== "skip" && moles.has(c))) {
+    return { caught: true as const, caughtMoles: top, steal: top[pick(top.length)], tied: top.length > 1, accused: null };
+  }
   const accused = best > 0 && top.length === 1 && top[0] !== "skip" ? top[0] : null;
-  return { caught: false as const, steal: null, tied: false, accused };
+  return { caught: false as const, caughtMoles: [] as string[], steal: null, tied: false, accused };
 }
 
 function resolveVoteFour(d: Tx, g: Game) {
@@ -351,73 +400,148 @@ function resolveVoteFour(d: Tx, g: Game) {
     const c = v.choice ?? "skip";
     if (c === "skip" || here.has(c)) tally.set(c, (tally.get(c) ?? 0) + 1);
   }
-  const j = judgeFour(tally, moleIdsOf(d, g.id, g.round));
+  // A mole who has left is not on the tally (they are caught by leaving, see settleRoundFour), so the
+  // moles still here are judged on the votes of those still here.
+  const j = judgeFour(tally, new Set([...moleIdsOf(d, g.id, g.round)].filter((m) => here.has(m))));
   if (j.caught) {
     if (j.tied) log(tableScope(g.tableCode), `the top vote was tied between moles · one of them gets the steal · round ${g.round}`);
-    return toSteal(d, g, j.steal);
+    return toSteal(d, g, j.steal, JSON.stringify(j.caughtMoles));
   }
-  settleRoundFour(d, g, j.accused, false, false);
+  settleRoundFour(d, g, { accused: j.accused, caughtByVote: [], stole: false });
 }
 
-// The round's points, from its two ballots, the round's moles and the steal. Written once, in
-// the same transaction that opens the reveal, so a score never moves while a vote is open.
-export function roundPoints(o: {
+export type Reason = { kind: "caught" | "best" | "lend" | "escaped" | "stole"; n: number; points: number };
+const UNIT: Record<Reason["kind"], number> = { caught: SCORE_CATCH, best: SCORE_BEST, lend: SCORE_LEND, escaped: SCORE_ESCAPE, stole: SCORE_STEAL };
+
+// The round's points with the reasons for each, from its two ballots, the round's moles and the steal.
+// One function does the scoring and the explaining, so what the screen says is what was scored.
+//  - `moles` is everyone dealt as a mole this round, whether or not they are still here; a vote for one
+//    who has left still catches them. `players` is who is still in the game: only they can score.
+//  - `caught` is the moles who were caught (by the vote, or by leaving); every other mole who is still
+//    here got away, on their own. A mole's own mole vote scores nothing.
+//  - Best votes are already filtered to the ones that count (a leaver's own ballot, and any for a card
+//    whose picker left, count for nothing); a lender who has left just gets nothing.
+// `reasons[].points` is `n` times that reason's unit and always sums to the person's points.
+export function scoreRound(o: {
   moles: Set<string>; players: string[]; moleVotes: { voter: string; choice: string }[];
-  bestVotes: { voter: string; picker: string; lender: string | null }[]; caught: boolean; stole: string | null;
-}): Map<string, number> {
-  const pts = new Map<string, number>(o.players.map((p) => [p, 0]));
-  const add = (p: string | null, n: number) => {
-    if (p && pts.has(p)) pts.set(p, pts.get(p)! + n);
+  bestVotes: { voter: string; picker: string; lender: string | null }[]; caught: Set<string>; stole: string | null;
+}): Map<string, { points: number; reasons: Reason[] }> {
+  const got = new Map<string, Map<Reason["kind"], number>>(o.players.map((p) => [p, new Map()]));
+  const add = (p: string | null, kind: Reason["kind"], n = 1) => {
+    const m = p ? got.get(p) : undefined;
+    if (m) m.set(kind, (m.get(kind) ?? 0) + n);
   };
-  for (const v of o.moleVotes) if (!o.moles.has(v.voter) && o.moles.has(v.choice)) add(v.voter, SCORE_CATCH);
+  for (const v of o.moleVotes) if (!o.moles.has(v.voter) && o.moles.has(v.choice)) add(v.voter, "caught");
   for (const b of o.bestVotes) {
-    add(b.picker, SCORE_BEST);
-    if (b.lender) add(b.lender, SCORE_LEND);
+    add(b.picker, "best");
+    if (b.lender) add(b.lender, "lend");
   }
-  if (!o.caught) for (const m of o.moles) add(m, SCORE_ESCAPE);
-  if (o.stole) add(o.stole, SCORE_STEAL);
-  return pts;
+  for (const m of o.moles) if (!o.caught.has(m)) add(m, "escaped");
+  if (o.stole) add(o.stole, "stole");
+  const order: Reason["kind"][] = ["caught", "best", "lend", "escaped", "stole"];
+  return new Map([...got].map(([p, m]) => {
+    const reasons = order.filter((k) => m.has(k)).map((kind) => ({ kind, n: m.get(kind)!, points: m.get(kind)! * UNIT[kind] }));
+    return [p, { points: reasons.reduce((a, r) => a + r.points, 0), reasons }];
+  }));
 }
 
-function settleRoundFour(d: Tx, g: Game, accused: string | null, caught: boolean, stole: boolean) {
+// Just the numbers (see scoreRound).
+export function roundPoints(o: Parameters<typeof scoreRound>[0]): Map<string, number> {
+  return new Map([...scoreRound(o)].map(([p, v]) => [p, v.points]));
+}
+
+const nameById = (d: Tx | typeof db, id: string | null) => (id ? d.select({ n: people.name }).from(people).where(eq(people.id, id)).get()?.n ?? "" : "");
+
+// What a revealed round shows everyone, frozen at its reveal (by display name), so a leaver afterwards,
+// a reload, or a late joiner always sees the round as it was scored. Written into round_results.snapshot.
+export type RoundSnapshot = {
+  moles: string[];
+  // Everyone who had left the game when the reveal opened.
+  left: string[];
+  // Moles who left the game before the reveal: "X left. Everyone who had voted for them catches them."
+  leftMoles: string[];
+  // Each of the round's moles on their own: caught (by the vote, or by leaving) or got away.
+  caught: string[];
+  escaped: string[];
+  votes: { voter: string; choice: string | null }[];
+  bestVotes: { voter: string; order: number; picker: string; lender?: string }[];
+  points: { name: string; points: number; reasons: Reason[] }[];
+  // The card(s) with the most best-pick votes that counted (a tie lists each); none when there were no votes.
+  best: { order: number; picker: string; lender?: string; votes: number }[];
+};
+
+// A mole who leaves during a round (in pick, listen, vote, or after being caught) counts as caught,
+// for everyone who had voted for them, and there is no steal for them: the moles still here are judged
+// on their own as usual (resolveVoteFour). One who leaves during their own steal was caught by the vote
+// already: the steal is missed (no +3, as before), and the rule above applies as to any mole who leaves:
+// those who had voted for them still get +2 (before, they got nothing, which is the case the review
+// found) and the reveal says they left. The only difference from leaving earlier is that the vote had
+// already caught them. Tied moles who were all caught (`caughtByVote`) stay caught
+// when the one who steals leaves. Nobody else's leaving changes the vote: their ballots, and best votes
+// for their card, count for nothing.
+function settleRoundFour(d: Tx, g: Game, o: { accused: string | null; caughtByVote: string[]; stole: boolean }) {
+  const { accused, stole } = o;
   const play = inPlay(d, g.id).map((p) => p.personId);
   const here = new Set(play);
-  const moles = new Set([...moleIdsOf(d, g.id, g.round)].filter((m) => here.has(m)));
+  const dealt = moleIdsOf(d, g.id, g.round);
+  const leftMoles = [...dealt].filter((m) => !here.has(m));
+  const caught = new Set([...o.caughtByVote, ...leftMoles]);
   const picksOf = d.select().from(picks).where(and(eq(picks.gameId, g.id), eq(picks.round, g.round))).all();
-  const pts = roundPoints({
-    moles,
+  const ballots = d.select().from(votes).where(and(eq(votes.gameId, g.id), eq(votes.round, g.round))).all().filter((v) => here.has(v.voterPersonId));
+  const counted = d.select().from(bestVotes).where(and(eq(bestVotes.gameId, g.id), eq(bestVotes.round, g.round))).all()
+    .filter((b) => here.has(b.voterPersonId) && here.has(b.pickPersonId))
+    .flatMap((b) => {
+      const card = picksOf.find((p) => p.personId === b.pickPersonId);
+      return card ? [{ voter: b.voterPersonId, picker: card.personId, lender: card.lenderPersonId, order: card.slot ?? 0 }] : [];
+    });
+  const scored = scoreRound({
+    moles: dealt,
     players: play,
-    moleVotes: d.select().from(votes).where(and(eq(votes.gameId, g.id), eq(votes.round, g.round))).all()
-      .filter((v) => here.has(v.voterPersonId) && v.choice && v.choice !== "skip")
-      .map((v) => ({ voter: v.voterPersonId, choice: v.choice! })),
-    bestVotes: d.select().from(bestVotes).where(and(eq(bestVotes.gameId, g.id), eq(bestVotes.round, g.round))).all()
-      .filter((b) => here.has(b.voterPersonId))
-      .flatMap((b) => {
-        const card = picksOf.find((p) => p.personId === b.pickPersonId);
-        return card ? [{ voter: b.voterPersonId, picker: card.personId, lender: card.lenderPersonId }] : [];
-      }),
+    moleVotes: ballots.filter((v) => v.choice && v.choice !== "skip").map((v) => ({ voter: v.voterPersonId, choice: v.choice! })),
+    bestVotes: counted,
     caught,
     stole: stole ? accused : null,
   });
-  d.insert(roundResults).values({ gameId: g.id, round: g.round, accusedPersonId: accused, caught: caught ? 1 : 0, stole: stole ? 1 : 0 }).run();
-  for (const [personId, points] of pts) {
-    d.insert(roundScores).values({ gameId: g.id, round: g.round, personId, points }).run();
-    if (points) d.update(gamePlayers).set({ score: sql`${gamePlayers.score} + ${points}` }).where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.personId, personId))).run();
+  d.insert(roundResults).values({ gameId: g.id, round: g.round, accusedPersonId: accused, caught: o.caughtByVote.length ? 1 : 0, stole: stole ? 1 : 0 }).run();
+  for (const [personId, r] of scored) {
+    d.insert(roundScores).values({ gameId: g.id, round: g.round, personId, points: r.points }).run();
+    if (r.points) d.update(gamePlayers).set({ score: sql`${gamePlayers.score} + ${r.points}` }).where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.personId, personId))).run();
   }
+  // The frozen reveal. Best-pick tallies use the votes that scored; the ballots list those of people still here.
+  const nm = (id: string | null) => nameById(d, id);
+  const perCard = new Map<number, number>();
+  for (const b of counted) perCard.set(b.order, (perCard.get(b.order) ?? 0) + 1);
+  const top = Math.max(0, ...perCard.values());
+  const snapshot: RoundSnapshot = {
+    moles: [...dealt].map(nm).sort(),
+    left: d.select({ id: gamePlayers.personId }).from(gamePlayers).where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.left, 1))).all().map((r) => nm(r.id)).sort(),
+    leftMoles: leftMoles.map(nm).sort(),
+    caught: [...caught].map(nm).sort(),
+    escaped: [...dealt].filter((m) => !caught.has(m)).map(nm).sort(),
+    votes: ballots.map((v) => ({ voter: nm(v.voterPersonId), choice: v.choice && v.choice !== "skip" ? nm(v.choice) : null })).sort((a, b) => a.voter.localeCompare(b.voter)),
+    bestVotes: counted.map((b) => ({ voter: nm(b.voter), order: b.order, picker: nm(b.picker), ...(b.lender ? { lender: nm(b.lender) } : {}) })).sort((a, b) => a.voter.localeCompare(b.voter)),
+    points: [...scored].map(([id, r]) => ({ name: nm(id), points: r.points, reasons: r.reasons })).sort((a, b) => a.name.localeCompare(b.name)),
+    best: top ? [...perCard].filter(([, n]) => n === top).sort((a, b) => a[0] - b[0]).map(([order, votes]) => {
+      const c = picksOf.find((p) => p.slot === order)!;
+      return { order, picker: nm(c.personId), ...(c.lenderPersonId ? { lender: nm(c.lenderPersonId) } : {}), votes };
+    }) : [],
+  };
+  d.update(roundResults).set({ snapshot: JSON.stringify(snapshot) }).where(and(eq(roundResults.gameId, g.id), eq(roundResults.round, g.round))).run();
   enter(d, g, "reveal", { set: { ejectedPersonId: null, stole: stole ? 1 : 0 } });
   // The reveal names the round's moles and the prompt; never who voted for whom or what anyone gained.
-  const names = [...moleIdsOf(d, g.id, g.round)].map(personTag);
+  const names = [...dealt].map(personTag);
   const prompt = promptById(promptOf(d, g.id, g.round)?.promptId ?? "")?.text ?? "?";
+  const verdict = o.caughtByVote.length ? (stole ? "caught, and stole it" : "caught") : leftMoles.length === dealt.size ? "caught (left)" : "got away";
   log(
     tableScope(g.tableCode),
-    `reveal · prompt "${prompt}" · moles: ${names.join(", ") || "none"} · ${caught ? (stole ? "caught, and stole it" : "caught") : "got away"} · round ${g.round}`,
+    `reveal · prompt "${prompt}" · moles: ${names.join(", ") || "none"}${leftMoles.length ? ` · left: ${leftMoles.map(personTag).join(", ")}` : ""} · ${verdict} · round ${g.round}`,
   );
   if (g.round >= FOUR_ROUNDS) finish(d, { ...g, phase: "reveal" }, "points");
 }
 
 // A mole was voted out and has a steal: STEAL_OPTIONS prompts of the round's slot (the
 // real one and the rest decoys), shuffled, in a column only /me reads for them.
-function toSteal(d: Tx, g: Game, mole: string) {
+function toSteal(d: Tx, g: Game, mole: string, caughtMoles?: string) {
   const prompt = promptOf(d, g.id, g.round)!;
   // Decoys are prompts this game hasn't used: every used one was shown at its
   // reveal, so a used decoy could be struck out. A slot has far more prompts than
@@ -429,7 +553,7 @@ function toSteal(d: Tx, g: Game, mole: string) {
   const others = [...shuffle(ofSlot.filter((p) => !used.has(p.id))), ...shuffle(ofSlot.filter((p) => used.has(p.id)))].slice(0, STEAL_OPTIONS - 1);
   const options = shuffle([prompt.promptId, ...others.map((p) => p.id)]);
   d.update(gamePlayers).set({ stealUsed: 1 }).where(and(eq(gamePlayers.gameId, g.id), eq(gamePlayers.personId, mole))).run();
-  enter(d, g, "steal", { set: { stealPersonId: mole, stealOptions: JSON.stringify(options), stealGuess: null, stole: 0 } });
+  enter(d, g, "steal", { set: { stealPersonId: mole, stealOptions: JSON.stringify(options), stealGuess: null, stole: 0, ...(caughtMoles ? { caughtMoles } : {}) } });
   log(tableScope(g.tableCode), `${personTag(mole)} gets a steal · round ${g.round}`);
 }
 
@@ -440,7 +564,7 @@ function resolveSteal(d: Tx, g: Game) {
   const mole = g.stealPersonId!;
   const right = !!g.stealGuess && g.stealGuess === promptOf(d, g.id, g.round)?.promptId;
   log(tableScope(g.tableCode), `${personTag(mole)} ${right ? "stole it (guessed right)" : "missed the steal"} · round ${g.round}`);
-  if (isFour(g)) return settleRoundFour(d, g, mole, true, right);
+  if (isFour(g)) return settleRoundFour(d, g, { accused: mole, caughtByVote: JSON.parse(g.caughtMoles ?? "[]") as string[], stole: right });
   settleVerdict(d, g, mole, right);
 }
 
@@ -473,7 +597,7 @@ function step(d: Tx, g: Game, cause: string) {
     const cards = t.autoplay ? pickCount(d, g) : 0;
     const next = (g.nowPlaying ?? -1) + 1;
     if (t.autoplay && next < cards) {
-      d.update(games).set({ nowPlaying: next, deadline: now + t.slotSeconds * 1000 }).where(eq(games.id, g.id)).run();
+      setDeadline(d, g.id, now + t.slotSeconds * 1000, { nowPlaying: next });
       touch(g.tableCode);
       log(tableScope(g.tableCode), `autoplay · track ${next + 1} of ${cards} playing · round ${g.round}`);
     } else {
@@ -551,7 +675,7 @@ function settle(d: Tx, code: string, why: string) {
 function lastCall(d: Tx, g: Game) {
   if (g.lastCall) return;
   const deadline = Math.min(g.deadline ?? Infinity, Date.now() + LAST_CALL_MS);
-  d.update(games).set({ lastCall: 1, deadline }).where(eq(games.id, g.id)).run();
+  setDeadline(d, g.id, deadline, { lastCall: 1 });
   log(tableScope(g.tableCode), `last call · everyone has voted${isFour(g) ? " on both" : ""} · round ${g.round}`);
 }
 
@@ -626,7 +750,7 @@ export function resumeGames() {
     // A reveal with no deadline and no winner (an older build moved the game there
     // and its reveal had no timer): give it the usual one, or it would sit forever.
     if (g.phase === "reveal" && g.deadline === null) {
-      db.update(games).set({ deadline: Date.now() + REVEAL_SECONDS * 1000 }).where(eq(games.id, g.id)).run();
+      setDeadline(db, g.id, Date.now() + REVEAL_SECONDS * 1000);
       log(tableScope(code), `reveal had no deadline at boot · round ${g.round} moves on in ${REVEAL_SECONDS}s`);
     }
     schedule(code);
@@ -1004,10 +1128,8 @@ export function setNowPlaying(code: string, slot: number, by?: string): { ok: tr
     // carries on from this slot once its time is up.
     const t = tableOptions(code)!;
     const resume = t.autoplay && g.phase === "listen";
-    tx.update(games)
-      .set(resume ? { nowPlaying: slot, deadline: Date.now() + t.slotSeconds * 1000 } : { nowPlaying: slot })
-      .where(eq(games.id, g.id))
-      .run();
+    if (resume) setDeadline(tx, g.id, Date.now() + t.slotSeconds * 1000, { nowPlaying: slot });
+    else tx.update(games).set({ nowPlaying: slot }).where(eq(games.id, g.id)).run();
     log(tableScope(code), `${by ? `${by} ` : ""}played track ${slot + 1} · round ${g.round}`);
     return { ok: true };
   });

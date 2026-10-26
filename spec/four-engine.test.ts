@@ -93,7 +93,7 @@ it("scores a round per rule: a hand-checked example", async () => {
   expect([SCORE_CATCH, SCORE_BEST, SCORE_LEND, SCORE_ESCAPE, SCORE_STEAL]).toEqual([2, 1, 1, 2, 3]);
   // Moles M1 M2; players A B C D. A and D vote M1 (+2 each); B votes A and C skips (0); M2 votes M1 (a mole: 0).
   // Best: A->B's card, borrowed from D (B +1, D +1), C->B's card (B +1, D +1), D->A (+1), B->C (+1), M1->A (+1), M2->C (+1).
-  // M1 was caught and guessed wrong: nobody escapes, nobody steals.
+  // M1 was caught and guessed wrong: no steal. M2 was not caught, so M2 escapes on their own (+2).
   const pts = roundPoints({
     moles: new Set(["M1", "M2"]),
     players: ["A", "B", "C", "D", "M1", "M2"],
@@ -102,14 +102,19 @@ it("scores a round per rule: a hand-checked example", async () => {
       { voter: "A", picker: "B", lender: "D" }, { voter: "C", picker: "B", lender: "D" }, { voter: "D", picker: "A", lender: null },
       { voter: "B", picker: "C", lender: null }, { voter: "M1", picker: "A", lender: null }, { voter: "M2", picker: "C", lender: null },
     ],
-    caught: true,
+    caught: new Set(["M1"]),
     stole: null,
   });
-  expect(Object.fromEntries(pts)).toEqual({ A: 2 + 1 + 1, B: 0 + 1 + 1, C: 0 + 1 + 1, D: 2 + 1 + 1, M1: 0, M2: 0 });
+  expect(Object.fromEntries(pts)).toEqual({ A: 2 + 1 + 1, B: 0 + 1 + 1, C: 0 + 1 + 1, D: 2 + 1 + 1, M1: 0, M2: 2 });
+  // The same round, with both moles caught (a tie between them): nobody escapes.
+  const both = roundPoints({
+    moles: new Set(["M1", "M2"]), players: ["A", "M1", "M2"], moleVotes: [{ voter: "A", choice: "M1" }], bestVotes: [], caught: new Set(["M1", "M2"]), stole: null,
+  });
+  expect(Object.fromEntries(both)).toEqual({ A: 2, M1: 0, M2: 0 });
   // The moles got away (+2 each); a mole who stole is +3 and not +2 (caught).
-  const away = roundPoints({ moles: new Set(["M1"]), players: ["A", "M1"], moleVotes: [], bestVotes: [], caught: false, stole: null });
+  const away = roundPoints({ moles: new Set(["M1"]), players: ["A", "M1"], moleVotes: [], bestVotes: [], caught: new Set(), stole: null });
   expect(Object.fromEntries(away)).toEqual({ A: 0, M1: 2 });
-  const stole = roundPoints({ moles: new Set(["M1"]), players: ["A", "M1"], moleVotes: [{ voter: "A", choice: "M1" }], bestVotes: [], caught: true, stole: "M1" });
+  const stole = roundPoints({ moles: new Set(["M1"]), players: ["A", "M1"], moleVotes: [{ voter: "A", choice: "M1" }], bestVotes: [], caught: new Set(["M1"]), stole: "M1" });
   expect(Object.fromEntries(stole)).toEqual({ A: 2, M1: 3 });
 });
 
@@ -118,7 +123,11 @@ it("reads the top mole vote: a mole on top is caught; a tie between moles counts
   const moles = new Set(["M1", "M2"]);
   const t = (o: Record<string, number>) => new Map(Object.entries(o));
   const first = (n: number) => 0;
-  expect(judgeFour(t({ M1: 3, P: 1 }), moles, first)).toMatchObject({ caught: true, steal: "M1", tied: false });
+  expect(judgeFour(t({ M1: 3, P: 1 }), moles, first)).toMatchObject({ caught: true, steal: "M1", tied: false, caughtMoles: ["M1"] });
+  // Each mole is judged on their own: M1 caught says nothing of M2, who is not in `caughtMoles` and so gets away.
+  expect(judgeFour(t({ M1: 3, M2: 1, P: 1 }), moles, first).caughtMoles).toEqual(["M1"]);
+  expect(judgeFour(t({ M1: 2, M2: 2 }), moles, first).caughtMoles).toEqual(["M1", "M2"]);
+  expect(judgeFour(t({ P: 3, M1: 1 }), moles, first).caughtMoles).toEqual([]);
   // The rule for a tie: only moles level on top = the top mole vote is a mole; one of them (at random) steals.
   expect(judgeFour(t({ M1: 2, M2: 2, P: 1 }), moles, first)).toMatchObject({ caught: true, steal: "M1", tied: true });
   expect(judgeFour(t({ M1: 2, M2: 2 }), moles, (n) => n - 1)).toMatchObject({ caught: true, steal: "M2", tied: true });
@@ -240,7 +249,8 @@ it("scores a hand-checked game: a caught mole's wrong steal, a getaway, and a ri
   for (const id of w.ids.filter((x) => x !== m1)) expect(M.G.myView(w.code, id).steal).toBeUndefined();
   expect(M.G.castSteal(w.code, m1, options.find((o) => o !== realPrompt(w))!)).toEqual({ ok: true });
   expect(game(w).phase).toBe("reveal");
-  expectPoints(1, { [p1]: 2 + 2, [p2]: 0 + 2, [p3]: 0 + 2, [p4]: 2 + 2, [m1]: 0, [m2]: 0 });
+  // M2 was not the one caught, so M2 got away on their own: +2.
+  expectPoints(1, { [p1]: 2 + 2, [p2]: 0 + 2, [p3]: 0 + 2, [p4]: 2 + 2, [m1]: 0, [m2]: 2 });
   expect(pub(w).game!.reveal).toMatchObject({ stole: false, wasMole: true, accused: nameOf(w, m1), moles: [nameOf(w, m1), nameOf(w, m2)].sort() });
   const bv = pub(w).game!.reveal!.bestVotes!;
   expect(bv).toHaveLength(6);
@@ -269,7 +279,7 @@ it("scores a hand-checked game: a caught mole's wrong steal, a getaway, and a ri
   expect(game(w).phase).toBe("steal");
   expect(M.G.castSteal(w.code, m1, realPrompt(w))).toEqual({ ok: true });
   expect(game(w).phase).toBe("reveal");
-  expectPoints(3, { ...Object.fromEntries(players3.map((p) => [p, 2])), [m1]: 3 });
+  expectPoints(3, { ...Object.fromEntries(players3.map((p) => [p, 2])), [m1]: 3, [m2]: 2 });
   expect(pub(w).game!.reveal).toMatchObject({ stole: true, wasMole: true });
   expect(game(w).winner).toBeNull();
   expect(M.G.advance(w.code)).toEqual({ ok: true });
@@ -528,4 +538,338 @@ it("keeps Knockout's own public shape: no scores, no best tally, and no best pic
   const f = world(3);
   pickAll(f); toVote(f);
   expect(M.G.castGhostGuess(f.code, f.ids[0], f.names[1])).toMatchObject({ ok: false, status: 409 });
+});
+
+// ---- the stage 3 review's fixes ----
+
+// Plays a whole round: everyone picks, the vote opens. `ballot` casts the votes.
+const reveal = (w: W) => pub(w).game!.reveal!;
+const pointsOf = (w: W): Record<string, number> => Object.fromEntries(reveal(w).points!.map((p) => [p.name, p.points]));
+// Every person's reasons add up to their points, and each reason is n times its kind's unit.
+function expectReasonsAdd(w: W) {
+  const unit = { caught: 2, best: 1, lend: 1, escaped: 2, stole: 3 } as const;
+  const r = reveal(w);
+  expect(r.points!.length).toBeGreaterThan(0);
+  for (const p of r.points!) {
+    expect(p.reasons.reduce((a, x) => a + x.points, 0)).toBe(p.points);
+    for (const x of p.reasons) expect(x.points).toBe(x.n * unit[x.kind]);
+  }
+}
+
+it("keeps the winner and the final scores after game over, when a player leaves", async () => {
+  // The review's repro: scores A 2, B 10, C 8, then B (the winner) leaves.
+  const w = world(3, { moles: 1 });
+  for (let round = 1; round <= 4; round++) {
+    pickAll(w); toVote(w);
+    for (const id of w.ids) vote(w, id, "skip");
+    // B (ids[1]) gets every best vote that isn't their own; the others split the rest.
+    for (const id of w.ids) expect(best(w, id, id === w.ids[1] ? w.ids[2] : w.ids[1])).toEqual({ ok: true });
+    lock(w);
+    if (round < 4) M.G.advance(w.code);
+  }
+  const before = pub(w).game!;
+  expect(before.winner).toBe("points");
+  const top = Math.max(...before.scores!.map((s) => s.score));
+  expect(before.winners).toEqual(before.scores!.filter((s) => s.score === top).map((s) => s.name));
+  expect(before.winners).toContain(w.names[1]);
+  const frozen = JSON.stringify({ scores: before.scores, winners: before.winners, past: before.past, reveal: before.reveal });
+  // The winner leaves, then another: nothing on the game-over screen moves, and history still agrees.
+  M.G.leaveTable(w.code, w.ids[1]);
+  expect(JSON.stringify({ scores: pub(w).game!.scores, winners: pub(w).game!.winners, past: pub(w).game!.past, reveal: pub(w).game!.reveal })).toBe(frozen);
+  M.G.leaveTable(w.code, w.ids[2]);
+  expect(JSON.stringify({ scores: pub(w).game!.scores, winners: pub(w).game!.winners, past: pub(w).game!.past, reveal: pub(w).game!.reveal })).toBe(frozen);
+  expect(pub(w).game!.winners).toContain(w.names[1]);
+  // The winners are stored with the game, not worked out from who is seated.
+  const stored = JSON.parse(game(w).finalResult!) as { scores: unknown[]; winners: string[] };
+  expect(stored.winners).toEqual(before.winners);
+  expect(stored.scores).toHaveLength(3);
+});
+
+it("sends the reasons for every person's points from the server, and they sum to the points, with a leaver in the game", async () => {
+  // Random ballots over several games, with someone leaving at a random moment: every reveal adds up.
+  for (let n = 0; n < 6; n++) {
+    const six = n % 2 === 0;
+    const w = world(six ? 6 : 4, { moles: six ? 2 : 1 });
+    const rnd = (k: number) => Math.floor(Math.random() * k);
+    let leaver: string | null = null;
+    for (let round = 1; round <= 4; round++) {
+      pickAll(w, w.ids.filter((id) => id === leaver));
+      toVote(w);
+      const live = () => w.ids.filter((id) => id !== leaver);
+      // Some vote before the leaver goes, some after; the leaver (a mole or not) leaves in round 2 or 3.
+      const ids = live();
+      const half = ids.slice(0, ids.length >> 1);
+      for (const id of half) {
+        const others = ids.filter((o) => o !== id);
+        vote(w, id, rnd(3) === 0 ? "skip" : others[rnd(others.length)]);
+        best(w, id, others[rnd(others.length)]);
+      }
+      if (round === 2 + (n % 2) && !leaver) {
+        leaver = n % 4 < 2 ? half[0] : molesOf(w, round)[0];
+        M.G.leaveTable(w.code, leaver);
+        if (game(w).winner) break;
+      }
+      if (game(w).phase === "vote") {
+        for (const id of live()) {
+          vote(w, id, rnd(3) === 0 ? "skip" : live().filter((o) => o !== id)[rnd(live().length - 1)]);
+          const others = live().filter((o) => o !== id);
+          best(w, id, others[rnd(others.length)]);
+        }
+        lock(w);
+      }
+      if (game(w).phase === "steal") lock(w);
+      if (game(w).phase !== "reveal" && !game(w).winner) break;
+      const r = reveal(w);
+      expectReasonsAdd(w);
+      // The reveal lists no one who had left as a voter, and says who left.
+      if (leaver) {
+        expect(r.left).toContain(nameOf(w, leaver));
+        expect(r.votes.map((v) => v.voter)).not.toContain(nameOf(w, leaver));
+        expect(r.bestVotes!.map((v) => v.voter)).not.toContain(nameOf(w, leaver));
+        expect(r.points!.map((p) => p.name)).not.toContain(nameOf(w, leaver));
+      }
+      // Those points are the ones the scores moved by.
+      for (const p of r.points!) expect(roundIn(w, round).points!.find((q) => q.name === p.name)).toEqual(p);
+      if (game(w).winner) break;
+      M.G.advance(w.code);
+    }
+    // Game over: past[] carries the same reasons for every round.
+    if (game(w).winner === "points") for (const p of pub(w).game!.past) for (const q of p.points!) expect(q.reasons.reduce((a, x) => a + x.points, 0)).toBe(q.points);
+  }
+});
+
+// A mole who leaves counts as caught for those who voted for them (+2 each), with no steal; the other
+// mole in the round is still judged on their own.
+{
+  const setup = (phase: "pick" | "listen" | "vote" | "steal") => {
+    const w = world(6, { moles: 2 });
+    const [m1, m2] = molesOf(w, 1);
+    const [p1, p2, p3, p4] = w.ids.filter((id) => ![m1, m2].includes(id));
+    const out = { w, m1, m2, p1, p2, p3, p4 };
+    if (phase === "pick") return out;
+    pickAll(w);
+    if (phase === "listen") return out;
+    toVote(w);
+    return out;
+  };
+  const sentence = (r: ReturnType<typeof reveal>) => r.leftMoles;
+
+  it("a mole leaving in pick: nobody had voted yet, so nobody catches them; the other mole gets away", () => {
+    const { w, m1, m2, p1 } = setup("pick");
+    M.G.leaveTable(w.code, m1);
+    expect(game(w).phase).toBe("pick");
+    M.G.pickTrack(w.code, p1, w.base[idx(w, p1)]);
+    for (const id of w.ids.filter((x) => x !== m1 && x !== p1)) M.G.pickTrack(w.code, id, w.base[idx(w, id)]);
+    toVote(w);
+    for (const id of w.ids.filter((x) => x !== m1)) vote(w, id, "skip");
+    lock(w);
+    expect(game(w).phase).toBe("reveal");
+    expect(sentence(reveal(w))).toEqual([nameOf(w, m1)]);
+    const pts = pointsOf(w);
+    expect(pts[nameOf(w, m1)]).toBeUndefined();
+    expect(pts[nameOf(w, m2)]).toBe(2 + (reveal(w).bestVotes ?? []).filter((b) => b.picker === nameOf(w, m2)).length);
+    expectReasonsAdd(w);
+  });
+
+  it("a mole leaving in listen: still no votes; judged as left, the other mole is judged alone", () => {
+    const { w, m1, m2, p1, p2 } = setup("listen");
+    M.G.leaveTable(w.code, m1);
+    expect(game(w).phase).toBe("listen");
+    toVote(w);
+    // The room votes for the mole who stayed, and it is caught on their own.
+    for (const id of w.ids.filter((x) => x !== m1 && x !== m2)) vote(w, id, m2);
+    vote(w, m2, p1);
+    lock(w);
+    expect(game(w).phase).toBe("steal");
+    expect(game(w).stealPersonId).toBe(m2);
+    lock(w);
+    expect(sentence(reveal(w))).toEqual([nameOf(w, m1)]);
+    const pts = pointsOf(w);
+    expectReasonsAdd(w);
+    // 3 players (of 4 non-moles) voted m2: +2 each, m2 caught: nothing for them.
+    expect(pts[nameOf(w, p2)]).toBeGreaterThanOrEqual(2);
+    expect(pts[nameOf(w, m2)]).toBe((reveal(w).bestVotes ?? []).filter((b) => b.picker === nameOf(w, m2)).length);
+  });
+
+  it("a mole leaving in vote: everyone who had voted for them gets +2, no steal, and the reveal says so", () => {
+    const { w, m1, m2, p1, p2, p3, p4 } = setup("vote");
+    vote(w, p1, m1); vote(w, p2, m1); vote(w, p3, m2); vote(w, p4, "skip");
+    vote(w, m2, m1); // a mole's own mole vote scores nothing
+    M.G.leaveTable(w.code, m1);
+    for (const id of [p1, p2, p3, p4, m2]) if (!M.G.myView(w.code, id).vote) vote(w, id, "skip");
+    // The room's tally without m1: m2 has 1 vote (p3), skip has 1: a tie with skip, so nobody is caught by vote.
+    lock(w);
+    expect(game(w).phase).toBe("reveal");
+    const r = reveal(w);
+    expect(r.leftMoles).toEqual([nameOf(w, m1)]);
+    expect(r.left).toContain(nameOf(w, m1));
+    expect(r.wasMole).toBe(false);
+    expect(r.stole).toBe(false);
+    const pts = pointsOf(w);
+    const bonus = (id: string) => (r.bestVotes ?? []).filter((b) => b.picker === nameOf(w, id)).length;
+    expect(pts[nameOf(w, p1)]).toBe(2 + bonus(p1));
+    expect(pts[nameOf(w, p2)]).toBe(2 + bonus(p2));
+    expect(pts[nameOf(w, p3)]).toBe(2 + bonus(p3)); // any vote for a mole catches them, top or not
+    expect(pts[nameOf(w, m2)]).toBe(2 + bonus(m2)); // the other mole was not caught: gets away on their own
+    expect(pts[nameOf(w, m1)]).toBeUndefined();
+    expectReasonsAdd(w);
+    expect(M.db.select().from(M.S.roundScores).where(M.and(M.eq(M.S.roundScores.gameId, game(w).id), M.eq(M.S.roundScores.round, 1))).all().find((s) => s.personId === m1)).toBeUndefined();
+    expect(M.L.recentLines(w.code).some((l) => /reveal ·.*· left: /.test(l))).toBe(true);
+  });
+
+  it("the only mole leaving in vote: the room that had caught them is paid, and there is no steal and no escape", () => {
+    const w = world(4, { moles: 1 });
+    const [m] = molesOf(w, 1);
+    const ps = w.ids.filter((id) => id !== m);
+    pickAll(w); toVote(w);
+    for (const id of ps) vote(w, id, m);
+    M.G.leaveTable(w.code, m);
+    expect(game(w).phase).toBe("vote");
+    for (const id of ps) best(w, id, ps.find((o) => o !== id)!);
+    lock(w);
+    expect(game(w).phase).toBe("reveal");
+    const r = reveal(w);
+    for (const id of ps) expect(pointsOf(w)[nameOf(w, id)]).toBe(2 + (r.bestVotes ?? []).filter((b) => b.picker === nameOf(w, id)).length);
+    expect(r.leftMoles).toEqual([nameOf(w, m)]);
+    expect(r.escaped).toEqual([]);
+    expectReasonsAdd(w);
+  });
+
+  it("a mole leaving during their own steal: the vote had caught them, so those who voted for them are paid, and the steal is missed", () => {
+    const { w, m1, m2, p1, p2, p3, p4 } = setup("vote");
+    for (const id of [p1, p2, p3, p4]) vote(w, id, m1);
+    vote(w, m1, p1); vote(w, m2, "skip");
+    lock(w);
+    expect(game(w).phase).toBe("steal");
+    expect(game(w).stealPersonId).toBe(m1);
+    M.G.leaveTable(w.code, m1);
+    expect(game(w).phase).toBe("reveal");
+    const r = reveal(w);
+    expect(r.wasMole).toBe(true); // the vote caught them
+    expect(r.stole).toBe(false);
+    expect(r.leftMoles).toEqual([nameOf(w, m1)]);
+    for (const id of [p1, p2, p3, p4]) expect(pointsOf(w)[nameOf(w, id)]).toBe(2 + (r.bestVotes ?? []).filter((b) => b.picker === nameOf(w, id)).length);
+    expect(pointsOf(w)[nameOf(w, m2)]).toBe(2 + (r.bestVotes ?? []).filter((b) => b.picker === nameOf(w, m2)).length); // m2 got away on their own
+    expectReasonsAdd(w);
+  });
+
+  it("when tied moles are both caught and the one who steals leaves, the other stays caught", () => {
+    const { w, m1, m2, p1, p2, p3, p4 } = setup("vote");
+    vote(w, p1, m1); vote(w, p2, m1); vote(w, p3, m2); vote(w, p4, m2); vote(w, m1, p1); vote(w, m2, p2);
+    lock(w);
+    expect(game(w).phase).toBe("steal");
+    const stealer = game(w).stealPersonId!;
+    M.G.leaveTable(w.code, stealer);
+    const other = stealer === m1 ? m2 : m1;
+    const r = reveal(w);
+    // Both were caught (one by the vote and by leaving): neither got away.
+    expect(pointsOf(w)[nameOf(w, other)]).toBe((r.bestVotes ?? []).filter((b) => b.picker === nameOf(w, other)).length);
+    expect(r.escaped).toEqual([]);
+    expectReasonsAdd(w);
+  });
+}
+
+it("keeps each round's best card on the server in past[], so a reload at game over still has every round's", async () => {
+  const w = world(4, { moles: 1 });
+  const expected: { picker: string; votes: number }[] = [];
+  for (let round = 1; round <= 4; round++) {
+    pickAll(w); toVote(w);
+    // Everyone best-picks the card of the next person along (so each card gets one vote), except that
+    // w.ids[0]'s card gets a second vote from w.ids[2]: it is the unique best card.
+    for (const id of w.ids) vote(w, id, "skip");
+    for (const [i, id] of w.ids.entries()) expect(best(w, id, i === 2 ? w.ids[0] : w.ids[(i + 1) % 4])).toEqual({ ok: true });
+    lock(w);
+    expect(reveal(w).points!.length).toBe(4);
+    expected.push({ picker: w.names[0], votes: 2 });
+    if (round < 4) M.G.advance(w.code);
+  }
+  // "A reload": a new process loads the modules afresh from the same database, and boot resumes.
+  vi.resetModules();
+  M = await load();
+  const g = pub(w).game!;
+  expect(g.winner).toBe("points");
+  expect(g.past).toHaveLength(4);
+  for (const [i, p] of g.past.entries()) {
+    expect(p.best).toHaveLength(1);
+    expect(p.best![0]).toMatchObject({ picker: expected[i].picker, votes: expected[i].votes });
+    expect(p.best![0].order).toBe(p.cards.find((c) => c.picker === expected[i].picker)!.order);
+  }
+});
+
+it("deals moles without repeats: over a 4-player game nobody is the mole twice, over a 6-player game with two each round no pair repeats a person until all six have been", async () => {
+  for (let n = 0; n < 5; n++) {
+    const w = world(4, { moles: 1 });
+    const seen: string[] = [];
+    for (let round = 1; round <= 4; round++) {
+      seen.push(...molesOf(w, round));
+      pickAll(w); toVote(w);
+      for (const id of w.ids) vote(w, id, "skip");
+      lock(w);
+      if (round < 4) M.G.advance(w.code);
+    }
+    expect(new Set(seen).size).toBe(4);
+  }
+  for (let n = 0; n < 5; n++) {
+    const w = world(6, { moles: 2 });
+    const per: string[][] = [];
+    for (let round = 1; round <= 4; round++) {
+      per.push(molesOf(w, round));
+      pickAll(w); toVote(w);
+      for (const id of w.ids) vote(w, id, "skip");
+      lock(w);
+      if (round < 4) M.G.advance(w.code);
+    }
+    // Rounds 1-3 are one full cycle: six different people. Round 4 starts the next: two different people.
+    expect(new Set(per.slice(0, 3).flat()).size).toBe(6);
+    expect(new Set(per[3]).size).toBe(2);
+  }
+});
+
+it("deals the next moles from who hasn't been, refilling when the pool empties, and counts people who joined later", () => {
+  const { dealOrder } = M.G;
+  const ids = ["a", "b", "c", "d", "e"];
+  // 2 moles from 5, over many rounds: within every window of one cycle nobody repeats; a round never has the same person twice.
+  for (let n = 0; n < 200; n++) {
+    const hist: string[][] = [];
+    for (let r = 0; r < 12; r++) hist.push(dealOrder(hist, ids, 2));
+    for (const h of hist) expect(new Set(h).size).toBe(2);
+    // Replay: until the pool is empty nobody is dealt again.
+    let seen = new Set<string>();
+    for (const h of hist) for (const m of h) {
+      expect(seen.has(m)).toBe(false);
+      seen.add(m);
+      if (ids.every((i) => seen.has(i))) seen = new Set();
+    }
+  }
+  // The pool of 5 with 2 per round: after rounds {a,b},{c,d} only e is left, so e is dealt, then a new cycle fills the second place.
+  const third = dealOrder([["a", "b"], ["c", "d"]], ids, 2);
+  expect(third).toContain("e");
+  expect(new Set(third).size).toBe(2);
+  // Someone who joined later is eligible like anyone, and is dealt before anyone who has already been.
+  expect(dealOrder([["a"], ["b"], ["c"]], ["a", "b", "c", "d"], 1)).toEqual(["d"]);
+  // A leaver is not dealt; the others carry on.
+  expect(dealOrder([["a"], ["b"]], ["a", "c", "d"], 1)).not.toContain("a");
+  // Everyone has been once: a new cycle starts (anyone may be next).
+  expect(["a", "b", "c"]).toContain(dealOrder([["a"], ["b"], ["c"]], ["a", "b", "c"], 1)[0]);
+  // A leaver who had been is forgotten; 3 left, a and b had been: only c is eligible.
+  expect(dealOrder([["a"], ["b"], ["z"]], ["a", "b", "c"], 1)).toEqual(["c"]);
+});
+
+it("pays each mole on their own in an engine round: one caught, one not caught gets +2, and the steal goes to the caught one", async () => {
+  const w = world(6, { moles: 2 });
+  const [m1, m2] = molesOf(w, 1);
+  const ps = w.ids.filter((id) => ![m1, m2].includes(id));
+  pickAll(w); toVote(w);
+  for (const id of ps) vote(w, id, m1);
+  vote(w, m1, "skip"); vote(w, m2, "skip");
+  lock(w);
+  expect(game(w).stealPersonId).toBe(m1);
+  expect(M.G.castSteal(w.code, m1, realPrompt(w))).toEqual({ ok: true });
+  const r = reveal(w);
+  expect(pointsOf(w)[nameOf(w, m1)]).toBe(3 + (r.bestVotes ?? []).filter((b) => b.picker === nameOf(w, m1)).length);
+  expect(r.points!.find((p) => p.name === nameOf(w, m2))!.reasons).toContainEqual({ kind: "escaped", n: 1, points: 2 });
+  expect(r.points!.find((p) => p.name === nameOf(w, m1))!.reasons).toContainEqual({ kind: "stole", n: 1, points: 3 });
+  expect(r.caught).toEqual([nameOf(w, m1)]);
+  expect(r.escaped).toEqual([nameOf(w, m2)]);
+  expectReasonsAdd(w);
 });
