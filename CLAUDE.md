@@ -111,15 +111,24 @@ holds in both unless this section says otherwise.
 - **Four rounds.** One round per mood, each mood once, in shuffled order.
   Nobody is voted out and there are no ghosts.
   - **Moles are dealt again every round** (same counts as above), because the
-    steal shows who was caught. A round's moles are named at its reveal.
+    steal shows who was caught. A round's moles are named at its reveal. They
+    are dealt **without repeats**: nobody is the mole twice until everyone
+    seated has been once, so being dealt the mole more often can't decide the
+    winner.
   - **Two votes at once**, live and changeable like the knockout vote: who's the
     mole (a name, not yourself, or skip), and **best pick** (a card, not your
     own). Last call starts when everyone has cast both.
-  - **Scoring, per round:** each non-mole who voted for a mole +2; each best-pick
-    vote +1 to the card's picker and +1 to its lender if it was borrowed; each
-    mole +2 if the room's top mole vote isn't a mole (a tie or skip on top
-    counts). If the top mole vote is a mole, that mole gets the steal (8
-    prompts); a right guess +3.
+  - **Scoring, per round:** each non-mole who voted for a mole +2 (a mole's own
+    mole vote scores nothing); each best-pick vote +1 to the card's picker and
+    +1 to its lender if it was borrowed. Each mole is judged on their own: a
+    mole the room didn't catch +2. The room catches a mole when the top mole vote
+    is that mole, or a tie made only of moles (then one of them, at random, gets
+    the steal). The caught mole gets the steal (8 prompts); a right guess +3.
+  - **A mole who leaves during the round** counts as caught for everyone who had
+    voted for them (+2 each); there is no steal. Anyone else who leaves just
+    drops out: their votes and their card's best-pick votes count for nothing.
+  - The reveal's points and their reasons come from the server, so what the
+    screen says always matches the score.
   - **Scores change only at the reveal**, never while a vote is open, so a score
     can't leak who voted for what.
   - After round 4 the highest score wins; a tie shares the win. A round nobody

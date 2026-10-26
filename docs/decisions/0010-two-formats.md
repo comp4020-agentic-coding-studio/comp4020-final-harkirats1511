@@ -37,6 +37,14 @@ voted out, which is the Among Us feel I wanted from the start.
     secret role changes every round too. Here it's forced: the steal shows
     who was caught, so a mole kept for the next round couldn't bluff any more.
   - **Scores move only at the reveal**, so a score can't give away a vote.
+  - After the stage 3 review (26 Oct):
+    - **No repeat moles until everyone has had a turn.** A simulation showed
+      that in a skip-heavy room, whoever got dealt the mole most often won 55-65%
+      of games.
+    - **Each mole is judged on their own.** With two moles, one caught and one
+      not, the one who got away still gets +2.
+    - **A mole who leaves mid-round counts as caught** for those who voted for
+      them. Before, a room that had found the mole scored nothing when they left.
 
 ## Cost
 
