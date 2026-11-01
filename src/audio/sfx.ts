@@ -17,6 +17,11 @@ export type Sfx = {
   needle(): void;
   clunk(): void;
   click(): void;
+  // The table scene's moments: the steal's sting and its per-second tick, then the outcome.
+  stealSting(): void;
+  tick(): void;
+  stealWin(): void;
+  stealMiss(): void;
   destroy(): void;
 };
 
@@ -179,6 +184,38 @@ export function createSfx(): Sfx {
       const c = live();
       if (!c) return;
       tone(c, c.currentTime, { from: 1900, to: 1500, dur: 0.03, gain: 0.07 });
+    },
+    // The steal opens: two low notes a semitone apart (uneasy), a rising hiss, and a double heartbeat.
+    stealSting() {
+      const c = live();
+      if (!c) return;
+      const t = c.currentTime;
+      tone(c, t, { from: 147, to: 139, dur: 0.7, gain: 0.16, type: "triangle" });
+      tone(c, t, { from: 156, to: 147, dur: 0.7, gain: 0.1, type: "triangle" });
+      burst(c, t, { type: "bandpass", freq: 900, q: 1.5, dur: 0.6, gain: 0.05, attack: 0.3, sweepTo: 2600 });
+      thud(c, t + 0.15, 0.2);
+      thud(c, t + 0.4, 0.14);
+    },
+    tick() {
+      const c = live();
+      if (!c) return;
+      tone(c, c.currentTime, { from: 1300, to: 1000, dur: 0.035, gain: 0.05 });
+    },
+    // A right steal: a quick major arpeggio and a sparkle.
+    stealWin() {
+      const c = live();
+      if (!c) return;
+      const t = c.currentTime;
+      [523, 659, 784, 1047].forEach((f, i) => tone(c, t + i * 0.07, { from: f, to: f * 1.01, dur: 0.16, gain: 0.12, type: "triangle" }));
+      burst(c, t + 0.22, { type: "highpass", freq: 5000, dur: 0.3, gain: 0.05, attack: 0.02 });
+    },
+    // A missed steal: a low thud and a falling note.
+    stealMiss() {
+      const c = live();
+      if (!c) return;
+      const t = c.currentTime;
+      thud(c, t, 0.4);
+      tone(c, t + 0.05, { from: 240, to: 70, dur: 0.5, gain: 0.12, type: "sawtooth" });
     },
     destroy() {
       for (const t of timers) clearTimeout(t);

@@ -9,6 +9,7 @@ import { Color, Entity, Quat, StandardMaterial, Vec3 } from "playcanvas";
 import { type Avatar, defaultAvatar, OPTIONS } from "../lib/avatar.ts";
 import { Character, Kit } from "./character.ts";
 import { createEngine, type Engine } from "./engine.ts";
+import { createSfx } from "../audio/sfx.ts";
 
 export type PublicState = {
   status: string;
@@ -20,8 +21,16 @@ export type PublicState = {
     nowPlaying: number | null;
     alive: string[];
     ghosts: string[];
-    reveal?: { ejected: string | null; wasMole: boolean };
-    winner?: "players" | "moles" | "none";
+    deadline?: number | null;
+    format?: string;
+    cards?: { order: number; picker: string; lender?: string }[];
+    // Vote: a count per alive player (never who voted); skip has no chip.
+    tally?: { name: string; votes: number }[];
+    // Steal: who the room voted out.
+    accused?: string;
+    reveal?: { ejected: string | null; wasMole: boolean; accused?: string | null; stole?: boolean; points?: { name: string; points: number }[] };
+    winner?: string;
+    winners?: string[];
   };
 };
 
@@ -99,6 +108,15 @@ type Person = {
   nextFlourish: number;
   flourishUntil: number;
   label: HTMLElement;
+  chip: HTMLElement;
+  chipN: number;
+  lit: boolean;
+  lx: number;
+  ly: number;
+  rx: number;
+  rz: number;
+  dy: number;
+  crown: Entity | null;
   lw: number;
   lh: number;
   gone: boolean;
@@ -109,6 +127,11 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
   canvas.className = "scene-canvas";
   canvas.setAttribute("aria-hidden", "true");
   slot.append(canvas);
+  const sfx = createSfx();
+  const unlock = () => sfx.unlock();
+  addEventListener("pointerdown", unlock, true);
+  addEventListener("keydown", unlock, true);
+  let paused = false;
   const labels = document.createElement("div");
   labels.className = "scene-labels";
   labels.setAttribute("aria-hidden", "true");
@@ -213,6 +236,12 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
   spot.addComponent("light", { type: "spot", color: new Color().fromString("#fff6e0"), intensity: 0, range: 9, innerConeAngle: 18, outerConeAngle: 34 });
   root.addChild(spot);
 
+  // The lamp: a warm cone that lands on whoever's card is playing, and on a winner.
+  const lamp = new Entity("lamp");
+  lamp.addComponent("light", { type: "spot", color: new Color().fromString("#ffc873"), intensity: 0, range: 9, innerConeAngle: 14, outerConeAngle: 30 });
+  root.addChild(lamp);
+  const crownMat = kit.flat("#f4b860", { emissive: 0.5 });
+
   const applyTheme = () => {
     setCol(mats.floor, pal.floor);
     setCol(mats.wall, pal.wall);
@@ -231,7 +260,24 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
   let spin = false;
   let nod = false;
   let reveal: { name: string | null; wasMole: boolean } | null = null;
-  let over: "players" | "moles" | null = null; // "none" (abandoned) is no ending to act out
+  let over: "players" | "moles" | "points" | null = null; // "none" (abandoned) is no ending to act out
+  let winners = new Set<string>();
+  let lastPhase: string | undefined;
+  let lastPlay = "";
+  let playName: string | null = null;
+  let stealWho: string | null = null;
+  let stealTick = -1;
+  let outcome: { name: string; win: boolean; t0: number } | null = null;
+  let lastPoints = "";
+  const leans = new Map<string, { to: string; until: number }>();
+  const floaters: { el: HTMLElement; name: string; t0: number }[] = [];
+  const CHIP_CSS = "position:absolute;left:0;top:0;min-width:1.15rem;padding:0 0.35rem;border-radius:999px;background:var(--lamp,#f4b860);color:var(--ink,#1b1420);font:700 0.7rem/1.3 var(--ui,sans-serif);text-align:center;will-change:transform;visibility:hidden;box-shadow:0 1px 4px rgba(0,0,0,.5)";
+  const FLOAT_CSS = "position:absolute;left:0;top:0;font:400 1.1rem/1 var(--sign,Impact,sans-serif);color:var(--lamp,#f4b860);text-shadow:0 1px 0 #1b1420,0 0 6px #1b1420;will-change:transform,opacity;visibility:hidden";
+  const playSound = (fn: () => void) => {
+    if (paused) return;
+    try { sfx.setEnabled(localStorage.getItem("mole:radio") !== "off"); } catch { /* no storage: on */ }
+    fn();
+  };
   const rng = (a: number, b: number) => a + Math.random() * (b - a);
 
   // Everyone's seat is recomputed from the member list: aid users take the ends
@@ -314,9 +360,13 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
     const label = document.createElement("span");
     label.className = "scene-label";
     labels.append(label);
+    const chip = document.createElement("span");
+    chip.style.cssText = CHIP_CSS;
+    chip.hidden = true;
+    labels.append(chip);
     const p: Person = {
       name, key: JSON.stringify(look), look, seat, x: 0, y: 0, z: 0, yaw: 0, chair: look.aid === "wheelchair" || look.aid === "power-chair", ch: null, rig: new Entity(`seat-${seat}`), stool: null, aid: null,
-      born: now, ghost, clip: "", nextFlourish: now + rng(2, 6), flourishUntil: 0, label, lw: 60, lh: 20, gone: false,
+      born: now, ghost, clip: "", nextFlourish: now + rng(2, 6), flourishUntil: 0, label, chip, chipN: 0, lit: false, lx: 0, ly: 0, rx: 0, rz: 0, dy: 0, crown: null, lw: 60, lh: 20, gone: false,
     };
     root.addChild(p.rig);
     people.set(name, p);
@@ -332,6 +382,8 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
     p.ch?.destroy();
     p.rig.destroy();
     p.label.remove();
+    p.chip.remove();
+    leans.delete(p.name);
     people.delete(p.name);
   }
 
@@ -375,11 +427,58 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
     const phase = g?.phase;
     spin = next.status === "playing" && !g?.winner && (phase === "listen" || phase === "vote") && g?.nowPlaying != null;
     nod = spin && phase === "listen";
-    const prevReveal = reveal;
     reveal = g?.reveal && phase === "reveal" ? { name: g.reveal.ejected, wasMole: g.reveal.wasMole } : null;
-    void prevReveal;
     stamp.hidden = true;
-    over = g?.winner === "none" ? null : (g?.winner ?? null);
+    over = g?.winner === "players" || g?.winner === "moles" || g?.winner === "points" ? g.winner : null;
+    winners = new Set(over === "points" ? (g?.winners ?? []) : []);
+    // moments, from public fields only
+    const live2 = next.status === "playing" || !!g?.winner;
+    const ph = live2 ? phase : undefined;
+    if (ph === "steal" && lastPhase !== "steal") {
+      stealWho = g?.accused ?? null;
+      stealTick = -1;
+      if (lastPhase !== undefined) playSound(() => sfx.stealSting());
+    } else if (lastPhase === "steal" && ph !== "steal" && g?.reveal && stealWho) {
+      outcome = { name: stealWho, win: !!g.reveal.stole, t0: now };
+      playSound(() => (g.reveal!.stole ? sfx.stealWin() : sfx.stealMiss()));
+      stealWho = null;
+    }
+    lastPhase = ph;
+    const card = ph === "listen" && !g?.winner && g?.nowPlaying != null ? g.cards?.find((c) => c.order === g.nowPlaying) : undefined;
+    playName = card?.picker ?? null;
+    const pk = card ? `${g!.round}:${card.order}` : "";
+    if (pk && pk !== lastPlay && card?.lender) {
+      // a borrowed card starts: the two lean toward each other for a moment
+      leans.set(card.picker, { to: card.lender, until: now + 2.6 });
+      leans.set(card.lender, { to: card.picker, until: now + 2.2 });
+    }
+    lastPlay = pk;
+    // vote chips: the public tally only, counts, popping when one changes
+    const tally = new Map<string, number>();
+    if (ph === "vote" && !g?.winner) for (const t of g?.tally ?? []) tally.set(t.name, t.votes);
+    for (const p of people.values()) {
+      const n = tally.get(p.name) ?? 0;
+      if (n !== p.chipN) {
+        p.chip.textContent = String(n);
+        p.chip.hidden = n === 0;
+        if (n > 0) p.chip.animate([{ scale: "0.4" }, { scale: "1.35" }, { scale: "1" }], { duration: 320, easing: "ease-out" });
+        p.chipN = n;
+      }
+    }
+    // Four rounds: +N over heads once, from the reveal's points
+    const pts = ph === "reveal" ? (g?.reveal?.points ?? []).filter((r) => r.points > 0) : [];
+    const ptsKey = pts.length && g ? `${g.round}:${pts.map((r) => r.name + r.points).join(",")}` : "";
+    if (ptsKey !== lastPoints) {
+      lastPoints = ptsKey;
+      for (const f of floaters.splice(0)) f.el.remove();
+      for (const r of pts) {
+        const el = document.createElement("span");
+        el.style.cssText = FLOAT_CSS;
+        el.textContent = `+${r.points}`;
+        labels.append(el);
+        floaters.push({ el, name: r.name, t0: now });
+      }
+    }
     for (const p of people.values()) {
       const tag = p.label;
       tag.replaceChildren(document.createTextNode(p.name));
@@ -398,6 +497,8 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
     if (!g) return "idle";
     // the ejected person's fate is public once the reveal is
     if (reveal?.name === p.name && g.phase === "reveal") return reveal.wasMole ? "die" : "emote-no";
+    if (outcome && outcome.name === p.name && now - outcome.t0 < 3.6) return outcome.win ? "emote-yes" : "idle";
+    if (over === "points") return winners.has(p.name) ? "emote-yes" : "idle";
     if (over) {
       if (p.ghost && reveal?.name !== p.name) return "idle";
       return over === "players" ? "emote-yes" : "emote-no";
@@ -418,6 +519,11 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
   let focus: Person | null = null;
   let amb = 1;
   let push = 0;
+  let stealing = false;
+  let outcomeOn = false;
+  let lampI = 0;
+  const lampAt = new Vec3();
+  const lampPos = new Vec3();
   const camPos = new Vec3();
   const camAt = new Vec3();
   const q = new Quat();
@@ -444,9 +550,12 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
       }
       // at the reveal everyone else turns to look at the ejected person
       let want = p.yaw;
-      if (focus && focus !== p) {
-        const dx = focus.x - p.x;
-        const dz = focus.z - p.z;
+      const ln = leans.get(p.name);
+      const leanP = ln && now < ln.until ? (people.get(ln.to) ?? null) : null;
+      const look = focus && focus !== p ? focus : leanP;
+      if (look) {
+        const dx = look.x - p.x;
+        const dz = look.z - p.z;
         const to = (Math.atan2(dx, dz) * 180) / Math.PI;
         const d = ((((to - p.yaw) % 360) + 540) % 360) - 180;
         want = p.yaw + Math.max(-70, Math.min(70, d)) * 0.8;
@@ -454,6 +563,44 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
       turn.set(p, (turn.get(p) ?? p.yaw) + (((((want - (turn.get(p) ?? p.yaw)) % 360) + 540) % 360) - 180) * (1 - Math.exp(-dt * 5)));
       p.rig.setLocalEulerAngles(0, turn.get(p)!, 0);
       if (!ch) continue;
+      // body language: a lean, a fidget, a hop for a right steal, a slump for a miss
+      const nervous = stealing && focus === p && !outcomeOn;
+      let rx = 0;
+      let rz = 0;
+      let dy = 0;
+      if (leanP) rx = 8;
+      if (nervous && focus === p) {
+        rz = Math.sin(now * 11) * 2.4;
+        rx = 3 + Math.sin(now * 17) * 1.6;
+      }
+      if (outcome && outcome.name === p.name && outcomeOn) {
+        const age = now - outcome.t0;
+        if (outcome.win) dy = Math.abs(Math.sin(age * 7)) * 0.32 * Math.max(0, 1 - age / 1.7);
+        else rx = 24 * Math.min(1, age * 3) * (age > 3 ? Math.max(0, 1 - (age - 3) / 0.6) : 1);
+      }
+      const kk = 1 - Math.exp(-dt * 10);
+      p.rx += (rx - p.rx) * kk;
+      p.rz += (rz - p.rz) * kk;
+      p.dy += (dy - p.dy) * kk;
+      ch.root.setLocalEulerAngles(p.rx, 0, p.rz);
+      ch.root.setLocalPosition(0, (ch.wheelchair ? 0.2 : 0.26) + p.dy, ch.wheelchair ? 0.02 : -0.04);
+      // a crown for each winner at the end of a Four rounds game
+      const crowned = winners.has(p.name);
+      if (crowned && !p.crown) {
+        const c = new Entity("crown");
+        c.setLocalPosition(0, 0.6, -0.04);
+        kit.prim("cylinder", crownMat, [0, 0, 0], [0.34, 0.1, 0.34], [0, 0, 0], c);
+        for (let i = 0; i < 5; i++) {
+          const a = (i / 5) * Math.PI * 2;
+          kit.prim("cone", crownMat, [Math.sin(a) * 0.14, 0.1, Math.cos(a) * 0.14], [0.09, 0.14, 0.09], [0, 0, 0], c);
+        }
+        ch.head.addChild(c);
+        p.crown = c;
+      } else if (!crowned && p.crown) {
+        p.crown.destroy();
+        p.crown = null;
+      }
+      if (p.crown) p.crown.setLocalEulerAngles(0, now * 90, 0);
       let clip = clipFor(p);
       const mood = MOOD[(p.look.mood as Mood) in MOOD ? (p.look.mood as Mood) : "chill"];
       if (clip === "idle" && mood.flourish && !nod) {
@@ -463,7 +610,7 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
         }
         if (now < p.flourishUntil) clip = mood.flourish;
       }
-      const speed = clip === "idle" ? mood.idle : 1;
+      const speed = nervous ? 1.9 : clip === "idle" ? mood.idle : 1;
       if (clip !== p.clip) {
         p.clip = clip;
         ch.play(clip);
@@ -477,14 +624,40 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
       }
     }
     // the reveal: dim the room, spotlight and push in toward the ejected person
-    focus = reveal?.name ? (people.get(reveal.name) ?? null) : null;
+    const g2 = state?.game;
+    stealing = !!g2 && g2.phase === "steal" && !g2.winner && !!g2.accused;
+    outcomeOn = !!outcome && now - outcome.t0 < 3.6;
+    const focusName = stealing ? g2!.accused! : (reveal?.name ?? (outcomeOn ? outcome!.name : null));
+    focus = focusName ? (people.get(focusName) ?? null) : null;
+    // the steal's clock: a light pulse on each second, and a tick
+    let pulse = 0;
+    if (stealing && g2!.deadline != null) {
+      const rem = g2!.deadline - Date.now();
+      if (rem > 0) {
+        pulse = Math.pow((((rem % 1000) + 1000) % 1000) / 1000, 4);
+        const sec = Math.ceil(rem / 1000);
+        if (sec !== stealTick) {
+          if (stealTick !== -1) playSound(() => sfx.tick());
+          stealTick = sec;
+        }
+      }
+    }
+    // the lamp on whoever's card is playing (a winner at the end of Four rounds)
+    const lampOn = playName ? people.get(playName) : winners.size === 1 ? people.get([...winners][0]) : undefined;
+    if (lampOn) lampAt.set(lampOn.x, 0, lampOn.z);
+    lampI += ((lampOn ? 4.2 : 0) - lampI) * (1 - Math.exp(-dt * 4));
+    lampPos.x += (lampAt.x - lampPos.x) * (1 - Math.exp(-dt * 5));
+    lampPos.z += (lampAt.z - lampPos.z) * (1 - Math.exp(-dt * 5));
+    lamp.light!.intensity = lampI;
+    lamp.setLocalPosition(lampPos.x, 3.8, lampPos.z + 0.8);
+    lamp.lookAt(new Vec3(lampPos.x, 0.6, lampPos.z));
     const on = focus ? 1 : 0;
     push += (on - push) * (1 - Math.exp(-dt * (calm ? 30 : 2.6)));
-    amb += ((focus ? 0.38 : 1) - amb) * (1 - Math.exp(-dt * 3));
+    amb += ((focus ? (stealing ? 0.26 : 0.38) : lampOn ? 0.75 : 1) - amb) * (1 - Math.exp(-dt * 3));
     app.scene.ambientLight = new Color().fromString(pal.ambient).mulScalar(amb);
     key.light!.intensity = 1.15 * (0.35 + 0.65 * amb);
-    kick.light!.intensity = 1.6 * amb;
-    spot.light!.intensity = push * 5;
+    kick.light!.intensity = 1.6 * amb + pulse * 1.2;
+    spot.light!.intensity = push * (5 + pulse * 4);
     camPos.copy(HOME_POS);
     camAt.copy(HOME_AT);
     if (focus && push > 0.001) {
@@ -545,9 +718,43 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
       placed.push({ l, t, w, h });
       b.p.label.style.visibility = "visible";
       b.p.label.style.transform = `translate(${l.toFixed(1)}px, ${t.toFixed(1)}px)`;
+      b.p.lx = l + w / 2;
+      b.p.ly = t;
+    }
+    for (const p of people.values()) {
+      const lit = playName === p.name;
+      if (lit !== p.lit) {
+        p.lit = lit;
+        p.label.style.background = lit ? "var(--lamp)" : "";
+        p.label.style.color = lit ? "var(--ink)" : "";
+      }
+      const shown = p.label.style.visibility === "visible";
+      if (p.chipN > 0 && shown) {
+        const cw = p.chip.offsetWidth || 20;
+        p.chip.style.visibility = "visible";
+        p.chip.style.transform = `translate(${Math.max(2, Math.min(W - cw - 2, p.lx - cw / 2)).toFixed(1)}px, ${Math.max(2, p.ly - 18).toFixed(1)}px)`;
+      } else p.chip.style.visibility = "hidden";
+    }
+    for (let i = floaters.length - 1; i >= 0; i--) {
+      const f = floaters[i];
+      const age = now - f.t0;
+      const p = people.get(f.name);
+      if (age > 3.2 || !p || !p.ch) {
+        if (age > 3.2) {
+          f.el.remove();
+          floaters.splice(i, 1);
+        } else f.el.style.visibility = "hidden";
+        continue;
+      }
+      const hp = p.ch.head.getPosition();
+      const sp = cam.camera!.worldToScreen(new Vec3(hp.x, hp.y + 0.35, hp.z));
+      const fw = f.el.offsetWidth || 30;
+      f.el.style.visibility = "visible";
+      f.el.style.opacity = String(Math.max(0, Math.min(1, (3.2 - age) / 1)));
+      f.el.style.transform = `translate(${Math.max(2, Math.min(W - fw - 2, sp.x - fw / 2)).toFixed(1)}px, ${(sp.y - 14 - age * 16).toFixed(1)}px)`;
     }
     // the stamp over the ejected person: public reveal data only
-    if (focus && reveal && push > 0.35) {
+    if (focus && reveal && reveal.name === focus.name && push > 0.35) {
       const fh = focus.ch?.head.getPosition();
       if (fh) {
         const sp = cam.camera!.worldToScreen(new Vec3(fh.x, fh.y + 0.1, fh.z));
@@ -589,7 +796,6 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
   app.start();
   void last;
 
-  let paused = false;
   return {
     update,
     setPaused(v: boolean) {
@@ -605,6 +811,10 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
     },
     destroy() {
       ro.disconnect();
+      removeEventListener("pointerdown", unlock, true);
+      removeEventListener("keydown", unlock, true);
+      sfx.destroy();
+      for (const f of floaters.splice(0)) f.el.remove();
       cancelFrame(engine);
       for (const p of [...people.values()]) leave(p);
       engine.destroy();
