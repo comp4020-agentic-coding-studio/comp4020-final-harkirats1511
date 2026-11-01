@@ -56,7 +56,24 @@ for the later 3D shop). One theme, dark by design, native CSS, no framework.
 - **Vote rows**: each player still in, with their song and a big live count;
   your choice carries a YOUR VOTE tab. Skip is a row like the others.
 - **Steal**: a plum panel with the MOLE stamp and a huge countdown; only the
-  accused mole gets the four prompt buttons.
+  accused mole gets the eight prompt buttons. On a phone the accused's panel
+  is compact (heading and clock on one row) so all eight fit one 390x844
+  screen, with the score strip above it and nothing docked between.
+- **Mood strip**: four blocks of three dots (Up, Down, Out, In) on each crate
+  and on the table, the round's mood lit in lamp, the rest muted. Each block
+  has its word under it (mono caps, 11px) and the strip's words are in
+  screen-reader text.
+- **Moment strip**: on a phone the 3D scene docks as a 220px strip for a
+  bystander's steal and for the reveal (after the verdict lines, so the words
+  come first), then goes home below the action. The accused mole's steal and
+  game over never dock it. Every moment it shows is also in words.
+- **Sleeves**: in listen each card is a white-label cream sleeve with a big
+  number, a name sticker (and a second for a borrow), a CLASH stamp and a
+  PLAYING stamp, with the art small in a corner.
+- **YOURS tab**: your own card in listen and vote carries a lamp-on-ink tab, so
+  you find it among the sleeves; it shows only once picks are public.
+- **Vote chips**: lamp pills over heads in the 3D scene, counts only, from the
+  public tally; the vote rows carry the same counts in words.
 - **Liner notes**: reveal and game over are a paper back cover: tracklist with
   pickers, the prompt in handwriting, votes by name, a MOLE stamp when the
   ejected person was a mole, and at game end every mole and every round. Past
@@ -89,5 +106,5 @@ sits on the platter with the arm down.
 
 Phone first (390px), 16px gutters, no horizontal scroll. Home becomes sign on the
 left and forms on the right from 52rem; the table page is two columns from
-1024px with the 3D scene (a decoration) at the top of the game column.
+1100px with the 3D scene (a decoration) at the top of the game column.
 Tap targets are at least 44px; focus is a 3px lamp ring (ink on paper).
