@@ -67,11 +67,15 @@ it("the Deezer bucket serves card audio first, makes low priorities wait or give
   const t0 = Date.now();
   expect(await b.take("card", 2000)).toBe(true);
   expect(Date.now() - t0).toBeLessThan(500);
-  // A low priority with no patience gives up rather than queue.
-  expect(await b.take("background", 50)).toBe(false);
   await Promise.all(waiting);
   // In any window of 400 ms it never let more than 10 through.
   expect(b.inWindow()).toBeLessThanOrEqual(10);
+  // A low priority with no patience gives up rather than queue. Checked on a bucket that is
+  // full right now: under load the 400 ms window above may already have moved on, and then a
+  // slot really is free.
+  const full = new Bucket({ limit: 10, windowMs: 60_000, reserve: { card: 0, normal: 2, suggest: 4, background: 7 } });
+  while (full.tryTake("card")) { /* fill */ }
+  expect(await full.take("background", 50)).toBe(false);
 });
 
 async function signedIn() {
