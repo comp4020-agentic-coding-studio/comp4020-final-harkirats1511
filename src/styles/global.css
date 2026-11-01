@@ -959,3 +959,4 @@ ol.plays:not(.reveal) .pcard.sl.playing { background: var(--sleeve); box-shadow:
 .pcard .yours-tab { display: none; position: absolute; top: -0.6rem; left: 0.8rem; font: 600 0.625rem/1 var(--cat); letter-spacing: 0.08em; text-transform: uppercase; padding: 0.25rem 0.45rem; border-radius: 3px; background: var(--ink); color: var(--lamp); box-shadow: 0 0 0 1.5px var(--lamp); }
 .pcard.playing .yours-tab { display: block; }
 .pcard.sl .stage-note { color: var(--ink-2); }
+.liner h3, .liner .pts-h { color: var(--ink-2); }

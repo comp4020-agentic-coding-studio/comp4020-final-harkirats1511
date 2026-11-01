@@ -157,3 +157,27 @@ it("loads a table page signed in, and the 404 of a table that is not there, with
   expect(errors).toEqual([]);
   await ctx.close();
 });
+
+// Contract (graphics review): at 1280 the table page is two columns with the scene beside the action, and the
+// crates start collapsed, one row each; at 390 the action comes first.
+it("lays the table page out in two columns at 1280 and in one at 390, with the crates collapsed", async () => {
+  const name = uniqueName("lay");
+  const { ctx, page } = await pageFor(undefined, name);
+  const made = await ctx.request.post(new URL("/api/tables", baseUrl).href, { data: {} });
+  const { code } = (await made.json()) as { code: string };
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await go(page, `/t/${code}`);
+  const game = await page.locator(".game-col").boundingBox();
+  const side = await page.locator("#side-col").boundingBox();
+  expect(side!.x, "side column sits right of the game column").toBeGreaterThan(game!.x + game!.width - 1);
+  expect(game!.width).toBeLessThanOrEqual(641);
+  expect(await page.locator("#side-col").evaluate((e) => getComputedStyle(e).position)).toBe("sticky");
+  expect(await page.locator("details.cplayer[open]").count()).toBe(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(300);
+  const g2 = await page.locator(".game-col").boundingBox();
+  const s2 = await page.locator("#side-col").boundingBox();
+  expect(s2!.y, "one column at 390").toBeGreaterThan(g2!.y);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await ctx.close();
+});

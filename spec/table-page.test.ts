@@ -85,3 +85,32 @@ it("says the Four rounds rules in How to play and has the 'still to cast' line",
   expect(text).not.toMatch(/id="vote-mole-panel"[^>]*aria-labelledby/);
   expect(text).not.toMatch(/id="vote-best-panel"[^>]*aria-labelledby/);
 });
+
+// Contract (graphics review): the page shell holds the two-column pieces (the scene and the crates live in the
+// right column, which is sticky from 1100px), the dock the scene moves to for the phone moment strip, and the
+// copy that explains the crate mood strips.
+it("puts the scene and the crates in the side column, with a dock for the phone strip", async () => {
+  const host = await signedIn("tblcol");
+  const { code } = (await (await host.s.call("/api/tables", { body: {} })).json()) as { code: string };
+  const text = await html(host.s, `/t/${code}`);
+  const side = text.slice(text.indexOf('id="side-col"'));
+  expect(side).toContain('id="scene-slot"');
+  expect(side).toContain('id="crates"');
+  expect(text.indexOf('id="strip-dock"')).toBeLessThan(text.indexOf('id="side-col"'));
+  expect(text).toContain("four blocks of three dots");
+});
+
+// Contract: the mole's mood line is handwriting, vote counts pop under a transform-only keyframe that reduced motion
+// switches off, and the reveal's reasons read as sentences ("+2 from 2 best-pick votes").
+it("styles the pop, the strip and the mole line as the design asks", async () => {
+  const css = await (await fetch(new URL("/", baseUrl))).text();
+  const href = css.match(/href="([^"]+\.css)"/)?.[1];
+  expect(href).toBeTruthy();
+  const sheet = await (await fetch(new URL(href!, baseUrl))).text();
+  expect(sheet).toMatch(/\.mole-line\{[^}]*var\(--hand\)/);
+  const pop = sheet.match(/@keyframes count-pop\{[^]*?\}\}/)?.[0] ?? "";
+  expect(pop).toContain("transform");
+  expect(pop).not.toMatch(/left|top|width|height|margin/);
+  expect(sheet).toMatch(/prefers-reduced-motion:reduce\)\{\.count\.pop/);
+  expect(sheet).toMatch(/\.strip-dock:empty\{display:none\}/);
+});
