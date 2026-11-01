@@ -222,6 +222,8 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
             <ul class="ghosts" id="ghost-list"></ul>
           </div>
           <p id="eject" class="eject"></p>
+          <!-- Phone moment strip for the reveal: after the headline lines, so the words come first. -->
+          <div id="reveal-dock" class="strip-dock"></div>
           <div id="four-points" class="four-points" hidden>
             <h3>Points this round</h3>
             <ul class="pts" id="pts-list"></ul>
@@ -586,11 +588,14 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     if (document.activeElement?.closest("#leave-confirm, #remove-confirm")) return;
     el.focus({ preventScroll: true });
     // The host taps "vote" at the foot of the replay; bring the new phase into view. When the scene has
-    // moved up as a strip (steal, reveal on a phone), the strip is what comes into view, the action just under it.
+    // moved up as a strip for a bystander's steal, the strip is what comes into view; otherwise the new phase's
+    // own heading is (for the accused mole, the steal heading with the options under it).
     const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
     const target = $("scene-slot").parentElement === $("strip-dock") ? $("strip-dock") : el;
     const top = target.getBoundingClientRect().top;
-    if (top < 0 || top > innerHeight - 120) target.scrollIntoView({ block: "start", behavior });
+    // The accused mole is on a 15 s clock: their steal panel goes to the top, so all 8 options are on screen.
+    const guessing = !!me?.steal && target === el;
+    if (top < 0 || top > innerHeight - 120 || (guessing && top > 16)) target.scrollIntoView({ block: "start", behavior });
   }
 
   // A name's badge from the members list; someone who left gets a default.
@@ -769,7 +774,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     once("strip", JSON.stringify([g.scores, done]), () => {
       const rows = [...(g.scores ?? [])].sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
       $("scores-list").replaceChildren(
-        ...rows.map((r) => h("li", { class: r.name === myName ? "me" : "" }, h("span", { class: "nm" }, r.name === myName ? `${r.name} (you)` : r.name), h("b", { class: "mono" + popped(`s:${r.name}`, r.score), "aria-label": `${r.score} points` }, String(r.score)))),
+        ...rows.map((r) => h("li", { class: r.name === myName ? "me" : "" }, h("span", { class: "nm" }, r.name === myName ? `${r.name} (you)` : r.name), h("b", { class: "mono" + popped(`s:${r.name}`, r.score) }, String(r.score), h("span", { class: "sr-only" }, ` point${r.score === 1 ? "" : "s"}`)))),
       );
     });
   }
@@ -1233,8 +1238,11 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
 
   // ---- steal ----
 
+  // Whoever arrives at (or reloads into) their own steal gets the panel scrolled up once, so all 8 options show.
+  let stealScrolled = false;
   function renderSteal(on: boolean) {
     show("steal", on);
+    if (!on) stealScrolled = false;
     if (!on) {
       // The steal is over: no decoy prompts stay in the page.
       if (sigs.has("steal")) { sigs.delete("steal"); $("steal-options").replaceChildren(); }
@@ -1249,6 +1257,10 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
       : `${accused} was the mole. They have 15 s to guess the prompt from 8 and steal the game.`;
     const box = $("steal-options");
     show("steal-options", mineToGuess);
+    if (mineToGuess && !stealScrolled) {
+      stealScrolled = true;
+      requestAnimationFrame(() => { if ($("steal").getBoundingClientRect().top > 16) $("steal").scrollIntoView({ block: "start", behavior: "auto" }); });
+    }
     show("steal-wait", !mineToGuess);
     $("steal-wait").textContent = `Waiting on ${accused}. Nothing for you to do but hold your breath.`;
     once("steal", JSON.stringify([me?.steal?.options ?? null, stealGuessed, stealChoice]), () => {
@@ -1791,18 +1803,24 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
   let sceneDead = false;
   let sceneStarted = false;
   let sceneVisible = true;
+  let sceneLost = false;
   const slot = $("scene-slot");
   const stage = $("scene-stage");
   const toggle = $<HTMLButtonElement>("scene-toggle");
 
   // The phone moment strip: on a narrow screen the scene sits below the action, except for the steal and the
-  // reveal, when it moves up under the header as a short strip, and goes home after. Not with 3D off or dead.
+  // reveal, when it moves up as a short strip, and goes home after. Not with 3D off or dead. The strip never
+  // comes between a person and their action: the accused mole's 8 steal options come first, so for them it
+  // stays home. In the reveal it sits after the headline lines (the verdict), not above them. At game over it
+  // is undocked: the winner and the final scores are the content then, and the scene is just decoration below.
   function placeScene() {
     const g = state?.game;
-    const moment = state?.status === "playing" || !!g?.winner ? g?.phase === "steal" || g?.phase === "reveal" : false;
-    const live = sceneStarted && !sceneDead && sceneWanted && !slot.hidden;
+    const playing = state?.status === "playing" || !!g?.winner;
+    const guessing = !!me?.steal;
+    const moment = playing && ((g?.phase === "steal" && !guessing) || (g?.phase === "reveal" && !g?.winner));
+    const live = sceneStarted && !sceneDead && sceneWanted && !sceneLost && !slot.hidden;
     const strip = narrow() && moment && live;
-    const dock = $("strip-dock");
+    const dock = $(g?.phase === "reveal" ? "reveal-dock" : "strip-dock");
     const home = $("side-col");
     if (strip) {
       if (slot.parentElement !== dock) dock.append(slot);
@@ -1849,7 +1867,12 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     stage.classList.remove("ready");
     try {
       const { startTableScene } = await import("../../scene/table-scene.ts");
-      const s = await startTableScene(stage, () => stage.classList.add("ready"));
+      const s = await startTableScene(stage, () => stage.classList.add("ready"), (lost) => {
+        // A lost WebGL context: no empty box with floating labels. The 2D page stays as it is; back if the browser restores it.
+        sceneLost = lost;
+        slot.hidden = lost;
+        placeScene();
+      });
       if (!sceneWanted || sceneDead) { s.destroy(); sceneLoading = false; return; }
       scene = s;
       sceneLoading = false;
