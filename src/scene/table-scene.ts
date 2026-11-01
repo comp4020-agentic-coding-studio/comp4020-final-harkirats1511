@@ -119,10 +119,13 @@ type Person = {
   crown: Entity | null;
   lw: number;
   lh: number;
+  tagKey: string;
+  measure: boolean;
+  cw: number;
   gone: boolean;
 };
 
-export async function startTableScene(slot: HTMLElement, onFirstFrame: () => void): Promise<TableScene> {
+export async function startTableScene(slot: HTMLElement, onFirstFrame: () => void, onContext?: (lost: boolean) => void): Promise<TableScene> {
   const canvas = document.createElement("canvas");
   canvas.className = "scene-canvas";
   canvas.setAttribute("aria-hidden", "true");
@@ -146,6 +149,27 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
 
   const engine = await createEngine(canvas);
   const { app } = engine;
+  // A lost WebGL context leaves an empty canvas: hide the scene, its labels and floaters, and let the 2D page
+  // stand alone. If the browser gives the context back, show it again.
+  let lost = false;
+  const onLost = (e: Event) => {
+    e.preventDefault();
+    lost = true;
+    slot.classList.add("ctx-lost");
+    cancelFrame(engine);
+    onContext?.(true);
+  };
+  const onRestored = () => {
+    lost = false;
+    slot.classList.remove("ctx-lost");
+    if (!paused) {
+      app.autoRender = true;
+      app.requestAnimationFrame();
+    }
+    onContext?.(false);
+  };
+  canvas.addEventListener("webglcontextlost", onLost);
+  canvas.addEventListener("webglcontextrestored", onRestored);
   const kit = new Kit(engine);
   app.autoRender = true;
   const root = app.root;
@@ -242,6 +266,8 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
   root.addChild(lamp);
   const crownMat = kit.flat("#f4b860", { emissive: 0.5 });
 
+  const ambBase = new Color().fromString(pal.ambient);
+  const ambNow = new Color();
   const applyTheme = () => {
     setCol(mats.floor, pal.floor);
     setCol(mats.wall, pal.wall);
@@ -270,11 +296,12 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
   let outcome: { name: string; win: boolean; t0: number } | null = null;
   let lastPoints = "";
   const leans = new Map<string, { to: string; until: number }>();
-  const floaters: { el: HTMLElement; name: string; t0: number }[] = [];
+  const floaters: { el: HTMLElement; name: string; t0: number; w: number }[] = [];
   const CHIP_CSS = "position:absolute;left:0;top:0;min-width:1.15rem;padding:0 0.35rem;border-radius:999px;background:var(--lamp,#f4b860);color:var(--ink,#1b1420);font:700 0.7rem/1.3 var(--ui,sans-serif);text-align:center;will-change:transform;visibility:hidden;box-shadow:0 1px 4px rgba(0,0,0,.5)";
   const FLOAT_CSS = "position:absolute;left:0;top:0;font:400 1.1rem/1 var(--sign,Impact,sans-serif);color:var(--lamp,#f4b860);text-shadow:0 1px 0 #1b1420,0 0 6px #1b1420;will-change:transform,opacity;visibility:hidden";
   const playSound = (fn: () => void) => {
-    if (paused) return;
+    // A phone's scene sits off screen (paused) for the steal, and a sound needs no rendering: only a hidden tab stays silent.
+    if (document.hidden) return;
     try { sfx.setEnabled(localStorage.getItem("mole:radio") !== "off"); } catch { /* no storage: on */ }
     fn();
   };
@@ -366,7 +393,7 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
     labels.append(chip);
     const p: Person = {
       name, key: JSON.stringify(look), look, seat, x: 0, y: 0, z: 0, yaw: 0, chair: look.aid === "wheelchair" || look.aid === "power-chair", ch: null, rig: new Entity(`seat-${seat}`), stool: null, aid: null,
-      born: now, ghost, clip: "", nextFlourish: now + rng(2, 6), flourishUntil: 0, label, chip, chipN: 0, lit: false, lx: 0, ly: 0, rx: 0, rz: 0, dy: 0, crown: null, lw: 60, lh: 20, gone: false,
+      born: now, ghost, clip: "", nextFlourish: now + rng(2, 6), flourishUntil: 0, label, chip, chipN: 0, lit: false, lx: 0, ly: 0, rx: 0, rz: 0, dy: 0, crown: null, lw: 60, lh: 20, tagKey: "", measure: true, cw: 0, gone: false,
     };
     root.addChild(p.rig);
     people.set(name, p);
@@ -423,12 +450,17 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
       fresh.delete(p);
     }
     const nShown = people.size;
-    labels.dataset.density = nShown > 8 ? "3" : nShown > 5 ? "2" : "1";
+    const density = nShown > 8 ? "3" : nShown > 5 ? "2" : "1";
+    if (labels.dataset.density !== density) {
+      labels.dataset.density = density;
+      for (const p of people.values()) p.measure = true;
+    }
     const phase = g?.phase;
     spin = next.status === "playing" && !g?.winner && (phase === "listen" || phase === "vote") && g?.nowPlaying != null;
     nod = spin && phase === "listen";
     reveal = g?.reveal && phase === "reveal" ? { name: g.reveal.ejected, wasMole: g.reveal.wasMole } : null;
     stamp.hidden = true;
+    stampText = "";
     over = g?.winner === "players" || g?.winner === "moles" || g?.winner === "points" ? g.winner : null;
     winners = new Set(over === "points" ? (g?.winners ?? []) : []);
     // moments, from public fields only
@@ -460,6 +492,7 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
       const n = tally.get(p.name) ?? 0;
       if (n !== p.chipN) {
         p.chip.textContent = String(n);
+        p.cw = 0;
         p.chip.hidden = n === 0;
         if (n > 0) p.chip.animate([{ scale: "0.4" }, { scale: "1.35" }, { scale: "1" }], { duration: 320, easing: "ease-out" });
         p.chipN = n;
@@ -476,16 +509,21 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
         el.style.cssText = FLOAT_CSS;
         el.textContent = `+${r.points}`;
         labels.append(el);
-        floaters.push({ el, name: r.name, t0: now });
+        floaters.push({ el, name: r.name, t0: now, w: 0 });
       }
     }
     for (const p of people.values()) {
       const tag = p.label;
-      tag.replaceChildren(document.createTextNode(p.name));
-      if (p.name === next.host) {
-        const h = document.createElement("b");
-        h.textContent = "HOST";
-        tag.append(h);
+      const tk = p.name + (p.name === next.host ? "\u0000host" : "");
+      if (tk !== p.tagKey) {
+        p.tagKey = tk;
+        p.measure = true;
+        tag.replaceChildren(document.createTextNode(p.name));
+        if (p.name === next.host) {
+          const h = document.createElement("b");
+          h.textContent = "HOST";
+          tag.append(h);
+        }
       }
       tag.classList.toggle("ghost", p.ghost);
     }
@@ -526,6 +564,16 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
   const lampPos = new Vec3();
   const camPos = new Vec3();
   const camAt = new Vec3();
+  const lampLook = new Vec3();
+  const fpV = new Vec3();
+  const dirV = new Vec3();
+  const goalV = new Vec3();
+  const spotAt = new Vec3();
+  const scr = new Vec3();
+  const probe = new Vec3();
+  let stampText = "";
+  let stampW = 0;
+  let stampH = 0;
   const q = new Quat();
   const headQ = new Quat();
   let last = 0;
@@ -650,30 +698,44 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
     lampPos.z += (lampAt.z - lampPos.z) * (1 - Math.exp(-dt * 5));
     lamp.light!.intensity = lampI;
     lamp.setLocalPosition(lampPos.x, 3.8, lampPos.z + 0.8);
-    lamp.lookAt(new Vec3(lampPos.x, 0.6, lampPos.z));
+    lamp.lookAt(lampLook.set(lampPos.x, 0.6, lampPos.z));
     const on = focus ? 1 : 0;
     push += (on - push) * (1 - Math.exp(-dt * (calm ? 30 : 2.6)));
     amb += ((focus ? (stealing ? 0.26 : 0.38) : lampOn ? 0.55 : 1) - amb) * (1 - Math.exp(-dt * 3));
-    app.scene.ambientLight = new Color().fromString(pal.ambient).mulScalar(amb);
+    ambNow.copy(ambBase).mulScalar(amb);
+    app.scene.ambientLight = ambNow;
     key.light!.intensity = 1.15 * (0.35 + 0.65 * amb);
     kick.light!.intensity = 1.6 * amb + pulse * 1.2;
     spot.light!.intensity = push * (5 + pulse * 4);
     camPos.copy(HOME_POS);
     camAt.copy(HOME_AT);
     if (focus && push > 0.001) {
-      const fp = new Vec3(focus.x, focus.y + 0.6, focus.z);
-      const dir = new Vec3(HOME_POS.x - fp.x, 0, HOME_POS.z - fp.z).normalize();
-      const goal = new Vec3(fp.x + dir.x * 3.2, fp.y + 1.2, fp.z + dir.z * 3.2);
+      const fp = fpV.set(focus.x, focus.y + 0.6, focus.z);
+      const dir = dirV.set(HOME_POS.x - fp.x, 0, HOME_POS.z - fp.z).normalize();
+      const goal = goalV.set(fp.x + dir.x * 3.2, fp.y + 1.2, fp.z + dir.z * 3.2);
       camPos.lerp(HOME_POS, goal, push * 0.9);
       camAt.lerp(HOME_AT, fp, push);
       spot.setLocalPosition(fp.x, 4.2, fp.z + 0.8);
-      spot.lookAt(new Vec3(fp.x, 0.5, fp.z));
+      spot.lookAt(spotAt.set(fp.x, 0.5, fp.z));
     }
     cam.setLocalPosition(camPos);
     cam.lookAt(camAt);
 
     // labels follow the heads, are kept inside the stage and nudged apart
+    // Read every size first (only what changed: a new text, a new density, a resize), then write.
     const rect = canvas.getBoundingClientRect();
+    for (const p of people.values()) {
+      if (p.measure) {
+        const w = p.label.offsetWidth;
+        if (w > 0) {
+          p.lw = w;
+          p.lh = p.label.offsetHeight;
+          p.measure = false;
+        }
+      }
+      if (p.chipN > 0 && !p.cw) p.cw = p.chip.offsetWidth;
+    }
+    for (const f of floaters) if (!f.w) f.w = f.el.offsetWidth;
     last = rect.width;
     const W = rect.width;
     const H = rect.height;
@@ -685,24 +747,18 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
         continue;
       }
       const wp = ch.head.getPosition();
-      const sp = cam.camera!.worldToScreen(new Vec3(wp.x, wp.y + 0.5, wp.z));
+      const sp = cam.camera!.worldToScreen(probe.set(wp.x, wp.y + 0.5, wp.z), scr);
       if (sp.z <= 0) {
         p.label.style.visibility = "hidden";
         continue;
-      }
-      if (!p.lw) {
-        p.lw = p.label.offsetWidth;
-        p.lh = p.label.offsetHeight;
       }
       boxes.push({ p, x: sp.x, y: sp.y });
     }
     boxes.sort((a, b) => a.y - b.y);
     const placed: { l: number; t: number; w: number; h: number }[] = [];
     for (const b of boxes) {
-      const w = b.p.label.offsetWidth || b.p.lw;
-      const h = b.p.label.offsetHeight || b.p.lh;
-      b.p.lw = w;
-      b.p.lh = h;
+      const w = b.p.lw;
+      const h = b.p.lh;
       let l = Math.max(2, Math.min(W - w - 2, b.x - w / 2));
       let t = Math.max(2, Math.min(H - h - 2, b.y - h));
       for (let tries = 0; tries < 8; tries++) {
@@ -730,7 +786,7 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
       }
       const shown = p.label.style.visibility === "visible";
       if (p.chipN > 0 && shown) {
-        const cw = p.chip.offsetWidth || 20;
+        const cw = p.cw || 20;
         p.chip.style.visibility = "visible";
         p.chip.style.transform = `translate(${Math.max(2, Math.min(W - cw - 2, p.lx - cw / 2)).toFixed(1)}px, ${Math.max(2, p.ly - 18).toFixed(1)}px)`;
       } else p.chip.style.visibility = "hidden";
@@ -747,8 +803,8 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
         continue;
       }
       const hp = p.ch.head.getPosition();
-      const sp = cam.camera!.worldToScreen(new Vec3(hp.x, hp.y + 0.35, hp.z));
-      const fw = f.el.offsetWidth || 30;
+      const sp = cam.camera!.worldToScreen(probe.set(hp.x, hp.y + 0.35, hp.z), scr);
+      const fw = f.w || 30;
       f.el.style.visibility = "visible";
       f.el.style.opacity = String(Math.max(0, Math.min(1, (3.2 - age) / 1)));
       f.el.style.transform = `translate(${Math.max(2, Math.min(W - fw - 2, sp.x - fw / 2)).toFixed(1)}px, ${(sp.y - 14 - age * 16).toFixed(1)}px)`;
@@ -757,12 +813,20 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
     if (focus && reveal && reveal.name === focus.name && push > 0.35) {
       const fh = focus.ch?.head.getPosition();
       if (fh) {
-        const sp = cam.camera!.worldToScreen(new Vec3(fh.x, fh.y + 0.1, fh.z));
-        stamp.textContent = reveal.wasMole ? "MOLE" : "NOT THE MOLE";
-        stamp.classList.toggle("mole", reveal.wasMole);
+        const sp = cam.camera!.worldToScreen(probe.set(fh.x, fh.y + 0.1, fh.z), scr);
+        const text = reveal.wasMole ? "MOLE" : "NOT THE MOLE";
+        if (text !== stampText) {
+          // a new text is measured once, here; after that the stamp only moves
+          stampText = text;
+          stamp.textContent = text;
+          stamp.classList.toggle("mole", reveal.wasMole);
+          stamp.hidden = false;
+          stampW = stamp.offsetWidth;
+          stampH = stamp.offsetHeight;
+        }
         stamp.hidden = false;
-        const w = stamp.offsetWidth;
-        const h = stamp.offsetHeight;
+        const w = stampW;
+        const h = stampH;
         const l = Math.max(2, Math.min(W - w - 2, sp.x - w / 2));
         const t = Math.max(2, Math.min(H - h - 2, sp.y - h * 0.5));
         stamp.style.transform = `translate(${l.toFixed(1)}px, ${t.toFixed(1)}px) rotate(-6deg)`;
@@ -774,6 +838,7 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
 
   // Sizing: the canvas fills the slot; resolution follows its CSS size.
   const fit = () => {
+    for (const p of people.values()) p.measure = true;
     const r = slot.getBoundingClientRect();
     if (r.width > 0 && r.height > 0) {
       canvas.style.width = `${r.width}px`;
@@ -801,6 +866,7 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
     setPaused(v: boolean) {
       if (v === paused) return;
       paused = v;
+      if (lost) return;
       if (v) {
         engine.app.autoRender = false;
         cancelFrame(engine);
@@ -811,6 +877,8 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
     },
     destroy() {
       ro.disconnect();
+      canvas.removeEventListener("webglcontextlost", onLost);
+      canvas.removeEventListener("webglcontextrestored", onRestored);
       removeEventListener("pointerdown", unlock, true);
       removeEventListener("keydown", unlock, true);
       sfx.destroy();
