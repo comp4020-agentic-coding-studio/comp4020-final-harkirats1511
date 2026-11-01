@@ -645,7 +645,7 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
     // the lamp on whoever's card is playing (a winner at the end of Four rounds)
     const lampOn = playName ? people.get(playName) : winners.size === 1 ? people.get([...winners][0]) : undefined;
     if (lampOn) lampAt.set(lampOn.x, 0, lampOn.z);
-    lampI += ((lampOn ? 4.2 : 0) - lampI) * (1 - Math.exp(-dt * 4));
+    lampI += ((lampOn ? 8 : 0) - lampI) * (1 - Math.exp(-dt * 4));
     lampPos.x += (lampAt.x - lampPos.x) * (1 - Math.exp(-dt * 5));
     lampPos.z += (lampAt.z - lampPos.z) * (1 - Math.exp(-dt * 5));
     lamp.light!.intensity = lampI;
@@ -653,7 +653,7 @@ export async function startTableScene(slot: HTMLElement, onFirstFrame: () => voi
     lamp.lookAt(new Vec3(lampPos.x, 0.6, lampPos.z));
     const on = focus ? 1 : 0;
     push += (on - push) * (1 - Math.exp(-dt * (calm ? 30 : 2.6)));
-    amb += ((focus ? (stealing ? 0.26 : 0.38) : lampOn ? 0.75 : 1) - amb) * (1 - Math.exp(-dt * 3));
+    amb += ((focus ? (stealing ? 0.26 : 0.38) : lampOn ? 0.55 : 1) - amb) * (1 - Math.exp(-dt * 3));
     app.scene.ambientLight = new Color().fromString(pal.ambient).mulScalar(amb);
     key.light!.intensity = 1.15 * (0.35 + 0.65 * amb);
     kick.light!.intensity = 1.6 * amb + pulse * 1.2;
