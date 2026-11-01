@@ -184,6 +184,13 @@ did when something goes wrong, so it stays after any crit.
 - It shows only what the public table state already shows. It never knows a
   prompt, who the mole is, a pick before picking closes, or who has voted for
   whom, so it can't leak them.
+- It acts out the round from that public state: a light on whoever's card is
+  playing, a borrower leaning to the lender, vote counts over heads, the
+  accused under a light during the steal. Each moment also exists in the 2D
+  page in words, so nothing is only in the 3D. On a phone the action comes
+  first and the scene sits below it; the steal and the reveal bring a short
+  strip of it into view. The steal's sting is synthesised like every other
+  sound.
 - Models are the CC0 Kenney Mini Characters in `public/models/` (credited in
   `public/models/CREDITS.md`). New assets need a licence that allows it, recorded
   there.
