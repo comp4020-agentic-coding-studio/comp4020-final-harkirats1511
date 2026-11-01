@@ -613,7 +613,7 @@ input[type="radio"] { border-radius: 50%; }
 .crates .hint { margin-bottom: 0.75rem; }
 #crates-list { display: grid; gap: 0.6rem; }
 details.cplayer { border-radius: 10px; background: rgba(239, 231, 215, 0.06); }
-details.cplayer > summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "av head tog" "mo mo mo"; align-items: center; gap: 0.4rem 0.6rem; padding: 0.55rem 0.75rem 0.65rem; min-height: 52px; cursor: pointer; font-weight: 700; list-style: none; }
+details.cplayer > summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "av head tog" "mo mo mo"; align-items: center; gap: 0.3rem 0.6rem; padding: 0.4rem 0.75rem 0.5rem; min-height: 52px; cursor: pointer; font-weight: 700; list-style: none; }
 details.cplayer > summary::-webkit-details-marker { display: none; }
 details.cplayer > summary::after { grid-area: tog; content: "+"; font: 600 1.25rem/1 var(--cat); color: var(--lamp); }
 details.cplayer > summary > .avatar { grid-area: av; }
@@ -624,10 +624,10 @@ details.cplayer .avatar { --s: 2rem; }
 .cmeta { display: inline-flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .cleft { font: 600 0.75rem/1 var(--cat); color: var(--muted); }
 /* The mood strip: four blocks (Up, Down, Out, In) of three dots. Filled = not heard yet; hollow and struck = heard. */
-.moods { grid-area: mo; display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.4rem; }
-.mblock { display: grid; gap: 0.25rem; justify-items: center; padding: 0.3rem 0.2rem 0.25rem; border-radius: 6px; box-shadow: inset 0 0 0 1.5px var(--rule); }
-.mdots { display: inline-flex; gap: 0.3rem; }
-.dot { position: relative; display: block; width: 0.7rem; height: 0.7rem; border-radius: 50%; background: var(--lamp); box-shadow: inset 0 0 0 2px var(--lamp); }
+.moods { grid-area: mo; display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.3rem; }
+.mblock { display: flex; align-items: center; justify-content: center; gap: 0.3rem; padding: 0.3rem 0.2rem; border-radius: 6px; box-shadow: inset 0 0 0 1.5px var(--rule); }
+.mdots { display: inline-flex; gap: 0.2rem; order: 2; }
+.dot { position: relative; display: block; width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--lamp); box-shadow: inset 0 0 0 2px var(--lamp); }
 .dot.heard { background: transparent; box-shadow: inset 0 0 0 2px var(--muted); }
 .dot.heard::after { content: ""; position: absolute; left: -2px; right: -2px; top: calc(50% - 1px); height: 2px; background: var(--muted); transform: rotate(-35deg); }
 .mname { font-size: 0.625rem; line-height: 1; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
@@ -931,7 +931,7 @@ details.cplayer[open] { background: rgba(239, 231, 215, 0.04); }
 
 /* White-label sleeves in listen: cream, a big number, a name sticker (and a second for a borrow), small art in a corner. */
 ol.plays:not(.reveal) .pcard.sl {
-  grid-template-columns: 3.25rem minmax(0, 1fr) auto; align-items: start; gap: 0.5rem 0.75rem; padding: 0.8rem 0.8rem 0.8rem 0.6rem;
+  grid-template-columns: 3.25rem minmax(0, 1fr) auto; align-items: start; gap: 0.5rem 0.75rem; padding: 0.6rem 0.8rem 0.6rem 0.6rem;
   background: var(--sleeve); color: var(--ink); border-radius: 6px; box-shadow: var(--lift);
 }
 ol.plays:not(.reveal) .pcard.sl:nth-child(odd) { transform: rotate(-0.4deg); }
@@ -948,7 +948,9 @@ ol.plays:not(.reveal) .pcard.sl:nth-child(even) { transform: rotate(0.3deg); }
 .pcard.sl .sleeve-art { width: 2.5rem; height: 2.5rem; align-self: start; opacity: 0.95; }
 .pcard.sl .sleeve-art::after { display: none; }
 .pcard.sl .sleeve-art img, .pcard.sl .sleeve-art .nocover { width: 2.5rem; height: 2.5rem; box-shadow: 0 0 0 1px rgba(27, 20, 32, 0.3); }
-.pcard.sl > button { grid-column: 2 / -1; background: var(--ink); color: var(--sleeve); }
+.pcard.sl > button { grid-column: 3; grid-row: 2; min-height: 44px; padding: 0.3rem 1rem; align-self: end; background: var(--ink); color: var(--sleeve); }
+.pcard.sl .n { grid-row: 1 / span 2; }
+.pcard.sl .sl-body { grid-row: 1 / span 2; }
 .pcard.sl .playing-stamp { top: -0.6rem; right: 0.8rem; background: var(--lamp); color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--ink); }
 ol.plays:not(.reveal) .pcard.sl.playing { background: var(--sleeve); box-shadow: 0 0 0 3px var(--lamp), var(--lift); }
 .pcard.sl.playing .n { color: var(--ink); }
