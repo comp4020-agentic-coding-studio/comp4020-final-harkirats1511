@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { session, uniqueName } from "./helpers";
+import { baseUrl, session, uniqueName } from "./helpers";
 
 // Contract: the HTML of /t/CODE already holds the booth controls (decision 0005):
 // a visibility tag, the host's public/private switch, and the report form; the
