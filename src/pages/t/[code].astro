@@ -77,6 +77,9 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           <ol class="strip-list" id="scores-list"></ol>
         </section>
 
+        <!-- Phone moment strip: the 3D scene docks here for the steal and the reveal, then goes home. -->
+        <div id="strip-dock" class="strip-dock"></div>
+
         <p class="watch-line" id="watch-line" hidden></p>
         <p class="watch-line late" id="late" hidden>The next game starts after this one. <a id="late-link" href={`/taste?next=/t/${code}`} hidden>Fill your crate now</a></p>
 
@@ -258,7 +261,9 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           <p id="see-games" hidden><a href="/history">See all your games</a></p>
           <p id="reveal-msg" class="error" role="alert"></p>
         </section>
+      </div>
 
+      <aside class="side-col" id="side-col" aria-label="The scene, the crates and the players">
         <!-- 3D scene: decoration only, loaded after the page is usable and only where WebGL 2
              works and motion is welcome. Everything in it is also in the 2D page below. -->
         <section id="scene-slot" aria-label="3D table view" hidden>
@@ -268,14 +273,11 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
         </section>
 
         <!-- The crates on the table: the evidence the room reasons from. -->
-        <section class="card crates" id="crates" aria-labelledby="crates-h" hidden>
+        <section class="crates" id="crates" aria-labelledby="crates-h" hidden>
           <h2 id="crates-h">The crates</h2>
-          <p class="hint">Everyone's songs, in the open. A heard song is struck out and marked played.</p>
+          <p class="hint">Everyone's songs, in the open. Each row has four blocks of three dots: Up, Down, Out, In. A filled dot is a song not heard yet; a hollow one has been played. Tap a row for the songs.</p>
           <div id="crates-list"></div>
         </section>
-      </div>
-
-      <aside class="side-col" aria-label="Players and rules">
         <section class="card" aria-labelledby="players-h">
           <h2 id="players-h">Players (<span id="count">{state.members.length}</span>)</h2>
           <ul class="members" id="members">
@@ -437,12 +439,32 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     return b;
   }
   type Track = { title: string; artist: string; cover?: string };
-  function art(t: Track, size = 56) {
-    const img = t.cover
+  // No cover, or the same cover as an earlier song in the crate: a plain sleeve in the mood's colour.
+  function art(t: Track, size = 56, opts: { mood?: Slot | null; repeat?: boolean } = {}) {
+    const img = t.cover && !opts.repeat
       ? Object.assign(document.createElement("img"), { src: t.cover, alt: "", width: size, height: size, loading: "lazy" })
-      : h("div", { class: "nocover" });
+      : h("div", { class: `nocover${opts.mood ? ` mood-${opts.mood}` : ""}` });
     return h("div", { class: "sleeve-art" }, img);
   }
+  // Songs whose cover repeats one already seen earlier in the same crate (a search that returned one album).
+  function repeatedCovers(crate: { trackId: number; cover?: string }[]): Set<number> {
+    const seen = new Set<string>();
+    const out = new Set<number>();
+    for (const c of crate) {
+      if (!c.cover) continue;
+      if (seen.has(c.cover)) out.add(c.trackId);
+      else seen.add(c.cover);
+    }
+    return out;
+  }
+  // Which mood a song sits in, from the crates on the table (public).
+  const moodOfTrack = (id: number): Slot | null => {
+    for (const m of state?.members ?? []) {
+      const t = m.crate?.find((c) => c.trackId === id);
+      if (t) return t.slot;
+    }
+    return null;
+  };
   // A record sleeve row: cover art with a record peeking out, title and artist,
   // then whatever the caller puts after.
   function trackRow(t: Track, ...extra: (Node | string)[]) {
@@ -451,6 +473,13 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
   async function api<T = Record<string, unknown>>(url: string, body?: unknown) {
     const res = await fetch(url, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     return { res, data: (await res.json().catch(() => ({}))) as T & { error?: string } };
+  }
+  // A count that just changed pops once (CSS, transform only, off under reduced motion). Keys are stable per row.
+  const counts = new Map<string, number>();
+  function popped(key: string, n: number, first = false): string {
+    const was = counts.get(key);
+    counts.set(key, n);
+    return !first && was !== undefined && was !== n ? " pop" : "";
   }
   // Drop a rebuild when nothing it draws has changed, so focus survives updates.
   const sigs = new Map<string, string>();
@@ -506,6 +535,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     const over = !!g?.winner && g.winner !== "none";
     const inGame = playing || over;
     const phase = g?.phase;
+    for (const m of state.members) if (m.crate) dupes.set(m.name, repeatedCovers(m.crate));
 
     const four = g?.format === "four";
     // "Round 2 of 4 · Down": the mood comes from /me (a mole has it too), never from a prompt.
@@ -531,7 +561,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     const spectating = playing && me?.role === "spectator";
     show("late", spectating);
     if (spectating) show("late-link", !(state.members.find((m) => m.name === myName)?.crateReady ?? true));
-    renderStrip(playing && four && phase !== "reveal");
+    renderStrip(playing && four);
     renderCard(playing && (phase === "pick" || phase === "listen" || phase === "vote"), phase);
     renderPick(playing && phase === "pick");
     renderListen(playing && (phase === "listen" || phase === "vote"));
@@ -539,6 +569,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     renderSteal(playing && phase === "steal");
     renderReveal(inGame && (phase === "reveal" || over));
     renderCrates(playing);
+    placeScene();
     tick();
     syncActions();
     settleFocus();
@@ -554,9 +585,12 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     pendingFocus = "";
     if (document.activeElement?.closest("#leave-confirm, #remove-confirm")) return;
     el.focus({ preventScroll: true });
-    // The host taps "vote" at the foot of the replay; bring the new phase into view.
-    const top = el.getBoundingClientRect().top;
-    if (top < 0 || top > innerHeight - 120) el.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    // The host taps "vote" at the foot of the replay; bring the new phase into view. When the scene has
+    // moved up as a strip (steal, reveal on a phone), the strip is what comes into view, the action just under it.
+    const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    const target = $("scene-slot").parentElement === $("strip-dock") ? $("strip-dock") : el;
+    const top = target.getBoundingClientRect().top;
+    if (top < 0 || top > innerHeight - 120) target.scrollIntoView({ block: "start", behavior });
   }
 
   // A name's badge from the members list; someone who left gets a default.
@@ -735,7 +769,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     once("strip", JSON.stringify([g.scores, done]), () => {
       const rows = [...(g.scores ?? [])].sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
       $("scores-list").replaceChildren(
-        ...rows.map((r) => h("li", { class: r.name === myName ? "me" : "" }, h("span", { class: "nm" }, r.name === myName ? `${r.name} (you)` : r.name), h("b", { class: "mono" }, String(r.score)))),
+        ...rows.map((r) => h("li", { class: r.name === myName ? "me" : "" }, h("span", { class: "nm" }, r.name === myName ? `${r.name} (you)` : r.name), h("b", { class: "mono" + popped(`s:${r.name}`, r.score), "aria-label": `${r.score} points` }, String(r.score)))),
       );
     });
   }
@@ -754,8 +788,8 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     const open = roleShown;
     const card = $("card");
     // While picking the card sits above the pick list, as it is needed to choose; later it is one line below the action.
-    const before = phase === "pick" ? $("pick") : $("scene-slot");
-    if (card.nextElementSibling !== before) before.before(card);
+    if (phase === "pick") { if (card.nextElementSibling !== $("pick")) $("pick").before(card); }
+    else if (card.previousElementSibling !== $("reveal")) $("reveal").after(card);
     card.classList.toggle("compact", phase !== "pick");
     card.classList.toggle("is-open", open);
     $("theme-card").classList.toggle("flipped", !open);
@@ -783,10 +817,12 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
   // ---- the crates on the table ----
 
   const crateOpen = new Map<string, boolean>();
-  const wide = () => matchMedia("(min-width: 1024px)").matches;
+  const WIDE = "(min-width: 1100px)";
+  const narrow = () => !matchMedia(WIDE).matches;
+  const dupes = new Map<string, Set<number>>();
   function songLi(t: CrateTrack, played: boolean, ...extra: (Node | string)[]) {
     const li = h("li", { class: "csong" + (played ? " is-played" : "") },
-      art(t, 36),
+      art(t, 36, { mood: t.slot, repeat: [...dupes.values()].some((d) => d.has(t.trackId)) }),
       h("span", { class: "meta" }, h("strong", {}, t.title), h("span", {}, t.artist)),
       ...(played ? [h("span", { class: "played-tag mono" }, "played")] : []),
       ...extra);
@@ -804,12 +840,28 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
         ...s.members.filter((m) => m.crate).map((m) => {
           const crate = m.crate!;
           const left = crate.filter((c) => !played.has(c.trackId)).length;
-          const open = crateOpen.get(m.name) ?? (m.name === myName || wide());
+          const open = crateOpen.get(m.name) ?? false;
+          // The mood strip: four blocks (Up, Down, Out, In) of three dots. Filled = not heard yet, hollow = heard.
+          // The strip is for the eye; the words for a screen reader and for anyone who can't tell the dots apart.
+          const per = slotInfo.map((si) => {
+            const mine = crate.filter((c) => c.slot === si.slot);
+            return { si, mine, unplayed: mine.filter((c) => !played.has(c.trackId)).length };
+          });
+          const words = per.map((x) => `${x.si.name}: ${x.unplayed} of ${x.mine.length} left`).join(". ");
+          const moodStrip = h("span", { class: "moods", "aria-hidden": "true" },
+            ...per.map((x) => h("span", { class: `mblock mood-${x.si.slot}` },
+              h("span", { class: "mdots" }, ...x.mine.map((c) => h("i", { class: played.has(c.trackId) ? "dot heard" : "dot" }))),
+              h("span", { class: "mname mono" }, x.si.name))));
           const summary = h("summary", { "data-fk": `crate:${m.name}` },
-            face(m.name), h("span", { class: "cname" }, m.name === myName ? `${m.name} (you)` : m.name),
-            ...(g.ghosts.includes(m.name) ? [h("span", { class: "stamp out" }, "Out")] : []),
-            ...(g.borrowed.includes(m.name) ? [h("span", { class: "stamp borrowed" }, "Borrowed")] : []),
-            h("span", { class: "cleft mono" }, `${left} left`));
+            face(m.name),
+            h("span", { class: "chead" },
+              h("span", { class: "cname" }, m.name === myName ? `${m.name} (you)` : m.name),
+              h("span", { class: "cmeta" },
+                ...(g.ghosts.includes(m.name) ? [h("span", { class: "stamp out" }, "Out")] : []),
+                ...(g.borrowed.includes(m.name) ? [h("span", { class: "stamp borrowed" }, "Borrowed")] : []),
+                h("span", { class: "cleft mono" }, `${left} left`))),
+            moodStrip,
+            h("span", { class: "sr-only" }, `${left} songs left. ${words}.`));
           const slots = slotInfo.map((si) => {
             const mine = crate.filter((c) => c.slot === si.slot);
             return h("div", { class: "cslot" },
@@ -938,16 +990,24 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           : host
             ? `${what} is playing. Tap another card to play it.`
             : `${what} is playing on ${state!.host}'s phone.`;
-    once("cards", JSON.stringify([cards, host]), () => {
+    once("cards", JSON.stringify([cards, host, myName]), () => {
       $("cards").replaceChildren(
         ...cards.map((c) => {
           const play = host ? button("Play", () => playByHost(c.order), { aria: `Play card ${c.order + 1}: ${c.title} by ${c.picker}` }) : null;
-          const li = h("li", { class: "pcard", "data-order": String(c.order) },
+          // A white-label sleeve: the number big, the picker on a sticker (a second sticker for a borrow),
+          // the cover small in a corner. "Yours" shows only on your own card, and only while it plays.
+          const own = c.picker === myName;
+          const li = h("li", { class: "pcard sl", "data-order": String(c.order) },
             h("span", { class: "n mono", "aria-hidden": "true" }, String(c.order + 1)),
-            art(c, 56),
-            h("div", { class: "meta" }, h("strong", {}, c.title), h("span", {}, c.artist)),
-            cardLine(c),
+            h("div", { class: "sl-body" },
+              h("div", { class: "meta" }, h("strong", {}, c.title), h("span", {}, c.artist)),
+              h("span", { class: "stickers" },
+                h("span", { class: "sticker who" }, face(c.picker), h("strong", {}, c.picker)),
+                ...(c.lender ? [h("span", { class: "sticker lent" }, `borrowed from ${c.lender}`)] : []),
+                ...(c.clash ? [h("span", { class: "stamp clash" }, "Clash")] : []))),
+            art(c, 40, { mood: moodOfTrack(c.trackId), repeat: false }),
             h("span", { class: "playing-stamp", "aria-hidden": "true" }, "Playing"),
+            ...(own ? [h("span", { class: "yours-tab", "aria-hidden": "true" }, "Yours")] : []),
             ...(play ? [play] : []));
           return li;
         }),
@@ -1096,7 +1156,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
             h("span", { class: "bname" },
               h("strong", {}, t.name),
               h("span", { class: "bcard" }, card ? `${card.title}, ${card.artist}${card.lender ? ` (from ${card.lender})` : ""}` : "Dead air: no song")),
-            h("span", { class: "count mono", "aria-hidden": "true" }, String(t.votes)),
+            h("span", { class: "count mono" + popped(`v:${g.round}:${t.name}`, t.votes), "aria-hidden": "true" }, String(t.votes)),
           ];
           if (!voter && !ghost) return h("li", {}, h("div", { class: "brow ro", role: "group", "aria-label": `${t.name}: ${t.votes} vote${t.votes === 1 ? "" : "s"}` }, ...body));
           const b = h("button", {
@@ -1111,7 +1171,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
         }),
       );
       const sk = g.skips ?? 0;
-      const skipBody = [h("span", {}, skipMine ? "Skip (your vote)" : "Skip: nobody"), h("span", { class: "count mono", "aria-hidden": "true" }, String(sk))];
+      const skipBody = [h("span", {}, skipMine ? "Skip (your vote)" : "Skip: nobody"), h("span", { class: "count mono" + popped(`v:${g.round}:skip`, sk), "aria-hidden": "true" }, String(sk))];
       $("vote-skip-wrap").replaceChildren(
         ghost ? "" :
         voter
@@ -1138,7 +1198,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
               h("span", { class: "bname" },
                 h("strong", {}, c.title),
                 h("span", { class: "bcard" }, `${c.artist} \u00b7 ${c.picker}${c.lender ? ` (from ${c.lender})` : ""}`)),
-              h("span", { class: "count mono", "aria-hidden": "true" }, String(n)),
+              h("span", { class: "count mono" + popped(`b:${g.round}:${c.order}`, n), "aria-hidden": "true" }, String(n)),
             ];
             const label = `Card ${c.order + 1}: ${c.title} by ${c.artist}, picked by ${c.picker}${c.lender ? `, borrowed from ${c.lender}` : ""}. ${n} vote${n === 1 ? "" : "s"} so far`;
             if (!voter || tag) {
@@ -1242,13 +1302,13 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
 
   // One line per reason the server sent, "+2 caught the mole". The client works out nothing itself.
   const REASON: Record<Reason["kind"], (n: number) => string> = {
-    caught: () => "caught the mole",
-    best: (n) => `best pick vote${n === 1 ? "" : "s"}`,
-    lend: (n) => `lent a best pick${n === 1 ? "" : " x" + n}`,
-    escaped: () => "got away",
-    stole: () => "stole the prompt",
+    caught: () => "for catching the mole",
+    best: (n) => `from ${n} best-pick vote${n === 1 ? "" : "s"}`,
+    lend: (n) => (n === 1 ? "for lending a best pick" : `for lending ${n} best picks`),
+    escaped: () => "for getting away",
+    stole: () => "for stealing the prompt",
   };
-  const reasonText = (r: Reason) => `+${r.points} ${r.kind === "best" || r.kind === "lend" ? (r.n > 1 ? `${r.n} ` : "") : ""}${REASON[r.kind](r.n)}`;
+  const reasonText = (r: Reason) => `+${r.points} ${REASON[r.kind](r.n)}`;
   const leftMark = (name: string, left: string[] | undefined) => (left?.includes(name) ? `${name} (left)` : name);
 
   function renderReveal(on: boolean) {
@@ -1735,6 +1795,24 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
   const stage = $("scene-stage");
   const toggle = $<HTMLButtonElement>("scene-toggle");
 
+  // The phone moment strip: on a narrow screen the scene sits below the action, except for the steal and the
+  // reveal, when it moves up under the header as a short strip, and goes home after. Not with 3D off or dead.
+  function placeScene() {
+    const g = state?.game;
+    const moment = state?.status === "playing" || !!g?.winner ? g?.phase === "steal" || g?.phase === "reveal" : false;
+    const live = sceneStarted && !sceneDead && sceneWanted && !slot.hidden;
+    const strip = narrow() && moment && live;
+    const dock = $("strip-dock");
+    const home = $("side-col");
+    if (strip) {
+      if (slot.parentElement !== dock) dock.append(slot);
+    } else if (slot.parentElement !== home) {
+      home.prepend(slot);
+    }
+    slot.classList.toggle("as-strip", strip);
+  }
+  matchMedia(WIDE).addEventListener("change", () => { placeScene(); });
+
   const canRunScene = () => {
     if (matchMedia("(prefers-reduced-motion: reduce)").matches) return false;
     try {
@@ -1792,6 +1870,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
         sceneWanted = !sceneWanted;
         writeScene(sceneWanted);
         syncToggle();
+        placeScene();
         if (sceneWanted) void loadScene();
         else dropScene(false);
       });
@@ -1803,6 +1882,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
       else setTimeout(go, 400);
     }
     describeScene();
+    placeScene();
     scene?.update(state as never);
   }
 
