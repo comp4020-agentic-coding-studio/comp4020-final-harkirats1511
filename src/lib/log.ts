@@ -13,8 +13,10 @@ import { people } from "./schema.ts";
 // their person id (a random UUID), enough to tell two "Ana"s apart. A table is
 // its 4-letter code.
 //
-// What must never reach a line, before it is public: a theme, who is a mole, a
-// track's title or id, which track is whose, or who voted for whom. And never
+// What must never reach a line, before it is public: a prompt, who is a mole,
+// what someone picked (a track's title or id, which track is whose), or who voted for
+// whom. Once picking closes, picks are logged with their pickers (the listen screen shows
+// them), so titles do appear then. And never
 // a PIN, hash, session token or cookie. Callers pass only what is safe; log()
 // never throws into a request.
 
@@ -62,4 +64,16 @@ export function recentLines(table?: string): string[] {
   if (!table) return [...ring];
   const prefix = `[${tableScope(table)}]`;
   return ring.filter((l) => l.startsWith(prefix));
+}
+
+// A last net under the whole process: an error nobody caught is logged (its message only: no
+// stack, no values) and the server keeps serving every table. Installed once, from middleware.ts,
+// the first thing Astro's node server loads. (A failing timer step is caught earlier, in game.ts.)
+let guarded = false;
+export function guardProcess(): void {
+  if (guarded) return;
+  guarded = true;
+  const say = (kind: string) => (e: unknown) => log("server", `${kind}: ${e instanceof Error ? e.message : String(e)}`);
+  process.on("unhandledRejection", say("unhandled rejection"));
+  process.on("uncaughtException", say("uncaught exception"));
 }
