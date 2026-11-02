@@ -152,6 +152,7 @@ if (me && safeNext) return Astro.redirect(safeNext);
       <input id="name" name="name" maxlength="24" autocomplete="username" required />
       <label for="pin">PIN (4 to 8 digits)</label>
       <input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4,8}" minlength="4" maxlength="8" autocomplete="current-password" required />
+      <p class="first-step"><strong>First step:</strong> pick a name and a PIN, then build your crate of 12 songs.</p>
       <p class="hint">New name? It is yours with this PIN. Taken? Enter its PIN to sign back in.</p>
       <p id="msg" class="error" role="alert"></p>
       <button type="submit">Step inside</button>
