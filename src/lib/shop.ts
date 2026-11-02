@@ -105,6 +105,15 @@ function stopWatching() {
 // A new person can't come in once 40 are here; one already in may open more tabs.
 export const isFull = (personId: string) => !here.has(personId) && here.size >= MAX_PEOPLE;
 
+// What the 41st person is told: a clear message, the cap, and the booth list (public state only,
+// the same Booth[] as GET /api/shop/booths), so the 2D list still works without the stream.
+export const fullBody = () => ({
+  error: `The shop is full right now (${MAX_PEOPLE} people). You can still join a table from the list below, or try again in a minute.`,
+  full: true as const,
+  max: MAX_PEOPLE,
+  booths: booths(),
+});
+
 // Opens a stream for this person (check isFull first).
 export function enter(me: Person, send: (text: string) => void): { leave: () => void } {
   let p = here.get(me.id);

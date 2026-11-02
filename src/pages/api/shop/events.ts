@@ -1,7 +1,7 @@
 import type { APIRoute } from "astro";
 import { json, personFromCookies } from "../../../lib/auth.ts";
 import { refused, tag } from "../../../lib/log.ts";
-import { enter, isFull, MAX_PEOPLE } from "../../../lib/shop.ts";
+import { enter, fullBody, isFull, MAX_PEOPLE } from "../../../lib/shop.ts";
 
 const HEARTBEAT_MS = 15_000;
 // A reader this far behind is gone without having closed; drop it.
@@ -17,7 +17,7 @@ export const GET: APIRoute = ({ cookies, request }) => {
   }
   if (isFull(me.id)) {
     refused("shop", tag(me), "walk in", `the shop is full (${MAX_PEOPLE})`);
-    return json({ error: "The shop is full right now." }, 503);
+    return json(fullBody(), 503);
   }
 
   const encoder = new TextEncoder();
