@@ -803,6 +803,7 @@ ul.members .rm-bot { min-width: 44px; min-height: 44px; padding: 0; font-size: 1
 .mole-ctl .seg button { min-width: 48px; min-height: 44px; padding: 0 1rem; }
 .mole-ctl .seg button:disabled { opacity: 0.4; }
 .mole-ctl .hint { flex: 1 1 100%; }
+.host-wait { font-weight: 600; margin: 0 0 0.75rem; border-left: 4px solid var(--lamp); padding-left: 0.75rem; }
 .waiting { font-weight: 600; margin: 0 0 0.75rem; border-left: 4px solid var(--lamp); padding-left: 0.75rem; }
 a.btn.holdup { display: block; text-align: center; min-height: 52px; line-height: 52px; padding: 0 1rem; margin: 0 0 1rem; font-size: var(--step-1); text-decoration: none; }
 .watch-line.late a { font-weight: 700; }
