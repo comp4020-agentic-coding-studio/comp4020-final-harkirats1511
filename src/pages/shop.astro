@@ -472,6 +472,8 @@ const list = booths();
       } else if (r.status === 401) { location.href = "/?next=/shop"; return; }
       else void r.body?.cancel();
     } catch { /* offline */ }
+    // Full: nobody to walk among, so the 2D list comes first and the note sits right under the bar.
+    if (full) { stage.hidden = true; details.open = true; }
     streamNote.hidden = false;
     streamNote.textContent = full
       ? (said || "The shop floor is full right now. The booth list below still works.")
@@ -490,7 +492,7 @@ const list = booths();
   }
   function wire(es: EventSource) {
   es.addEventListener("snapshot", (e) => {
-    gotSnapshot = true; retryMs = 2000; streamNote.hidden = true; clearInterval(pollTimer);
+    gotSnapshot = true; retryMs = 2000; streamNote.hidden = true; clearInterval(pollTimer); syncScene();
     const d = parse(e as MessageEvent);
     snapshot = d;
     roster.clear();
