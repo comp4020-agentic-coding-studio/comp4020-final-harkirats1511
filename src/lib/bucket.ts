@@ -64,5 +64,7 @@ export const DEEZER_BUCKET = new Bucket({
   reserve: { card: 0, normal: 5, suggest: 10, background: 16 },
 });
 
-// How long each class waits for a slot before giving up.
-export const MAX_WAIT: Record<Priority, number> = { card: 2000, normal: 2500, suggest: 5000, background: 800 };
+// How long each class waits for a slot before giving up. Search and add (normal) wait the longest of
+// the people-facing calls: the bucket still never lets more than 40 calls into any 5 s window (Deezer
+// allows 50), so waiting longer costs a person a few seconds, never a quota error.
+export const MAX_WAIT: Record<Priority, number> = { card: 2000, normal: 6000, suggest: 5000, background: 800 };

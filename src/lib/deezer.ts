@@ -36,7 +36,10 @@ type Raw = {
 // (see bucket.ts): card audio and previews first, then search and adds, then the starter
 // and sort-plan, then bot crates. A call that can't get a slot in time is "busy".
 async function get(path: string, priority: Priority, timeoutMs = TIMEOUT_MS): Promise<Record<string, unknown> | null> {
-  if (!(await DEEZER_BUCKET.take(priority, Math.min(MAX_WAIT[priority], timeoutMs)))) {
+  // How long a call may wait in the bucket for a slot: its class's patience, or less if the caller's whole budget is shorter.
+  // (A default-timeout call, search or add, waits the class's full patience: the fetch's own timeout starts after the wait.)
+  const wait = timeoutMs === TIMEOUT_MS ? MAX_WAIT[priority] : Math.min(MAX_WAIT[priority], timeoutMs);
+  if (!(await DEEZER_BUCKET.take(priority, wait))) {
     throw new DeezerQueued("Too many Deezer calls at once.");
   }
   let res: Response;
@@ -77,22 +80,52 @@ export async function searchTracks(q: string, limit = 25): Promise<Track[]> {
   return tracks;
 }
 
-// Track metadata rarely changes, so a small cache saves round trips.
-const cache = new Map<number, { track: Track; at: number }>();
+// Track metadata rarely changes, so small caches save round trips. Two, so that what people
+// are searching never pushes out what they have already added (a flood of searches at a busy
+// table would otherwise cost every add a Deezer call):
+//  - `cache` holds tracks someone has added or asked for (getTrack), least-recently-used out,
+//    refreshed on every hit.
+//  - `seen` holds search and starter results (25 a search): the tracks that may be added next.
+//    A hit in it moves the track to `cache`. It is the one that churns.
 const TTL = 60 * 60 * 1000;
-const CACHE_MAX = 500;
+const CACHE_MAX = 1000;
+const SEEN_MAX = 1500;
+type Cached = { track: Track; at: number };
+const cache = new Map<number, Cached>();
+const seen = new Map<number, Cached>();
 
-function remember(track: Track) {
-  if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value!);
-  cache.set(track.id, { track, at: Date.now() });
+function put(map: Map<number, Cached>, max: number, track: Track) {
+  map.delete(track.id);
+  if (map.size >= max) map.delete(map.keys().next().value!);
+  map.set(track.id, { track, at: Date.now() });
+}
+// Search results: remembered for the add that probably follows, never at the cost of an added track.
+const remember = (track: Track) => { if (!cache.has(track.id)) put(seen, SEEN_MAX, track); };
+
+function cached(id: number): Track | null {
+  const now = Date.now();
+  const hit = cache.get(id);
+  if (hit && now - hit.at < TTL) {
+    // Least recently used: a hit moves it to the back, and keeps its original age (so a hot track still refreshes hourly).
+    cache.delete(id);
+    cache.set(id, hit);
+    return hit.track;
+  }
+  const near = seen.get(id);
+  if (near && now - near.at < TTL) {
+    seen.delete(id);
+    put(cache, CACHE_MAX, near.track);
+    return near.track;
+  }
+  return null;
 }
 
 export async function getTrack(id: number): Promise<Track | null> {
-  const hit = cache.get(id);
-  if (hit && Date.now() - hit.at < TTL) return hit.track;
+  const hit = cached(id);
+  if (hit) return hit;
   const body = await get(`/track/${id}`, "normal");
   const track = body ? toTrack(body as Raw) : null;
-  if (track) remember(track);
+  if (track) put(cache, CACHE_MAX, track);
   return track;
 }
 
