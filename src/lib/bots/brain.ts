@@ -24,7 +24,7 @@ export type Pub = {
     format?: string;
     phase?: string;
     deadline?: number | null;
-    tally?: { name: string }[];
+    tally?: { name: string; votes?: number }[];
     cards?: { order?: number; picker: string; lender?: string; trackId: number; title?: string; artist?: string }[];
   };
 };
@@ -59,8 +59,11 @@ export function decidePick(me: MeView, self: string, pub: Pub, rand: Rand = Math
 
 // Votes with a little sense: a player whose song is not in the round's mood (by the
 // crate it was picked from: the picker's, or the lender's) is the likeliest bluffer, and
-// someone who missed the pick a little less so; with nothing to go on, a random name, or
-// now and then a skip.
+// someone who missed the pick a little less so. With no lead from the evidence it backs the
+// current leader of the public tally (the bandwagon people join, ties broken at random), so a
+// table of bots and few people doesn't split its votes and eject nobody. Only with an empty
+// tally does it pick a random name, or (rand < 0.15) skip; and in Knockout with three left it
+// never skips, since a vote that ejects nobody then hands the game to the moles.
 export function decideVote(me: MeView, self: string, pub: Pub, rand: Rand = Math.random): { name: string } | "skip" {
   const others = (pub.game?.tally ?? []).map((t) => t.name).filter((n) => n !== self);
   if (!others.length) return "skip";
@@ -75,7 +78,11 @@ export function decideVote(me: MeView, self: string, pub: Pub, rand: Rand = Math
   if (offMood.length) return { name: pickOne(offMood, rand)! };
   const silent = others.filter((n) => !cards.some((x) => x.picker === n));
   if (cards.length && silent.length && rand() < 0.5) return { name: pickOne(silent, rand)! };
-  return rand() < 0.15 ? "skip" : { name: pickOne(others, rand)! };
+  const count = (n: string) => pub.game?.tally?.find((t) => t.name === n)?.votes ?? 0;
+  const top = Math.max(...others.map(count));
+  if (top > 0) return { name: pickOne(others.filter((n) => count(n) === top), rand)! };
+  const lastVote = pub.game?.format !== "four" && (pub.game?.tally?.length ?? 0) === 3;
+  return !lastVote && rand() < 0.15 ? "skip" : { name: pickOne(others, rand)! };
 }
 
 // Four rounds' best pick: a card that isn't its own (picked or lent by the bot), preferring

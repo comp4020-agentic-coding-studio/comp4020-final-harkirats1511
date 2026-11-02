@@ -176,3 +176,34 @@ it("bots leave a lobby nobody has had open for a while, and a table with no pers
   expect(botSeats("SWAA"), "unwatched for 11 minutes: sent home").toHaveLength(0);
   expect(db.select().from(tableMembers).all().some((m) => m.tableCode === "SWAA" && m.personId === host), "the person stays").toBe(true);
 });
+
+// decideVote is a pure function of a bot's own /me and the public state. With no lead from the
+// evidence it backs the public tally's leader; it skips only on an empty tally (rand < 0.15), and
+// never in Knockout with three left.
+it("a bot with no lead backs the tally's leader (ties at random) and skips only on an empty tally, never with three left", async () => {
+  const { decideVote } = await import("../src/lib/bots/brain.ts");
+  const me = { role: "player", slot: "up" as const, borrowUsed: false, played: [] };
+  const pub = (tally: { name: string; votes: number }[], format = "knockout") => ({
+    members: tally.map((t) => ({ name: t.name })),
+    game: { format, phase: "vote", tally, cards: [] },
+  });
+  const four = [{ name: "me", votes: 0 }, { name: "ann", votes: 0 }, { name: "bo", votes: 2 }, { name: "cy", votes: 1 }];
+  // A leader: always the leader, whatever the dice say (even a roll under 0.15).
+  for (const r of [0, 0.1, 0.5, 0.99]) expect(decideVote(me, "me", pub(four), () => r)).toEqual({ name: "bo" });
+  // Never itself, even if it leads.
+  expect(decideVote(me, "me", pub([{ name: "me", votes: 5 }, { name: "ann", votes: 1 }, { name: "bo", votes: 0 }, { name: "cy", votes: 0 }]), () => 0)).toEqual({ name: "ann" });
+  // A tie for the lead is broken at random between the tied only.
+  const tie = [{ name: "me", votes: 0 }, { name: "ann", votes: 1 }, { name: "bo", votes: 1 }, { name: "cy", votes: 0 }];
+  const got = new Set<string>();
+  for (let i = 0; i < 40; i++) got.add((decideVote(me, "me", pub(tie), () => i / 40) as { name: string }).name);
+  expect([...got].sort()).toEqual(["ann", "bo"]);
+  // Empty tally: skips under 0.15, otherwise names someone else.
+  const empty = four.map((t) => ({ ...t, votes: 0 }));
+  expect(decideVote(me, "me", pub(empty), () => 0.1)).toBe("skip");
+  expect(decideVote(me, "me", pub(empty), () => 0.2)).toMatchObject({ name: expect.any(String) });
+  // Knockout with three left: never skips on an empty tally.
+  const three = [{ name: "me", votes: 0 }, { name: "ann", votes: 0 }, { name: "bo", votes: 0 }];
+  for (const r of [0, 0.05, 0.14]) expect(decideVote(me, "me", pub(three), () => r)).not.toBe("skip");
+  // Four rounds keeps its skip (nobody is ejected there).
+  expect(decideVote(me, "me", pub(three, "four"), () => 0.05)).toBe("skip");
+});
