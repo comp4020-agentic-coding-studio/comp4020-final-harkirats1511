@@ -96,6 +96,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
             </div>
             <p class="hint" id="vis-msg" role="status"></p>
           </fieldset>
+          <p class="host-wait" id="host-wait" role="status" hidden></p>
           <p class="hint">Everyone brings a crate of {MIN_CRATE} songs: {PER_SLOT} each for Up, Down, Out and In. Once the game starts the crates sit on the table for all to see.</p>
           <p class="hint"><a href="/me">Change your character</a></p>
           <p class="waiting" id="waiting" role="status" hidden></p>
@@ -216,6 +217,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           <div id="scoreboard" class="scoreboard" hidden>
             <h3>Final scores</h3>
             <ol class="board" id="board-list"></ol>
+            <p class="hint" id="board-left" role="note" hidden></p>
           </div>
           <div id="ghost-results" class="ghost-results" hidden>
             <h3>The ghosts' guesses</h3>
@@ -342,7 +344,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           <ul>
             <li>Four rounds, one per mood. Nobody is voted out. The moles are dealt again every round.</li>
             <li>Two votes at once: who is the mole, and the best pick (a song, not your own). Change either until it locks.</li>
-            <li>Moles are dealt without repeats: nobody is the mole twice until everyone at the table has been once.</li>
+            <li>The more often you've been the mole, the less likely you are to be dealt it again, but anyone can be.</li>
             <li>Points: +2 for voting for a mole (a mole's own mole vote scores nothing). +1 for each best-pick vote your song gets, and +1 to whoever lent it. You can't best-pick a song you lent.</li>
             <li>Each mole is judged on their own. A mole the room didn't catch gets +2, even if the other mole was caught. The room catches a mole when the top vote is that mole, or a tie made only of moles. A caught mole gets the steal: +3 for a right guess.</li>
             <li>A mole who leaves counts as caught for everyone who had voted for them (+2 each), with no steal. Anyone else who leaves just drops out: their votes count for nothing.</li>
@@ -664,6 +666,8 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     // Whoever is holding it up gets a way to finish.
     show("crate-me", !mineReady);
     if (!mineReady) $("crate-me").textContent = `Finish your crate (${myCrate ?? mine?.crateCount ?? 0}/${minCrate})`;
+    show("host-wait", !isHost());
+    $("host-wait").textContent = isHost() ? "" : `Waiting for ${s.host} to start.`;
     $("start-note").textContent = isHost()
       ? notReady.length
         ? ""
@@ -672,7 +676,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
         : n < 4
           ? "You can start now. 4 or more players is recommended."
           : "Everyone in? Start when ready."
-      : "Waiting for the host to start.";
+      : "";
     renderSetup(s);
   }
 
@@ -779,6 +783,15 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     });
   }
 
+  // Why a Knockout ghost is out, from the rounds on the table (voted-out is public), and where their guess is.
+  function ghostLine() {
+    const g = state?.game;
+    const out = [...(g?.past ?? []), ...(g?.reveal && g.reveal.ejected ? [g.reveal as { ejected: string | null; wasMole: boolean }] : [])].find((q) => q.ejected === myName);
+    const guess = g?.phase === "vote" ? " Your private guess at the mole is open below." : " You can make a private guess at the mole in each vote.";
+    if (!out) return `You're out of this game. You watch and listen.${guess}`;
+    return `Voted out. You ${out.wasMole ? "were" : "weren't"} the mole. You watch and listen.${guess}`;
+  }
+
   // Your card. A mole's comes from /me and holds the slot only: there is no other
   // source of a prompt in this page. Face down, a mole's card and a player's are the
   // same: same heading, same tape, same back. Only the face differs.
@@ -786,7 +799,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     const watching = !!me && !active();
     // Someone out, or watching, has no card: just a plain line saying so.
     show("watch-line", on && watching);
-    if (watching) $("watch-line").textContent = me!.role === "ghost" ? "You're out. You watch and listen." : "You're watching this game.";
+    if (watching) $("watch-line").textContent = me!.role === "ghost" ? ghostLine() : "You're watching this game.";
     show("card", on && !!me && !watching);
     if (!on || !me || watching) return;
     const mole = me.role === "mole";
@@ -898,6 +911,11 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     // The same words for a mole and a player: a mole's screen must not read differently.
     $("pick-instr").textContent = watching ? "" : "Pick a song from your crate that answers your card. Your pick is final once you tap it.";
     $("pick-instr").hidden = watching;
+    if (locked) {
+      // Picked: nothing to tab to. Drop the lists (the hidden copies of the Pick buttons) from the page.
+      for (const id of ["pick-fit", "pick-rest", "borrow-panel"]) $(id).replaceChildren();
+      sigs.delete("pick");
+    }
     if (watching || locked) return;
     const mine = state!.members.find((m) => m.name === myName)?.crate ?? [];
     const played = new Set([...g.played, ...(me.played ?? [])]);
@@ -1320,7 +1338,37 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     escaped: () => "for getting away",
     stole: () => "for stealing the prompt",
   };
-  const reasonText = (r: Reason) => `+${r.points} ${REASON[r.kind](r.n)}`;
+  // "caught" depends on whether the room caught that mole (the reveal says who was caught): a vote for a
+  // mole the room did not catch is still worth +2, but it is "spotting", never "catching".
+  function reasonText(r: Reason, who?: string, rv?: Reveal) {
+    if (r.kind === "caught" && who && rv) {
+      const picked = rv.votes.find((v) => v.voter === who)?.choice;
+      if (picked) return `+${r.points} for ${(rv.caught ?? []).includes(picked) ? "catching" : "spotting"} ${picked} (a mole)`;
+    }
+    return `+${r.points} ${REASON[r.kind](r.n)}`;
+  }
+  // Why a row has no points, from what the reveal already shows everyone (votes and moles).
+  function noPointsWhy(name: string, rv: Reveal): string {
+    if ((rv.moles ?? []).includes(name)) return (rv.caught ?? []).includes(name) ? "no points: the room caught you, and you missed the steal" : "no points";
+    const v = rv.votes.find((x) => x.voter === name);
+    if (!v) return "no points: no vote counted, and no best-pick votes";
+    if (v.choice === null) return "no points: skipped the vote, and no best-pick votes";
+    return `no points: voted for ${v.choice}, who was not a mole, and no best-pick votes`;
+  }
+  // Why nobody went out, in words: a tie, skip on top, or nobody voting.
+  function noOneWhy(rv: Reveal): string {
+    const tally = new Map<string, number>();
+    let skips = 0;
+    for (const v of rv.votes) { if (v.choice === null) skips++; else tally.set(v.choice, (tally.get(v.choice) ?? 0) + 1); }
+    const top = Math.max(0, ...tally.values());
+    const tied = [...tally].filter(([, n]) => n === top && top > 0).map(([n]) => n);
+    if (!rv.votes.length) return "Nobody voted.";
+    if (skips > top) return "Skip had the most votes.";
+    if (skips === top && top > 0) return "Skip tied with the top name, so nobody goes out.";
+    if (tied.length > 1) return `The vote was tied between ${tied.join(" and ")}.`;
+    return "";
+  }
+
   const leftMark = (name: string, left: string[] | undefined) => (left?.includes(name) ? `${name} (left)` : name);
 
   function renderReveal(on: boolean) {
@@ -1354,6 +1402,13 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           ...rows.map((r) => h("li", { class: g.winners?.includes(r.name) ? "top" : "" }, face(r.name), h("strong", {}, r.name === myName ? `${r.name} (you)` : r.name),
             ...(g.winners?.includes(r.name) ? [h("span", { class: "stamp win" }, "Winner")] : []), h("b", { class: "mono" }, String(r.score)))),
         );
+        // Someone who left took their points off the board: say so once, by name.
+        const onBoard = new Set((g.scores ?? []).map((x) => x.name));
+        const scored = new Set<string>();
+        for (const q of [...g.past, ...(g.reveal ? [g.reveal] : [])]) for (const x of q.points ?? []) if (x.points > 0) scored.add(x.name);
+        const vanished = [...scored].filter((n) => !onBoard.has(n)).sort();
+        show("board-left", vanished.length > 0);
+        $("board-left").textContent = vanished.length ? `${vanished.join(", ")} left the game, so their points are not on this board.` : "";
       });
     }
     // Knockout game over: what each ghost guessed, and how many hit.
@@ -1383,7 +1438,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
       const parts = [`${ms.length === 1 ? "The mole this round was" : "The moles this round were"} ${ms.join(" and ") || "nobody"}.`];
       if (r.wasMole) parts.push(r.stole ? `The room caught ${r.accused ?? "a mole"} and they stole the prompt.` : `The room caught ${r.accused ?? "a mole"}. They missed the steal.`);
       else if (r.accused) parts.push(`The room blamed ${r.accused}, who was not a mole.`);
-      else if (!(r.leftMoles ?? []).length || (r.escaped ?? []).length) parts.push("The room did not agree on anyone.");
+      else if (!(r.leftMoles ?? []).length || (r.escaped ?? []).length) parts.push(`The room did not agree on anyone. ${noOneWhy(r)}`.trim());
       for (const m of r.leftMoles ?? []) parts.push(`${m} left. Everyone who had voted for them catches them.`);
       const esc = r.escaped ?? [];
       if (esc.length) parts.push(`${esc.join(" and ")} got away.`);
@@ -1396,8 +1451,8 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
       else if (r.ejected) {
         parts.push(`${r.ejected} was voted out. ${r.wasMole ? "They were a mole." : "They were not a mole."}`);
         if (r.wasMole) parts.push("They missed the steal.");
-      } else parts.push("Nobody was voted out.");
-      if (g.ending === "final-vote") parts[parts.length - 1] = "Nobody was voted out with three left: the moles win.";
+      } else parts.push(`Nobody was voted out. ${noOneWhy(r)}`.trim());
+      if (g.ending === "final-vote") parts[parts.length - 1] = `Nobody was voted out with three left: the moles win. ${noOneWhy(r)}`.trim();
       else if (g.ending === "round-cap") parts.push("Round 12 is over and the moles are still in: the moles win.");
       eject.textContent = parts.join(" ");
       // The stamp repeats what the sentence says: colour is never the only signal.
@@ -1426,7 +1481,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
       const rows = [...(r?.points ?? [])].sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
       $("pts-list").replaceChildren(
         ...rows.map((p) => h("li", {}, face(p.name), h("strong", {}, p.name === myName ? `${p.name} (you)` : p.name),
-          h("span", { class: "why" }, p.reasons.map(reasonText).join(", ") || "no points"), h("b", { class: "mono" }, `+${p.points}`))),
+          h("span", { class: "why" }, p.reasons.map((x) => reasonText(x, p.name, r)).join(", ") || noPointsWhy(p.name, r!)), h("b", { class: "mono" }, `+${p.points}`))),
       );
     });
     show("past-end", !!g.winner && g.past.length > 0);
@@ -1491,7 +1546,8 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     }
     const left = secondsLeft(g);
     el.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
-    el.classList.toggle("low", left < 10);
+    // The wavy "low" mark is a nudge: once you have picked there is nothing left to hurry for.
+    el.classList.toggle("low", left < 10 && !(g.phase === "pick" && me?.picked === true));
     $("steal-clock").classList.toggle("low", left < 6);
     // Announce once per phase, not every second.
     const key = `${g.round}:${g.phase}`;
@@ -1886,7 +1942,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     if (!state) return;
     if (!sceneStarted) {
       sceneStarted = true;
-      if (!canRunScene()) { sceneDead = true; return; }
+      if (!canRunScene()) { sceneDead = true; toggle.hidden = true; slot.hidden = true; return; }
       slot.hidden = false;
       syncToggle();
       toggle.addEventListener("click", () => {
@@ -1935,6 +1991,15 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     return `You scored ${mine.points} this round, ${total.score} in all.`;
   }
 
+  // The outcome in one short sentence, for the "Reveal." announcement.
+  function revealSentence(g: Game): string {
+    const r = g.reveal;
+    if (!r) return "";
+    if (g.format === "four") return r.wasMole ? `The room caught ${r.accused ?? "a mole"}.` : (r.escaped ?? []).length ? "A mole got away." : "Nobody was caught.";
+    if (r.stole && r.accused) return `${r.accused} was a mole and stole the prompt.`;
+    return r.ejected ? `${r.ejected} was voted out${r.wasMole ? ", a mole" : ", not a mole"}.` : "Nobody was voted out.";
+  }
+
   let removed = false;
   let wasMember = false;
   let refusedJoin = false;
@@ -1964,7 +2029,7 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
           g.phase === "pick" ? `Round ${g.round}. Picking: ${secondsLeft(g)} seconds.`
           : g.phase === "vote" ? `Vote. ${secondsLeft(g)} seconds.`
           : g.phase === "steal" ? "Steal! The mole has 15 seconds to guess the prompt."
-          : g.phase === "reveal" ? `Reveal. ${scoredLine(g)}`.trim()
+          : g.phase === "reveal" ? `Reveal. ${revealSentence(g)} ${scoredLine(g)}`.replace(/\s+/g, " ").trim()
           : "Listen.",
         );
       }
@@ -2046,7 +2111,9 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
   let lastHeard = Date.now();
   let everOpened = false;
   function dropStream() { streamCtl?.abort(); }
-  window.addEventListener("online", () => { showConn(); dropStream(); });
+  // Back online: cut any waiting short and ask at once (the backoff is only for refusals).
+  let wake: (() => void) | null = null;
+  window.addEventListener("online", () => { showConn(); if (!fullMsg) wake?.(); dropStream(); });
 
   function handleFrame(frame: string) {
     let event = "message";
@@ -2067,7 +2134,11 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
     }
     if (next.same?.includes("past") && next.game && lastFrame?.game) next.game.past = lastFrame.game.past;
     delete next.same;
+    // A vote from another tab of mine moves the public tally: ask /me who I voted for.
+    const tallyOf = (st: State | null) => st?.game?.phase === "vote" ? JSON.stringify([st.game.round, st.game.tally, st.game.skips]) : "";
+    const tallyMoved = !!lastFrame && lastFrame.game?.phase === "vote" && next.game?.phase === "vote" && lastFrame.game.round === next.game.round && tallyOf(next) !== tallyOf(lastFrame);
     lastFrame = next;
+    if (tallyMoved) void refreshMe();
     onState(next);
   }
 
@@ -2119,7 +2190,8 @@ const slotInfo = JSON.stringify(Object.keys(SLOT_NAMES).map((s) => ({ slot: s, n
       showConn();
       const wait = !navigator.onLine ? 500 : fullMsg ? backoff : RETRY_MS;
       if (fullMsg) backoff = Math.min(backoff * 2, 30_000);
-      await new Promise((r) => setTimeout(r, wait));
+      await new Promise<void>((r) => { const t = setTimeout(r, wait); wake = () => { clearTimeout(t); r(); }; });
+      wake = null;
     }
   }
   // A stream that says nothing, not even a heartbeat, is dead: close it, say so, reopen.

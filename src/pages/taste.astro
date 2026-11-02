@@ -305,6 +305,10 @@ const slots = SLOTS.map((s) => ({ slot: s, name: SLOT_NAMES[s], hint: SLOT_HINTS
     $("q").disabled = locked;
     $("search").querySelector("button").disabled = locked;
     $("starter").hidden = locked || n >= max;
+    // First visit (empty crate): "Start from artists you love" comes before "Find a song"; after that, search leads.
+    const find = document.querySelector('[aria-labelledby="find-h"]');
+    if (taste.length === 0 && !locked) { if (find.previousElementSibling !== $("starter")) find.before($("starter")); }
+    else if ($("starter").previousElementSibling !== find) find.after($("starter"));
     $("keep-all").hidden = locked || !slots.some((s) => sugg[s.slot].some((t) => !taste.some((x) => x.id === t.id)) && room(s.slot) > 0);
     if (adding && (locked || room(adding) <= 0)) adding = null;
     $("adding").hidden = !adding;
