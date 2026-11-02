@@ -41,6 +41,14 @@ voted out, which is the Among Us feel I wanted from the start.
     - **No repeat moles until everyone has had a turn.** A simulation showed
       that in a skip-heavy room, whoever got dealt the mole most often won 55-65%
       of games.
+  - After the pre-merge review (2 Nov): **dealt weighted, not without repeats.**
+    With no repeats and every round's moles named at the reveal, the last
+    round's mole was a matter of elimination: at 4 players everyone knew round
+    4's mole, and with 2 moles each mole knew the other. Now the more often you
+    have been the mole, the less likely you are to be dealt it again, but never
+    impossible, so nobody can be sure. A simulation checks both: no round's
+    moles can be named for certain from the public history, and being dealt the
+    mole most often no longer decides the winner.
     - **Each mole is judged on their own.** With two moles, one caught and one
       not, the one who got away still gets +2.
     - **A mole who leaves mid-round counts as caught** for those who voted for

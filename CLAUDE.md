@@ -96,8 +96,8 @@ They are decisions, not defaults (see `docs/decisions/0009`).
   borrow, and which songs have been heard, so a page restores from the server
   alone. At game over every mole is named, including any who left.
 - Each player chooses where they hear tracks: on their own phone, or from the
-  host's. The host's phone always plays. The choice is per person, saved, and can
-  be changed during a game.
+  host's. The host's phone always plays. The choice is saved on the device, and
+  can be changed during a game.
 
 ## Formats
 
@@ -112,9 +112,11 @@ holds in both unless this section says otherwise.
   Nobody is voted out and there are no ghosts.
   - **Moles are dealt again every round** (same counts as above), because the
     steal shows who was caught. A round's moles are named at its reveal. They
-    are dealt **without repeats**: nobody is the mole twice until everyone
-    seated has been once, so being dealt the mole more often can't decide the
-    winner.
+    are dealt **weighted, never certain**: the more often someone has been the
+    mole this game, the less likely they are to be dealt it again, so being
+    dealt the mole more often doesn't decide the winner; but everyone seated
+    always keeps a real chance, so the earlier rounds never tell the room (or a
+    mole) who this round's moles are.
   - **Two votes at once**, live and changeable like the knockout vote: who's the
     mole (a name, not yourself, or skip), and **best pick** (a card, not your
     own). Last call starts when everyone has cast both.
@@ -159,8 +161,11 @@ did when something goes wrong, so it stays after any crit.
 - **Never logged before it is public, because the logs may be read aloud or on
   a screen during a game:** a prompt, who is a mole, what someone picked before
   picking closes, or who someone voted for. The action itself is fine to log
-  ("Ana picked a track", "Ben voted"): that is who did what, and it reveals
-  nothing a round's outcome depends on. Once picking closes, picks may be
+  ("Ana picked a track"): that is who did what, and it reveals nothing a
+  round's outcome depends on. A vote is the exception: while a vote is open
+  the tally is public, so a line per vote, read next to it, would show whose
+  vote moved which count. Votes are logged once, when the vote locks, as who
+  voted (never for whom). Once picking closes, picks may be
   logged with their picker (the listen screen shows them). The reveal line may
   name the prompt, who was ejected and whether they were a mole.
   Who voted for whom is never logged: the reveal shows it on screen, but the
