@@ -106,5 +106,5 @@ sits on the platter with the arm down.
 
 Phone first (390px), 16px gutters, no horizontal scroll. Home becomes sign on the
 left and forms on the right from 52rem; the table page is two columns from
-1100px with the 3D scene (a decoration) at the top of the game column.
+1100px with the 3D scene (a decoration) at the top of the side column.
 Tap targets are at least 44px; focus is a 3px lamp ring (ink on paper).
