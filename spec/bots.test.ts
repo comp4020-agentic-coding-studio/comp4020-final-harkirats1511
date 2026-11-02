@@ -214,7 +214,10 @@ it("a bot game with 1 human and 3 bots runs to game over by itself, then a remat
   if (process.env.LOG_TOKEN) {
     const mine = [...seen];
     expect(mine.some((l) => /added a bot \(bot-/.test(l))).toBe(true);
-    expect(mine.some((l) => /bot-[\w]+ \(p:\w{4}\) (picked a track|voted)/.test(l))).toBe(true);
+    expect(mine.some((l) => /bot-[\w]+ \(p:\w{4}\) picked a track/.test(l))).toBe(true);
+    // Votes are logged once, at the lock, as who voted (never for whom).
+    expect(mine.some((l) => /votes in: .*bot-[\w]+ \(p:\w{4}\)/.test(l))).toBe(true);
+    expect(mine.some((l) => /\) voted · round/.test(l))).toBe(false);
     for (const l of mine) if (/picked|voted|steal/.test(l) && !/reveal|finished/.test(l)) expect(l).not.toMatch(/A song for|mole/i);
   }
 

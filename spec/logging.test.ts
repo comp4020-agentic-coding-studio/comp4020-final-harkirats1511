@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { baseUrl, fillCrate, session, uniqueName } from "./helpers";
+import { baseUrl, getUrl, fillCrate, session, uniqueName } from "./helpers";
 import { PROMPTS } from "../src/lib/prompts";
 
 // Contract (CLAUDE.md "Logging"): the server logs who did what, one line per
@@ -107,7 +107,7 @@ withToken("logs a round without the prompt, moles, picks or votes before they're
   // The last pick closes picking: now the picks may be logged with their pickers.
   await ps[2].s.call(`/api/tables/${code}/pick`, { body: { trackId: ps[2].ids[0] } });
   for (let i = 0; i < 40; i++) {
-    const s = (await (await fetch(new URL(`/api/tables/${code}`, baseUrl))).json()) as { game?: { phase: string } };
+    const s = (await (await getUrl(`/api/tables/${code}`)).json()) as { game?: { phase: string } };
     if (s.game?.phase === "listen") break;
     await sleep(250);
   }
@@ -118,18 +118,31 @@ withToken("logs a round without the prompt, moles, picks or votes before they're
 
   await ps[0].s.call(`/api/tables/${code}/advance`, { body: {} });
   for (let i = 0; i < 40; i++) {
-    const s = (await (await fetch(new URL(`/api/tables/${code}`, baseUrl))).json()) as { game?: { phase: string } };
+    const s = (await (await getUrl(`/api/tables/${code}`)).json()) as { game?: { phase: string } };
     if (s.game?.phase === "vote") break;
     await sleep(250);
   }
-  for (const p of ps) await p.s.call(`/api/tables/${code}/vote`, { body: p === mole ? { skip: true } : { name: mole.name } });
+  // While the vote is open nothing is logged per vote: the tally is public, so a line per vote would show whose vote moved which count.
+  const [early, ...rest] = ps;
+  await early.s.call(`/api/tables/${code}/vote`, { body: early === mole ? { skip: true } : { name: mole.name } });
+  await sleep(400);
+  const open = linesWith(await logs(), code).join("\n");
+  for (const p of ps) expect(linesWith(open, p.name).some((l) => /\) (voted|changed their vote)/.test(l))).toBe(false);
+  expect(open).not.toMatch(/votes in/);
+  for (const p of rest) await p.s.call(`/api/tables/${code}/vote`, { body: p === mole ? { skip: true } : { name: mole.name } });
   // The mole is voted out and gets a steal; the options are theirs alone, and the guess isn't logged until it resolves.
   for (let i = 0; i < 40; i++) {
-    const s = (await (await fetch(new URL(`/api/tables/${code}`, baseUrl))).json()) as { game?: { phase: string } };
+    const s = (await (await getUrl(`/api/tables/${code}`)).json()) as { game?: { phase: string } };
     if (s.game?.phase === "steal") break;
     await sleep(250);
   }
   const stealing = linesWith(await logs(), code).join("\n");
+  // At the lock, one line names who voted, never whom.
+  const lock = linesWith(stealing, "votes in");
+  expect(lock).toHaveLength(1);
+  for (const p of ps) expect(lock[0]).toContain(p.name);
+  expect(lock[0]).toContain("(3 of 3)");
+  expect(lock[0]).not.toMatch(/voted for|\bfor\b|\bmole\b/i);
   expect(linesWith(stealing, mole.name).some((l) => /gets a steal/.test(l))).toBe(true);
   expect(stealing).not.toContain(prompt);
   expect(stealing).not.toMatch(/stole it|missed the steal/);
@@ -177,4 +190,26 @@ withToken("doesn't say a pick was a borrow, or log a round cut short by a leaver
   expect(after).toMatch(/game finished/);
   expect(after).not.toMatch(/picks closed/);
   expect(after).not.toMatch(/borrow/i);
+});
+
+withToken("never writes the session token or cookie to /api/logs", async () => {
+  const name = uniqueName("tok");
+  const res = await fetch(new URL("/api/join", baseUrl), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, pin: "5791" }) });
+  expect(res.status).toBeLessThan(300);
+  const cookie = res.headers.getSetCookie().map((c) => c.split(";")[0]);
+  expect(cookie.length).toBeGreaterThan(0);
+  const s = session();
+  // Some activity as that person, then a wrong-PIN attempt and a table.
+  const mine = await fetch(new URL("/api/tables", baseUrl), { method: "POST", headers: { "content-type": "application/json", cookie: cookie.join("; ") }, body: JSON.stringify({}) });
+  expect(mine.status).toBeLessThan(300);
+  await s.call("/api/join", { body: { name, pin: "0000" } });
+  await sleep(200);
+  const text = await logs();
+  for (const c of cookie) {
+    const [key, value] = [c.slice(0, c.indexOf("=")), c.slice(c.indexOf("=") + 1)];
+    expect(text).not.toContain(value);
+    expect(text).not.toContain(c);
+    expect(text).not.toContain(key);
+  }
+  expect(text).not.toContain(TOKEN!);
 });

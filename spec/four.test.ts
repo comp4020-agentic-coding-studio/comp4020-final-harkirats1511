@@ -192,9 +192,13 @@ it("a bot game in Four rounds reaches game over by itself, moles named only at t
   stream.close();
   if (process.env.LOG_TOKEN) {
     const mine = [...seen];
-    expect(mine.some((l) => /chose a best pick/.test(l))).toBe(true);
     expect(mine.some((l) => /last call · everyone has voted on both/.test(l))).toBe(true);
     expect(mine.filter((l) => /\] reveal · /.test(l))).toHaveLength(4);
+    // One line per round at the lock names who cast each ballot, never for whom; none while open.
+    const locks = mine.filter((l) => /votes in · mole: /.test(l));
+    expect(locks).toHaveLength(4);
+    for (const l of locks) expect(l, l).toMatch(/votes in · mole: .* \(\d+ of \d+\) · best pick: .* \(\d+ of \d+\) · round \d/);
+    expect(mine.some((l) => /\) (voted|changed their vote|chose a best pick) · round/.test(l))).toBe(false);
     // No prompt before a reveal, and no ballot targets for either ballot.
     for (const l of mine) {
       if (/\] (reveal|game finished)/.test(l)) continue;
