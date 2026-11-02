@@ -27,7 +27,7 @@ const list = booths();
     <section id="shop-stage" class="shop-stage" aria-label="3D shop floor (decorative; everything here is also in the lists below)" hidden>
       <div class="shop-loading" id="shop-loading" aria-hidden="true"><div>Opening up<span>unlocking the shop</span></div></div>
       <div class="shop-hud" id="shop-hud">
-        <div class="shop-brand" aria-hidden="true"><b>Mole Records</b><small><em id="hud-people">0</em> in the shop · <em id="hud-booths">0</em> booths</small></div>
+        <div class="shop-brand" aria-hidden="true"><b>Mole Records</b><small><em id="hud-people">0</em> in the shop · <em id="hud-booths">0</em> <span id="hud-booths-word">booths</span></small></div>
         <div class="shop-hint" aria-hidden="true">WASD or click to walk · Space to jump · E to sit</div>
         <div class="shop-sheet" id="shop-sheet" role="region" aria-label="Nearby" hidden></div>
         <div class="shop-emotes" id="shop-emotes">
@@ -42,6 +42,8 @@ const list = booths();
         </div>
       </div>
     </section>
+
+    <p class="shop-note shop-stream-note" id="shop-stream-note" role="status" hidden></p>
 
     <details id="shop-2d" class="shop-2d" open>
       <summary id="shop-2d-sum">Booths, people and radio</summary>
@@ -149,7 +151,7 @@ const list = booths();
   const syncScene = () => {
     sceneBtn.textContent = `3D: ${sceneWanted ? "on" : "off"}`;
     sceneBtn.setAttribute("aria-pressed", String(sceneWanted));
-    stage.hidden = !sceneWanted;
+    stage.hidden = !sceneWanted || sceneDead;
     shop.classList.toggle("is-3d", sceneWanted && !sceneDead);
   };
   const syncPause = () => scene?.setPaused(document.hidden || !sceneVisible || !sceneWanted);
@@ -189,7 +191,7 @@ const list = booths();
     }
   }
   function sceneInit() {
-    if (!canRunScene()) { sceneDead = true; syncScene(); return; }
+    if (!canRunScene()) { sceneDead = true; sceneBtn.hidden = true; details.open = true; syncScene(); return; }
     sceneBtn.hidden = false;
     syncScene();
     sceneBtn.addEventListener("click", () => {
@@ -249,6 +251,7 @@ const list = booths();
     $("count-booths").textContent = String(booths.length);
     $("count-booths-word").textContent = booths.length === 1 ? "booth" : "booths";
     $("hud-booths").textContent = String(booths.length);
+    $("hud-booths-word").textContent = booths.length === 1 ? "booth" : "booths";
     if (html === lastHtml) return;
     lastHtml = html;
     // keep what someone is typing, which report form is open and any message
@@ -442,9 +445,52 @@ const list = booths();
   }
 
   // ---- the shop stream: names, avatars, positions, emotes, booths, radio ----
-  const es = new EventSource("/api/shop/events");
+  let es: EventSource;
   const parse = (e: MessageEvent) => JSON.parse(e.data);
+  let retryMs = 2000, retryTimer = 0, gotSnapshot = false;
+  const streamNote = $("shop-stream-note");
+  // The stream refuses with a status when the floor is full; EventSource only says "error",
+  // so ask once with fetch to find out why, and keep the 2D booth list up to date meanwhile.
+  async function refreshBooths() {
+    try {
+      const r = await fetch("/api/shop/booths", { credentials: "same-origin" });
+      if (r.ok) { booths = await r.json(); renderList(); scene?.setBooths(booths); }
+    } catch { /* offline: keep the last list */ }
+  }
+  let pollTimer = 0;
+  async function onStreamError() {
+    es.close();
+    clearTimeout(retryTimer);
+    let full = false, said = "";
+    try {
+      const r = await fetch("/api/shop/events", { credentials: "same-origin", headers: { accept: "application/json" } });
+      if (r.status === 503) {
+        full = true;
+        const d = (await r.json().catch(() => null)) as { error?: string; booths?: Booth[] } | null;
+        said = d?.error ?? "";
+        if (Array.isArray(d?.booths)) { booths = d!.booths; renderList(); scene?.setBooths(booths); }
+      } else if (r.status === 401) { location.href = "/?next=/shop"; return; }
+      else void r.body?.cancel();
+    } catch { /* offline */ }
+    streamNote.hidden = false;
+    streamNote.textContent = full
+      ? `${said || "The shop floor is full right now."} The booth list below still works.`
+      : "Lost the shop connection. The booth list below still works; trying again.";
+    void refreshBooths();
+    // Keep the 2D list fresh while the stream is out (it is the only live feed there is).
+    clearInterval(pollTimer);
+    pollTimer = window.setInterval(refreshBooths, 5000);
+    retryTimer = window.setTimeout(connect, retryMs);
+    retryMs = Math.min(retryMs * 2, 30000);
+  }
+  function connect() {
+    es = new EventSource("/api/shop/events");
+    es.addEventListener("error", () => { if (es.readyState === EventSource.CLOSED || !gotSnapshot) void onStreamError(); });
+    wire(es);
+  }
+  function wire(es: EventSource) {
   es.addEventListener("snapshot", (e) => {
+    gotSnapshot = true; retryMs = 2000; streamNote.hidden = true; clearInterval(pollTimer);
     const d = parse(e as MessageEvent);
     snapshot = d;
     roster.clear();
@@ -475,8 +521,11 @@ const list = booths();
   es.addEventListener("emote", (e) => { const d = parse(e as MessageEvent); scene?.emote(d.name, d.emote); });
   es.addEventListener("booths", (e) => { booths = parse(e as MessageEvent); renderList(); scene?.setBooths(booths); });
   es.addEventListener("radio", (e) => { radio.update(parse(e as MessageEvent), { changed: true }); sfx.clunk(); });
+  }
+  connect();
+  addEventListener("online", () => { if (!gotSnapshot || es.readyState === EventSource.CLOSED) { retryMs = 2000; clearTimeout(retryTimer); connect(); } });
 
-  addEventListener("pagehide", () => { es.close(); radio.destroy(); sfx.destroy(); scene?.destroy(); });
+  addEventListener("pagehide", () => { clearTimeout(retryTimer); clearInterval(pollTimer); es.close(); radio.destroy(); sfx.destroy(); scene?.destroy(); });
   // A read-only peek for the browser checks.
   (window as unknown as { __shop: unknown }).__shop = { debug: () => scene?.debug() };
   paintSound();
@@ -570,6 +619,8 @@ const list = booths();
   @media (pointer: coarse) { .shop-stick { display: block; } .shop-hint { display: none; } }
   @media (max-width: 560px) { .shop-stage.has-sheet .shop-emotes { bottom: 190px; } .shop-stage.has-sheet .shop-stick { bottom: 200px; } .shop-emotes { flex-direction: row; flex-wrap: wrap; width: 120px; justify-content: flex-end; } .shop-emotes button { width: 44px; height: 44px; font-size: 10px; } }
 
+  .shop-stream-note { max-width: 72rem; margin: 0 auto; padding: 0.6rem 1rem; color: var(--s-lamp); font-weight: 600; }
+  .shop-stream-note[hidden] { display: none; }
   .shop-2d { max-width: 72rem; margin: 0 auto; padding: 0 1rem; }
   .shop-2d > summary { cursor: pointer; font: 700 0.95rem var(--s-ui); min-height: 44px; display: flex; align-items: center; color: var(--s-sleeve); padding: 0.4rem 0; }
   .shop:not(.is-3d) .shop-2d > summary { display: none; }
