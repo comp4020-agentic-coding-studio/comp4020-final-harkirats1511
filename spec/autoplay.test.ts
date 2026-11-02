@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { baseUrl, fillCrate, session, uniqueName } from "./helpers";
+import { baseUrl, getUrl, fillCrate, session, uniqueName } from "./helpers";
 
 // Contract: a table can let the server play the round's tracks in order, so the
 // room isn't waiting on the host's phone (which may lock or drop).
@@ -13,7 +13,7 @@ vi.setConfig({ testTimeout: 90_000 });
 type Session = ReturnType<typeof session>;
 type S = { status: string; game?: { phase: string; nowPlaying: number | null } };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const get = async (code: string) => (await (await fetch(new URL(`/api/tables/${code}`, baseUrl))).json()) as S;
+const get = async (code: string) => (await (await getUrl(`/api/tables/${code}`)).json()) as S;
 
 async function setup(opts: Record<string, unknown>) {
   const ps: { s: Session; name: string }[] = [];

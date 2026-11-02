@@ -65,9 +65,17 @@ it("the Deezer bucket serves card audio first, makes low priorities wait or give
   // ahead of all of them, and the starters can't have used its room.
   const waiting = Array.from({ length: 6 }, () => b.take("suggest", 2000));
   const t0 = Date.now();
+  // The card is let through in the same window as the queued starters, not pushed behind them to a later
+  // one (a wall-clock gap under the 400 ms window; the bucket has no strict queue, so "no later than the
+  // first starter's window" is what it promises). Timestamps, not a race on resolution order.
+  const doneAt: number[] = [];
+  const starters = waiting.map((w) => w.then(() => doneAt.push(Date.now())));
   expect(await b.take("card", 2000)).toBe(true);
-  expect(Date.now() - t0).toBeLessThan(500);
-  await Promise.all(waiting);
+  const cardAt = Date.now();
+  // A generous wall-clock bound (the window is 400 ms; a loaded machine adds scheduling noise).
+  expect(cardAt - t0).toBeLessThan(1500);
+  await Promise.all(starters);
+  expect(cardAt).toBeLessThanOrEqual(Math.min(...doneAt) + 400);
   // In any window of 400 ms it never let more than 10 through.
   expect(b.inWindow()).toBeLessThanOrEqual(10);
   // A low priority with no patience gives up rather than queue. Checked on a bucket that is

@@ -2,6 +2,18 @@ import { inject } from "vitest";
 
 const baseUrl = inject("baseUrl");
 
+const DROPPED = /other side closed|socket hang up|ECONNRESET/i;
+export async function getRetrying(method: string, send: () => Promise<Response>): Promise<Response> {
+  for (let tries = 0; ; tries++) {
+    try {
+      return await send();
+    } catch (e) {
+      const why = `${(e as { cause?: unknown }).cause ?? ""} ${(e as Error).message ?? e}`;
+      if (method !== "GET" || tries >= 2 || !DROPPED.test(why)) throw e;
+    }
+  }
+}
+
 // One browser session: its own cookie jar, talking to the running app.
 export function session() {
   let cookie = "";
@@ -18,11 +30,9 @@ export function session() {
           body: init.body === undefined ? undefined : JSON.stringify(init.body),
         });
       // Node's server closes a kept-alive socket after 5 s idle; a GET sent on it at
-      // that moment dies before the app sees it. Seen only off loopback, under load.
-      const res = await send().catch((e: Error) => {
-        if (method === "GET" && /other side closed|socket hang up/i.test(String((e as { cause?: Error }).cause ?? e))) return send();
-        throw e;
-      });
+      // that moment dies before the app sees it (also seen as ECONNRESET under load). Only a
+      // GET is retried: it can't have changed anything. A POST never is.
+      const res = await getRetrying(method, send);
       const set = res.headers.getSetCookie?.() ?? [];
       if (set.length) cookie = set.map((c) => c.split(";")[0]).join("; ");
       return res;
@@ -137,3 +147,6 @@ export async function fillCrate(s: ReturnType<typeof session>, which = 0): Promi
   }
   return ids;
 }
+
+// A GET that survives one dropped keep-alive socket, for specs that fetch without a session.
+export const getUrl = (path: string, init: RequestInit = {}) => getRetrying("GET", () => fetch(new URL(path, baseUrl), init));

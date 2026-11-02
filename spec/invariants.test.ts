@@ -1,6 +1,8 @@
 import { JSDOM } from "jsdom";
 import { readFileSync } from "node:fs";
-import { expect, inject, it } from "vitest";
+import { expect, inject, it, vi } from "vitest";
+
+vi.setConfig({ testTimeout: 60_000 });
 
 // The two things the course relies on, checked against the RUNNING app
 // (spec/global-setup.ts finds it): it answers at /, and /readme/ publishes

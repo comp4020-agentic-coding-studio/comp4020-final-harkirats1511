@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { baseUrl, session, uniqueName } from "./helpers";
+import { baseUrl, getUrl, session, uniqueName } from "./helpers";
 
 // Contract: each person has an avatar, a small set of choices from fixed lists,
 // shown to everyone at their table (2D badge now, 3D character later).
@@ -79,7 +79,7 @@ it("shows each member's avatar on the table's public state", async () => {
 
   const { code } = (await (await host.s.call("/api/tables", { body: {} })).json()) as { code: string };
   await guest.s.call(`/api/tables/${code}/join`, { body: {} });
-  const state = (await (await fetch(new URL(`/api/tables/${code}`, baseUrl))).json()) as {
+  const state = (await (await getUrl(`/api/tables/${code}`)).json()) as {
     members: { name: string; avatar: Avatar }[];
   };
   const seat = state.members.find((m) => m.name === guest.name)!;

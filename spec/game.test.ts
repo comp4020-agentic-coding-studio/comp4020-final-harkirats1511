@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { PROMPTS } from "../src/lib/prompts";
-import { baseUrl, CRATES, fillCrate, session, SLOT_NAMES, uniqueName } from "./helpers";
+import { baseUrl, getUrl, CRATES, fillCrate, session, SLOT_NAMES, uniqueName } from "./helpers";
 
 // Contract for a game at a table (CLAUDE.md has the rules these hold; decision 0009):
 //   POST /api/tables {pickSeconds?, voteSeconds?, moles?, autoplay?} -> {code}
@@ -66,7 +66,7 @@ async function player(prefix: string, which: number): Promise<Player> {
 }
 
 async function state(code: string): Promise<State> {
-  return (await (await fetch(new URL(`/api/tables/${code}`, baseUrl))).json()) as State;
+  return (await (await getUrl(`/api/tables/${code}`)).json()) as State;
 }
 
 async function waitFor(code: string, ok: (s: State) => boolean, ms = 12000): Promise<State> {
@@ -213,12 +213,32 @@ it("starts with 8 players and deals 2 moles", async () => {
   expect(roles.filter((r) => r === "player")).toHaveLength(6);
 });
 
-it("ignores a host's mole count: the rule is 1 for 3 to 5 players", async () => {
-  const t = await table(4, { moles: 2 });
-  expect((await t.host.s.call(at(t.code, "start"), { body: {} })).status).toBeLessThan(300);
-  await waitFor(t.code, (s) => s.game?.phase === "pick");
-  const roles = await Promise.all(t.players.map(async (p) => (await me(p, t.code)).role));
-  expect(roles.filter((r) => r === "mole")).toHaveLength(1);
+// The host's mole count goes through POST /api/tables/:code/moles (creating a table ignores it).
+it("honours the host's mole count only where it fits: 2 refused with 4 seated, kept at 6, cut to 1 if people leave, 1 stays 1 at 7", async () => {
+  const roleCount = async (t: Awaited<ReturnType<typeof table>>, who = t.players) => {
+    expect((await t.host.s.call(at(t.code, "start"), { body: {} })).status).toBeLessThan(300);
+    await waitFor(t.code, (s) => s.game?.phase === "pick");
+    return (await Promise.all(who.map(async (p) => (await me(p, t.code)).role))).filter((r) => r === "mole").length;
+  };
+  // 2 moles with 4 seated: refused, and the game still deals the plain 1.
+  const four = await table(4);
+  const refused = await four.host.s.call(at(four.code, "moles"), { body: { moles: 2 } });
+  expect(refused.status).toBe(409);
+  expect(((await refused.json()) as { error: string }).error).toMatch(/never more than a third/);
+  expect(await roleCount(four)).toBe(1);
+  // 2 moles at 6: accepted, and 2 are dealt.
+  const six = await table(6);
+  expect((await six.host.s.call(at(six.code, "moles"), { body: { moles: 2 } })).status).toBe(200);
+  expect(await roleCount(six)).toBe(2);
+  // 2 chosen at 6, then two leave before the start: 4 seated, so 1.
+  const shrunk = await table(6);
+  expect((await shrunk.host.s.call(at(shrunk.code, "moles"), { body: { moles: 2 } })).status).toBe(200);
+  for (const p of shrunk.players.slice(4)) expect((await p.s.call(at(shrunk.code, "leave"), { body: {} })).status).toBeLessThan(300);
+  expect(await roleCount(shrunk, shrunk.players.slice(0, 4))).toBe(1);
+  // 1 chosen at 7 (the plain rule would deal 2): 1.
+  const seven = await table(7);
+  expect((await seven.host.s.call(at(seven.code, "moles"), { body: { moles: 1 } })).status).toBe(200);
+  expect(await roleCount(seven)).toBe(1);
 });
 
 it("locks a crate for the game: edits refused with 409, and open again once it ends", async () => {

@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { baseUrl, fillCrate, session, uniqueName } from "./helpers";
+import { baseUrl, getUrl, fillCrate, session, uniqueName } from "./helpers";
 
 // Contract: a person can look back at the games they played, which is what the
 // persistence is for. Only finished games, only ones they were in.
@@ -16,7 +16,7 @@ type Session = ReturnType<typeof session>;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function state(code: string) {
-  return (await (await fetch(new URL(`/api/tables/${code}`, baseUrl))).json()) as {
+  return (await (await getUrl(`/api/tables/${code}`)).json()) as {
     status: string;
     game?: { phase: string };
   };
