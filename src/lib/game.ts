@@ -152,33 +152,30 @@ const promptOf = (d: Tx | typeof db, gameId: string, round: number) =>
 
 const isFour = (g: { format: string }) => g.format === "four";
 
-// Who is dealt as a mole next, without repeats (CLAUDE.md "Formats"): nobody is a mole twice
-// until everyone seated has been once. `history` is the moles of each earlier round, oldest
-// first, `ids` everyone in play now (a leaver is simply not in it; someone new is eligible
-// at once), `count` how many to deal. A cycle is the set of people who have been a mole since
-// everyone last had; when the pool empties, in the middle of a round or not, a new cycle starts
-// (so a 2-mole round can take the last of one cycle and the first of the next, never the same
-// person twice). Pure apart from `mix`, so it can be tested.
-export function dealOrder(history: string[][], ids: string[], count: number, mix: <T>(a: T[]) => T[] = shuffle): string[] {
-  let seen = new Set<string>();
-  const full = () => ids.every((i) => seen.has(i));
-  // Replay the earlier rounds, mole by mole, resetting whenever everyone has had a turn.
-  for (const round of history) for (const m of round) {
-    seen.add(m);
-    if (full()) seen = new Set();
-  }
+// Who is dealt as a mole next, weighted (CLAUDE.md "Formats"): the more often someone has been a mole
+// this game, the less likely they are dealt it again, but never impossible, so nobody can be sure
+// from the public history who this round's moles are. `history` is the moles of each earlier round,
+// `ids` everyone in play now (a leaver is simply not in it; someone new has no turns yet), `count` how
+// many to deal. A person's weight is 1 / (1 + 2 * times they have been a mole); each mole is drawn
+// in turn from the rest (never the same person twice in a round). Pure apart from `rand`
+// (a number in [0, 1)), so it can be tested.
+export const dealWeight = (times: number) => 1 / (1 + 2 * times);
+export function dealOrder(history: string[][], ids: string[], count: number, rand: () => number = () => randomInt(1 << 30) / (1 << 30)): string[] {
+  const times = new Map<string, number>();
+  for (const round of history) for (const m of round) times.set(m, (times.get(m) ?? 0) + 1);
+  const pool = [...ids];
   const chosen: string[] = [];
   while (chosen.length < Math.min(count, ids.length)) {
-    const pool = ids.filter((i) => !seen.has(i) && !chosen.includes(i));
-    const pick = mix(pool.length ? pool : ids.filter((i) => !chosen.includes(i)))[0];
-    chosen.push(pick);
-    seen.add(pick);
-    if (full()) seen = new Set();
+    const w = pool.map((i) => dealWeight(times.get(i) ?? 0));
+    let x = rand() * w.reduce((a, b) => a + b, 0);
+    let k = 0;
+    while (k < pool.length - 1 && x >= w[k]) x -= w[k++];
+    chosen.push(pool.splice(k, 1)[0]);
   }
   return chosen;
 }
 
-// Four rounds: deal this round's moles afresh from everyone in play (the same count rule as ever), without repeats.
+// Four rounds: deal this round's moles afresh from everyone in play (the same count rule as ever), weighted.
 function dealMoles(d: Tx, gameId: string, round: number, ids: string[], count: number) {
   const rows = d.select().from(roundMoles).where(eq(roundMoles.gameId, gameId)).orderBy(asc(roundMoles.round)).all().filter((r) => r.round < round);
   const history = Array.from({ length: Math.max(0, round - 1) }, (_, i) => rows.filter((r) => r.round === i + 1).map((r) => r.personId));
@@ -334,6 +331,25 @@ function logReveal(d: Tx, g: Game, accused: string | null, out: string | null, s
       ? `ejected ${personTag(out)}, ${role === "mole" ? "was a mole" : "was not a mole"}`
       : "nobody ejected";
   log(scope, `reveal · ${said} · ${what} · round ${g.round}`);
+}
+
+// The vote locked: one line saying who voted, never for whom (CLAUDE.md "Logging"). Only people
+// still in the game at the lock are named, in the order they sat down. Four rounds names the
+// voters of each ballot.
+function logVotesIn(d: Tx, g: Game) {
+  const here = inPlay(d, g.id).filter((p) => p.ejectedRound === null);
+  const names = (rows: { p: string }[]) => {
+    const who = new Set(rows.map((r) => r.p));
+    const list = here.filter((p) => who.has(p.personId));
+    return `${list.length ? list.map((p) => personTag(p.personId)).join(", ") : "nobody"} (${list.length} of ${here.length})`;
+  };
+  const mole = d.select({ p: votes.voterPersonId }).from(votes).where(and(eq(votes.gameId, g.id), eq(votes.round, g.round))).all();
+  let line = `votes in: ${names(mole)}`;
+  if (isFour(g)) {
+    const best = d.select({ p: bestVotes.voterPersonId }).from(bestVotes).where(and(eq(bestVotes.gameId, g.id), eq(bestVotes.round, g.round))).all();
+    line = `votes in · mole: ${names(mole)} · best pick: ${names(best)}`;
+  }
+  log(tableScope(g.tableCode), `${line} · round ${g.round}`);
 }
 
 // The vote locked: the most votes among the alive ejects that player; a tie, or
@@ -605,6 +621,7 @@ function step(d: Tx, g: Game, cause: string) {
     }
   } else if (g.phase === "vote") {
     logPhase(g, "reveal", cause);
+    logVotesIn(d, g);
     resolveVote(d, g);
   } else if (g.phase === "steal") {
     logPhase(g, "reveal", cause);
@@ -694,6 +711,16 @@ function flush(code: string) {
   else schedule(code);
 }
 
+// A timer step must never take the server down for every table: a step that throws is logged
+// (the message only: no prompt, no ids beyond the table) and that game is left as it was.
+function safely(code: string, fn: () => void) {
+  try {
+    fn();
+  } catch (e) {
+    log(tableScope(code), `timer step failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 // ---- timers ----
 
 const timers = new Map<string, NodeJS.Timeout>();
@@ -705,8 +732,8 @@ export function schedule(code: string) {
   if (!g || g.winner || g.deadline === null) return;
   // Overdue (the server was down past it): step now, so whoever's request loaded
   // the server gets the current phase back, not the one that already ended.
-  if (g.deadline <= Date.now()) return fire(code, g.round, g.phase);
-  const timer = setTimeout(() => fire(code, g.round, g.phase), Math.max(0, g.deadline - Date.now()));
+  if (g.deadline <= Date.now()) return safely(code, () => fire(code, g.round, g.phase));
+  const timer = setTimeout(() => safely(code, () => fire(code, g.round, g.phase)), Math.max(0, g.deadline - Date.now()));
   timer.unref();
   timers.set(code, timer);
 }
@@ -853,17 +880,6 @@ export function pickTrack(code: string, personId: string, trackId: number, from?
   return res;
 }
 
-// Whether this is the first vote change of this person this round (memory only:
-// after a restart one more line is harmless). Only the latest round is kept.
-const changedVote = new Map<string, { round: number; who: Set<string> }>();
-function firstChange(gameId: string, round: number, personId: string): boolean {
-  let e = changedVote.get(gameId);
-  if (!e || e.round !== round) changedVote.set(gameId, (e = { round, who: new Set() }));
-  if (e.who.has(personId)) return false;
-  e.who.add(personId);
-  return true;
-}
-
 // choice is a player's name or "skip". A vote can be changed until the vote
 // locks: the voter's row is replaced, and the last one counts.
 export function castVote(code: string, personId: string, choice: { name: string } | "skip"): { ok: true } | Fail {
@@ -883,19 +899,12 @@ export function castVote(code: string, personId: string, choice: { name: string 
       if (who.id === personId) return fail(400, "You can't vote for yourself.");
       target = who.id;
     }
-    const before = tx
-      .select({ p: votes.voterPersonId })
-      .from(votes)
-      .where(and(eq(votes.gameId, game.id), eq(votes.round, game.round), eq(votes.voterPersonId, personId)))
-      .get();
     tx.insert(votes)
       .values({ gameId: game.id, round: game.round, voterPersonId: personId, choice: target, slot: null })
       .onConflictDoUpdate({ target: [votes.gameId, votes.round, votes.voterPersonId], set: { choice: target, slot: null } })
       .run();
-    // Who voted, never for whom.
-    // Once per person per round: a toggling voter doesn't fill the log.
-    if (!before) log(tableScope(code), `${personTag(personId)} voted · round ${game.round}`);
-    else if (firstChange(game.id, game.round, personId)) log(tableScope(code), `${personTag(personId)} changed their vote · round ${game.round}`);
+    // Nothing is logged while the vote is open: the tally is public, so a line per vote would show
+    // whose vote moved which count. One line at the lock says who voted (logVotesIn).
     settle(tx, code, "everyone voted");
     return { ok: true };
   });
@@ -917,14 +926,11 @@ export function castBest(code: string, personId: string, order: number): { ok: t
     const card = tx.select().from(picks).where(and(eq(picks.gameId, game.id), eq(picks.round, game.round), eq(picks.slot, order))).get();
     if (!card) return fail(400, "No such card.");
     if (!isOthersCard(card, personId)) return fail(400, "You can't pick your own card.");
-    const before = tx.select({ p: bestVotes.voterPersonId }).from(bestVotes)
-      .where(and(eq(bestVotes.gameId, game.id), eq(bestVotes.round, game.round), eq(bestVotes.voterPersonId, personId))).get();
     tx.insert(bestVotes)
       .values({ gameId: game.id, round: game.round, voterPersonId: personId, pickPersonId: card.personId })
       .onConflictDoUpdate({ target: [bestVotes.gameId, bestVotes.round, bestVotes.voterPersonId], set: { pickPersonId: card.personId } })
       .run();
-    // Who cast it, never for which card.
-    if (!before) log(tableScope(code), `${personTag(personId)} chose a best pick · round ${game.round}`);
+    // Nothing is logged while the vote is open (see castVote); the lock line covers this ballot too.
     touch(code);
     settle(tx, code, "everyone voted");
     return { ok: true };

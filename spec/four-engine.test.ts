@@ -213,7 +213,9 @@ it("plays four rounds: moles dealt again each round and named only at its reveal
     if (!/^\[table \w+\] (reveal|game finished)/.test(l)) for (const t of texts) expect(l).not.toContain(t);
     expect(l).not.toMatch(/voted for|best pick of|chose card/);
   }
-  expect(lines.some((l) => /chose a best pick/.test(l))).toBe(true);
+  // No line per vote while open; one per round at the lock, naming who cast each ballot.
+  expect(lines.some((l) => /\) (voted|changed their vote|chose a best pick) · round/.test(l))).toBe(false);
+  expect(lines.filter((l) => /votes in · mole: .* \(6 of 6\) · best pick: .* \(6 of 6\) · round/.test(l))).toHaveLength(4);
   expect(lines.filter((l) => /last call · everyone has voted on both/.test(l))).toHaveLength(4);
   expect(lines.some((l) => /game finished · winner: points/.test(l))).toBe(true);
 });
@@ -796,63 +798,48 @@ it("keeps each round's best card on the server in past[], so a reload at game ov
   }
 });
 
-it("deals moles without repeats: over a 4-player game nobody is the mole twice, over a 6-player game with two each round no pair repeats a person until all six have been", async () => {
-  for (let n = 0; n < 5; n++) {
-    const w = world(4, { moles: 1 });
-    const seen: string[] = [];
-    for (let round = 1; round <= 4; round++) {
-      seen.push(...molesOf(w, round));
-      pickAll(w); toVote(w);
-      for (const id of w.ids) vote(w, id, "skip");
-      lock(w);
-      if (round < 4) M.G.advance(w.code);
+it("deals the right number of moles each round of an engine game, from people in play, never the same person twice in a round", async () => {
+  for (const [n, k] of [[4, 1], [6, 2]] as const) {
+    for (let g = 0; g < 5; g++) {
+      const w = world(n, { moles: k });
+      for (let round = 1; round <= 4; round++) {
+        const m = molesOf(w, round);
+        expect(m.length).toBe(k);
+        expect(new Set(m).size).toBe(k);
+        for (const id of m) expect(w.ids).toContain(id);
+        pickAll(w); toVote(w);
+        for (const id of w.ids) vote(w, id, "skip");
+        lock(w);
+        if (round < 4) M.G.advance(w.code);
+      }
     }
-    expect(new Set(seen).size).toBe(4);
-  }
-  for (let n = 0; n < 5; n++) {
-    const w = world(6, { moles: 2 });
-    const per: string[][] = [];
-    for (let round = 1; round <= 4; round++) {
-      per.push(molesOf(w, round));
-      pickAll(w); toVote(w);
-      for (const id of w.ids) vote(w, id, "skip");
-      lock(w);
-      if (round < 4) M.G.advance(w.code);
-    }
-    // Rounds 1-3 are one full cycle: six different people. Round 4 starts the next: two different people.
-    expect(new Set(per.slice(0, 3).flat()).size).toBe(6);
-    expect(new Set(per[3]).size).toBe(2);
   }
 });
 
-it("deals the next moles from who hasn't been, refilling when the pool empties, and counts people who joined later", () => {
-  const { dealOrder } = M.G;
-  const ids = ["a", "b", "c", "d", "e"];
-  // 2 moles from 5, over many rounds: within every window of one cycle nobody repeats; a round never has the same person twice.
-  for (let n = 0; n < 200; n++) {
-    const hist: string[][] = [];
-    for (let r = 0; r < 12; r++) hist.push(dealOrder(hist, ids, 2));
-    for (const h of hist) expect(new Set(h).size).toBe(2);
-    // Replay: until the pool is empty nobody is dealt again.
-    let seen = new Set<string>();
-    for (const h of hist) for (const m of h) {
-      expect(seen.has(m)).toBe(false);
-      seen.add(m);
-      if (ids.every((i) => seen.has(i))) seen = new Set();
-    }
+it("deals weighted: a person's chance falls with how often they have been a mole, but is never zero", () => {
+  const { dealOrder, dealWeight } = M.G;
+  expect(dealWeight(0)).toBe(1);
+  expect(dealWeight(1)).toBeCloseTo(1 / 3);
+  expect(dealWeight(3)).toBeCloseTo(1 / 7);
+  expect(dealWeight(3)).toBeGreaterThan(0);
+  // Two people, a has been the mole once: weights a 1/3, b 1. The draw follows the injected randomness.
+  const h = [["a"]];
+  expect(dealOrder(h, ["a", "b"], 1, () => 0)).toEqual(["a"]);
+  expect(dealOrder(h, ["a", "b"], 1, () => 0.2)).toEqual(["a"]);
+  expect(dealOrder(h, ["a", "b"], 1, () => 0.4)).toEqual(["b"]);
+  expect(dealOrder(h, ["a", "b"], 1, () => 0.999999)).toEqual(["b"]);
+  // Someone who has been the mole every round so far can still be dealt it (nobody is ruled out by elimination).
+  const every = [["a"], ["a"], ["a"]];
+  expect(dealOrder(every, ["a", "b", "c", "d"], 1, () => 0)).toEqual(["a"]);
+  // A round never deals the same person twice, and never more than are seated.
+  for (let n = 0; n < 300; n++) {
+    const got = dealOrder([["a", "b"]], ["a", "b", "c", "d", "e"], 2);
+    expect(new Set(got).size).toBe(2);
   }
-  // The pool of 5 with 2 per round: after rounds {a,b},{c,d} only e is left, so e is dealt, then a new cycle fills the second place.
-  const third = dealOrder([["a", "b"], ["c", "d"]], ids, 2);
-  expect(third).toContain("e");
-  expect(new Set(third).size).toBe(2);
-  // Someone who joined later is eligible like anyone, and is dealt before anyone who has already been.
-  expect(dealOrder([["a"], ["b"], ["c"]], ["a", "b", "c", "d"], 1)).toEqual(["d"]);
-  // A leaver is not dealt; the others carry on.
-  expect(dealOrder([["a"], ["b"]], ["a", "c", "d"], 1)).not.toContain("a");
-  // Everyone has been once: a new cycle starts (anyone may be next).
-  expect(["a", "b", "c"]).toContain(dealOrder([["a"], ["b"], ["c"]], ["a", "b", "c"], 1)[0]);
-  // A leaver who had been is forgotten; 3 left, a and b had been: only c is eligible.
-  expect(dealOrder([["a"], ["b"], ["z"]], ["a", "b", "c"], 1)).toEqual(["c"]);
+  expect(dealOrder([], ["a", "b"], 5).length).toBe(2);
+  // A leaver is not dealt; someone who joined later has no turns yet and so the heaviest weight.
+  expect(dealOrder([["a"], ["z"]], ["a", "c"], 1, () => 0.999)).toEqual(["c"]);
+  for (let n = 0; n < 200; n++) expect(dealOrder([["z"]], ["a", "b", "c"], 1)).not.toContain("z");
 });
 
 it("pays each mole on their own in an engine round: one caught, one not caught gets +2, and the steal goes to the caught one", async () => {

@@ -77,7 +77,6 @@ it("says the Four rounds rules in How to play and has the 'still to cast' line",
   expect(text).toContain("a mole's own mole vote scores nothing");
   expect(text).toContain("a tie made only of moles");
   expect(text).toContain("You can't best-pick a song you lent");
-  expect(text).toContain("without repeats");
   expect(text).toContain("Each mole is judged on their own");
   expect(text).toContain("A mole who leaves counts as caught");
   expect(text).toContain('id="vote-todo"');
