@@ -184,3 +184,33 @@ it("sends public state only: no prompt, role, crate, title or picker during a ga
   }
   stream.close();
 });
+
+// A pick must send nothing on any stream (CLAUDE.md "Show a pick before the pick phase closes"),
+// the shop's included. The shop is shared with whatever else the suite is doing, so other tables'
+// booth changes may arrive; what must not is anything about this table after a pick.
+it("sends nothing about a table on the shop stream when someone picks", async () => {
+  const people: { s: ReturnType<typeof session>; name: string; ids: number[] }[] = [];
+  for (let i = 0; i < 3; i++) {
+    const s = session();
+    const name = uniqueName(`shpk${i}`);
+    await s.call("/api/join", { body: { name, pin: "1357" } });
+    people.push({ s, name, ids: await fillCrate(s, i) });
+  }
+  const watcher = await signedIn("shpkw");
+  const stream = await watcher.s.open("/api/shop/events");
+  await stream.next((e) => e.event === "snapshot");
+  const { code } = (await (await people[0].s.call("/api/tables", { body: { pickSeconds: 60 } })).json()) as { code: string };
+  for (const p of people.slice(1)) await p.s.call(`/api/tables/${code}/join`, { body: {} });
+  await people[0].s.call(`/api/tables/${code}/start`, { body: {} });
+  await sleep(1500);
+  const mark = stream.seen.length;
+  for (const p of people.slice(0, 2)) expect((await p.s.call(`/api/tables/${code}/pick`, { body: { trackId: p.ids[0] } })).status).toBe(200);
+  await sleep(1500);
+  const after = stream.seen.slice(mark);
+  const mine = (b: { host: string }) => b.host === people[0].name;
+  // Anything that arrived has this table's booth exactly as before the picks (so a pick moved nothing it shows).
+  const lastBefore = [...stream.seen.slice(0, mark)].reverse().find((e) => e.event === "booths")?.data.find(mine);
+  for (const e of after.filter((e) => e.event === "booths")) expect(e.data.find(mine)).toEqual(lastBefore);
+  expect(after.filter((e) => e.event !== "booths" && e.event !== "moves" && e.event !== "radio" && e.event !== "joined" && e.event !== "left" && e.event !== "emote")).toEqual([]);
+  stream.close();
+});
