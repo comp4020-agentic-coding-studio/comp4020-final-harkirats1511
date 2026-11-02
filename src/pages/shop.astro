@@ -474,7 +474,7 @@ const list = booths();
     } catch { /* offline */ }
     streamNote.hidden = false;
     streamNote.textContent = full
-      ? `${said || "The shop floor is full right now."} The booth list below still works.`
+      ? (said || "The shop floor is full right now. The booth list below still works.")
       : "Lost the shop connection. The booth list below still works; trying again.";
     void refreshBooths();
     // Keep the 2D list fresh while the stream is out (it is the only live feed there is).
