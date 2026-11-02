@@ -5,7 +5,7 @@ import { actedTooFast } from "../../../../lib/limits.ts";
 import { refused, tableScope, tag } from "../../../../lib/log.ts";
 import { isMember, normaliseCode, tableExists } from "../../../../lib/tables.ts";
 
-// Body {promptId}: the voted-out mole's one guess, one of the four they were offered.
+// Body {promptId}: the voted-out mole's one guess, one of the eight they were offered.
 export const POST: APIRoute = async ({ params, cookies, request }) => {
   const me = personFromCookies(cookies);
   const code = normaliseCode(params.code);

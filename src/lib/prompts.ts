@@ -1,7 +1,7 @@
 // Prompts for the crate game (decision 0009). Each round draws one; non-moles see
 // it, the mole sees only its slot. Within a slot, prompts must be different
 // enough that a song can be heard to answer one and not another, and that the
-// steal (guess the prompt among 4 of the slot) is a real choice.
+// steal (guess the prompt among 8 of the slot) is a real choice.
 //
 // First draft by Claude as candidates; curating them is the student's call.
 export type Slot = "up" | "down" | "out" | "in";

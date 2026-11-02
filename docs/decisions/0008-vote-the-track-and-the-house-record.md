@@ -1,6 +1,6 @@
 # 0008: Vote the track, and the house record
 
-Status: accepted (final project, after a playtest with friends online).
+Status: superseded by 0009 (final project, after a playtest with friends online).
 
 ## Context
 

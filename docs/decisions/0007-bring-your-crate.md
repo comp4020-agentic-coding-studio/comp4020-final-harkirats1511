@@ -1,6 +1,6 @@
 # 0007: Bring your crate
 
-Status: accepted (final project). Changes the picking rule in 0001-0003, where
+Status: superseded by 0009 (final project). Changes the picking rule in 0001-0003, where
 any Deezer track could be picked and the taste file was optional.
 
 ## Context

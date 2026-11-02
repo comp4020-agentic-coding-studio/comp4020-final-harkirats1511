@@ -165,7 +165,7 @@ export const games = sqliteTable(
     slotOrder: text("slot_order"),
     // The table's format when this game started ("knockout" | "four"); never changes mid-game.
     format: text("format").notNull().default("knockout"),
-    // The steal phase: the voted-out mole, the four prompt ids they may guess
+    // The steal phase: the voted-out mole, the eight prompt ids they may guess
     // from (JSON, shuffled; moles only ever see them in /me), their guess, and
     // whether it was right (read at the reveal). Cleared when the next round begins.
     stealPersonId: text("steal_person_id"),
