@@ -233,7 +233,10 @@ booths. See `docs/decisions/0004`, `0005`, `0006` and `0011`.
   round of a public table goes on the shop wall: prompt, mood, picks with their
   pickers and lenders, the moles and whether they were caught, and Four rounds'
   best card. It goes up only after that round's reveal, never from a private
-  table, and is built from the stored rounds, so it survives restarts. Nothing
+  table (a table made private later takes its sleeves down, since a sleeve
+  carries the table's code), and is built from the stored rounds, so it
+  survives restarts. A sleeve says what was true of its own round: in Knockout,
+  who was caught that round, and after the game, who got away. Nothing
   else about a game (who voted for whom, ghost guesses, steal guesses before
   they resolve) is on it.
 - **The jukebox.** Someone on the shop floor may queue one song at a time from

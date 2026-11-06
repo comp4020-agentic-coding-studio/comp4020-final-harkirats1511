@@ -27,7 +27,9 @@ same time, and the showcase is a room full of people at once.
   lender), the moles and whether they were caught, and the best card in Four
   rounds. It is built from the stored rounds, so it stays across restarts. At
   the showcase it fills up through the day; later, anyone can browse what
-  people chose for "a song for a rainy Sunday". Private tables never go on it.
+  people chose for "a song for a rainy Sunday". Private tables never go on it,
+  and a table made private later takes its earlier sleeves down, because each
+  sleeve carries the table's code, which is what keeps a private table private.
 - **The jukebox.** Anyone on the floor can queue one song from their own crate.
   The whole shop hears it, named ("picked by Ana"); while the queue is empty the
   radio plays. Enough people on the floor tapping skip moves it on. Only songs
