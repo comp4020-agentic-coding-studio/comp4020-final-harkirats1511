@@ -195,7 +195,7 @@ it("sends public state only: no prompt, role, crate, title or picker during a ga
   expect(playing).not.toBeNull();
   await sleep(500);
   // Nothing but the listed keys, on any frame but the wall (whose sleeves are revealed rounds, spec/wall.test.ts).
-  for (const e of stream.seen.filter((e) => e.event !== "wall")) {
+  for (const e of stream.seen.filter((e) => e.event !== "wall" && e.event !== "wall-gone")) {
     for (const k of keysOf(e.data)) expect(SHOP_KEYS.has(k), `${e.event} carries "${k}"`).toBe(true);
   }
   for (const word of ["theme", "prompt", "role", "mole", "owner", "crate", "card", "voter", "guess"]) {
@@ -238,7 +238,8 @@ it("sends nothing about a table on the shop stream when someone picks", async ()
   const lastBefore = [...stream.seen.slice(0, mark)].reverse().find((e) => e.event === "booths")?.data.find(mine);
   for (const e of after.filter((e) => e.event === "booths")) expect(e.data.find(mine)).toEqual(lastBefore);
   // Other tables' wall sleeves and the jukebox may arrive too; never a sleeve of this table.
-  const other = (e: { event: string; data: any }) => e.event === "jukebox" || (e.event === "wall" && e.data.sleeve.table !== code);
+  const other = (e: { event: string; data: any }) =>
+    e.event === "jukebox" || (e.event === "wall" && e.data.sleeve.table !== code) || (e.event === "wall-gone" && e.data.table !== code);
   expect(after.filter((e) => e.event !== "booths" && e.event !== "moves" && e.event !== "radio" && e.event !== "joined" && e.event !== "left" && e.event !== "emote" && !other(e))).toEqual([]);
   stream.close();
 });
