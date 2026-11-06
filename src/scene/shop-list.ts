@@ -37,7 +37,7 @@ export function boothItem(b: Booth, i: number): string {
   if (b.private || !b.code) {
     return `<li class="shop-booth" data-key="private-${i}">
   <div class="shop-booth-head"><h3>Private booth</h3><span class="shop-pill dim">Code only</span></div>
-  <p>${esc(b.host)} is hosting. ${seats}. ${status}.</p>
+  <p>${esc(b.host)} is hosting, for people with the code.</p>
   <form class="shop-knock" data-form="knock" novalidate>
     <label for="${id}-code">Booth code</label>
     <div class="shop-inline">

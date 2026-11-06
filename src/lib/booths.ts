@@ -102,8 +102,14 @@ function seeInto(code: string): Partial<Booth> {
   return out;
 }
 
+// A private booth shows only that it is private and who hosts it (CLAUDE.md, 0005): not how many sit
+// there, nor whether a game is on, which would tell strangers when a private group is playing.
+// The other fields are fixed placeholders so the shape stays one type.
 export function booths(): Booth[] {
-  return rows().map(({ code, ...rest }) => (rest.private ? rest : { ...rest, code, ...(rest.status === "playing" ? seeInto(code) : {}) }));
+  return rows().map(({ code, ...rest }) =>
+    rest.private
+      ? { spot: rest.spot, private: true, host: rest.host, seated: 0, bots: 0, max: rest.max, status: "waiting" as const }
+      : { ...rest, code, ...(rest.status === "playing" ? seeInto(code) : {}) });
 }
 
 // The public, waiting booth with the most people that has room and that this

@@ -51,7 +51,9 @@ it("lists a public booth with its code and a private one without", async () => {
   const a = booths.find((b) => b.code === open)!;
   expect(a).toMatchObject({ private: false, host: pub.name, seated: 1, max: 8, status: "waiting" });
   const b = booths.find((b) => b.host === priv.name)!;
-  expect(b).toMatchObject({ private: true, seated: 1 });
+  // Only that it is private and who hosts it: no seats, no status, no round (CLAUDE.md, 0005).
+  expect(b).toMatchObject({ private: true, host: priv.name, seated: 0, status: "waiting" });
+  expect(b.round).toBeUndefined();
   expect(b.code).toBeUndefined();
   expect(JSON.stringify(booths)).not.toContain(secret);
   expect(JSON.stringify(snap!.data.booths)).not.toContain(secret);
