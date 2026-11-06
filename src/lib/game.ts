@@ -112,8 +112,9 @@ function enter(d: Tx, g: { id: string; tableCode: string; round: number; phase: 
     .where(eq(games.id, g.id))
     .run();
   // The round is revealed (the shop wall's clock): at its reveal, or at a game over that shows it.
-  // An abandoned game ("none") reveals nothing of the round it stopped in.
-  if (to === "reveal" || (to === "over" && o.set?.winner !== "none")) {
+  // An abandoned game ("none") reveals nothing of the round it stopped in, nor does a game cut short
+  // while picking (its hidden picks were never closed).
+  if (to === "reveal" || (to === "over" && o.set?.winner !== "none" && g.phase !== "pick")) {
     const set = d.update(gamePrompts).set({ revealedAt: Date.now() })
       .where(and(eq(gamePrompts.gameId, g.id), eq(gamePrompts.round, g.round), isNull(gamePrompts.revealedAt))).run();
     if (set.changes) revealed.set(g.tableCode, [...(revealed.get(g.tableCode) ?? []), { gameId: g.id, round: g.round }]);

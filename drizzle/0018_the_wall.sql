@@ -5,7 +5,8 @@ ALTER TABLE `games` ADD `private` integer DEFAULT false NOT NULL;--> statement-b
 -- (visibility can't change mid-game, so for a running game that is the flag it started with).
 UPDATE `games` SET `private` = coalesce((SELECT `tables`.`private` FROM `tables` WHERE `tables`.`code` = `games`.`table_code`), 1);--> statement-breakpoint
 -- Rounds already revealed get a time, in their game's order: every round before the one in play, and the
--- one in play once its reveal is up or the game is over with a winner (an abandoned game shows no round).
+-- one in play once its reveal is up or the game is over with a winner (an abandoned game shows no round),
+-- and only rounds whose picks closed (a game cut short while picking never showed that round's cards).
 -- The exact moment wasn't kept, so it is the game's end (or start, while it runs), a millisecond per round.
 UPDATE `game_prompts` SET `revealed_at` = (
   SELECT CASE WHEN `games`.`finished_at` IS NOT NULL THEN `games`.`finished_at` - (`games`.`round` - `game_prompts`.`round`)
@@ -17,4 +18,6 @@ UPDATE `game_prompts` SET `revealed_at` = (
     OR (`game_prompts`.`round` = `games`.`round` AND `games`.`winner` IS NULL AND `games`.`phase` = 'reveal')
     OR (`game_prompts`.`round` = `games`.`round` AND `games`.`winner` IS NOT NULL AND `games`.`winner` <> 'none')
   )
+) AND EXISTS (
+  SELECT 1 FROM `picks` WHERE `picks`.`game_id` = `game_prompts`.`game_id` AND `picks`.`round` = `game_prompts`.`round` AND `picks`.`slot` IS NOT NULL
 );

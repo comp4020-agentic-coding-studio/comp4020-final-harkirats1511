@@ -184,6 +184,19 @@ it("hangs nothing of an abandoned round (nobody picked)", () => {
   expect(sleevesOf(w)).toEqual([]);
 });
 
+it("hangs nothing of a round cut short while picking (the mole left), even though the game has a winner", () => {
+  const w = world(4, { format: "knockout" });
+  const mole = w.ids.find((id) => G.myView(w.code, id).role === "mole")!;
+  const other = w.ids.find((id) => id !== mole)!;
+  expect(G.pickTrack(w.code, other, trackOf(w, w.ids.indexOf(other), 0))).toEqual({ ok: true });
+  expect(G.leaveTable(w.code, mole)).toBe(true);
+  expect(game(w).winner).toBe("players");
+  expect(sleevesOf(w)).toEqual([]);
+  // And the page is still full: a dropped round never makes a page come up short.
+  const all = W.wallPage(null, 40).sleeves.length;
+  if (all >= 2) expect(W.wallPage(null, 2).sleeves.length).toBe(2);
+});
+
 it("reads the same wall from the database alone, in a fresh process", () => {
   const here = W.wallPage(null, 40);
   expect(here.sleeves.length).toBeGreaterThan(0);

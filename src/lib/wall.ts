@@ -33,7 +33,13 @@ const promptText = new Map(PROMPTS.map((p) => [p.id, p.text]));
 
 // Revealed rounds of games played in public at a table that is still public (its code is on the
 // sleeve, and a private table's code is what keeps it private).
-const shown = () => and(isNotNull(gamePrompts.revealedAt), eq(games.private, false), eq(tables.private, false));
+// A round with no closed card (cut short while picking) has nothing to hang, so it is left out here,
+// before the page is cut, never after.
+const shown = () =>
+  and(
+    isNotNull(gamePrompts.revealedAt), eq(games.private, false), eq(tables.private, false),
+    sql`exists (select 1 from ${picks} where ${picks.gameId} = ${gamePrompts.gameId} and ${picks.round} = ${gamePrompts.round} and ${picks.slot} is not null)`,
+  );
 
 type Row = { gameId: string; round: number; revealedAt: number; promptId: string; slot: string; code: string };
 
