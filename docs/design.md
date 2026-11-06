@@ -83,6 +83,31 @@ for the later 3D shop). One theme, dark by design, native CSS, no framework.
 - **Ticket**: the table code on a sleeve with punched notches, in mono.
 - **Avatar**: the drawn badge with a wall ring; mobility aids are a small drawn
   mark, not an icon font.
+- **The wall** (shop, decision 0011): revealed rounds from public booths hung
+  as sleeves on wood rails, newest first. Each sleeve shows the best card's (or
+  first pick's) cover, or a plain sleeve in the mood's colour with a record
+  ring, a mood sticker, and a tilted staff-pick card with the prompt in Caveat
+  and `BOOTH · R2 · CAUGHT` in mono. Opening one shows the round's liner notes on
+  paper in a dialog: prompt, mood, numbered picks with pickers and lenders, a
+  BEST PICK stamp, and a CAUGHT stamp with who the moles were. In 2D it is a
+  collapsible section with "More" for older sleeves; in 3D the same sleeves hang
+  on the back wall left of the sign (8 by 5, newest 40, one mesh and one texture
+  atlas), and tapping one or walking up to it opens the same dialog. A new
+  sleeve settles onto its hook (under 1s, none with reduced motion) and is
+  announced once.
+- **The jukebox**: "Picked by Ana" in mono caps over the title, the cover, and
+  time left; an "Up next" list; "Queue a song from your crate" opens your crate
+  by mood with a Queue button per song; Skip shows `skips/needed`. In 3D the
+  jukebox's front window glows lamp-amber while a song plays, with a lamp tag
+  `Now: title · picker` over it. A new song is announced once.
+- **Booth signs**: a playing public booth gets one mono line in lamp, in the
+  booth list and on a dark sign over the booth in 3D: `Round 2 · Vote · Down ·
+  3 voted`, or `Round 1 · Listening: Song by Artist (Ana's pick)`. While a card
+  plays, a cream sleeve (no title on it) leans on the booth's turntable.
+- **Taste notes** (Your past games): a paper card, "Staff notes on you": what
+  you reach for in each mood (mono-caps dividers like the crate's), your most
+  loved song with a stamp counting best-pick votes, songs you shared with
+  someone, and borrows both ways. Every part has a short empty line.
 
 ## Motion
 
