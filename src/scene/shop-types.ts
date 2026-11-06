@@ -21,6 +21,8 @@ export type Sleeve = {
   moles: string[];
   caught: boolean;
   stole?: boolean;
+  escaped?: string[];
+  moleCount?: number;
 };
 export type WallPage = { sleeves: Sleeve[]; more: boolean };
 

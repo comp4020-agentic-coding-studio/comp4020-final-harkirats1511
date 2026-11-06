@@ -6,14 +6,15 @@ import { fillCrate, getUrl, session, uniqueName } from "./helpers";
 // prompt, mood, picks: {picker, lender?, trackId, title, artist, cover?, best?}[], moles, caught, stole?}.
 // The shop stream sends `wall` {sleeve} when one goes up.
 // Never on the wall or the shop stream: a running round's prompt or picks before its reveal, anything of
-// a private table, a Knockout mole not yet revealed (only the one caught at their round, all at game
-// over), who voted for whom, a ghost's guess, a score, a steal guess.
+// a private table, a Knockout mole not caught (a sleeve names only the one caught in its own round; after
+// the game, the last sleeve's `escaped` names the moles nobody caught), who voted for whom, a ghost's
+// guess, a score, a steal guess.
 // These play whole games over HTTP and scan /api/wall and the raw shop stream bytes at every phase.
 
 vi.setConfig({ testTimeout: 300_000 });
 type Session = ReturnType<typeof session>;
 type P = { s: Session; name: string; ids: number[] };
-type Sleeve = { id: string; table: string; format: string; round: number; revealedAt: number; prompt: string; mood: string; picks: { picker: string; lender?: string; trackId: number; best?: boolean }[]; moles: string[]; caught: boolean; stole?: boolean };
+type Sleeve = { id: string; table: string; format: string; round: number; revealedAt: number; prompt: string; mood: string; picks: { picker: string; lender?: string; trackId: number; best?: boolean }[]; moles: string[]; caught: boolean; stole?: boolean; escaped?: string[] };
 type Pub = { game?: { round: number; phase: string; winner?: string; moles?: string[]; cards?: { order: number; picker: string }[]; reveal?: { prompt: string } } };
 type Me = { role: string; prompt?: string; steal?: { options: { id: string; text: string }[] } };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -117,11 +118,12 @@ it("hangs a Knockout game's rounds only after each reveal, and names a mole only
   expect(end.game!.winner).toBe("players");
   await stream.next((e) => e.event === "wall" && e.data.sleeve.table === code && e.data.sleeve.round === 2, 5000);
   await sleep(300);
-  // Game over: the caught mole on their round, and every mole on every sleeve; never a ballot or a guess.
+  // Game over: the caught mole on their round only, nobody got away; never a ballot or a guess.
   mine = await wallOf(code);
   expect(mine.find((s) => s.round === 2)).toMatchObject({ caught: true, moles: [mole.name], prompt: prompt2 });
   expect(mine.find((s) => s.round === 2)!.stole).toBeUndefined();
-  expect(mine.find((s) => s.round === 1)).toMatchObject({ caught: false, moles: [mole.name] });
+  expect(mine.find((s) => s.round === 1)).toMatchObject({ caught: false, moles: [] });
+  for (const s of mine) expect(s.escaped).toBeUndefined();
   const text = await wallText();
   for (const w of NEVER) expect(text).not.toContain(w);
   for (const w of NEVER) expect(rawFor(stream.raw, code)).not.toContain(w);

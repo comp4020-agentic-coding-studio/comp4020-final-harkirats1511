@@ -18,10 +18,19 @@ export function ago(ms: number, now = Date.now()): string {
   return d === 1 ? "yesterday" : `${d} days ago`;
 }
 
-// Who the moles were and whether the room caught them, in words.
+// Who the moles were and whether the room caught them, in words. A Knockout sleeve speaks only of
+// its own round (who was caught then), and its last one, after the game, of who got away.
 export function moleLine(s: Sleeve): string {
   const who = s.moles.length ? list(s.moles) : "";
   const one = s.moles.length <= 1;
+  if (s.format === "knockout") {
+    const article = (s.moleCount ?? 1) > 1 ? "a" : "the";
+    let line = who ? `Caught: ${who} ${one ? `was ${article} mole` : "were moles"}.` : "Nobody caught a mole this round.";
+    if (who && s.stole === true) line += " Then they guessed the prompt, and the moles took it.";
+    else if (who && s.stole === false) line += " The steal missed.";
+    if (s.escaped?.length) line += ` Got away: ${list(s.escaped)}.`;
+    return line;
+  }
   if (s.caught) {
     const base = who ? `Caught: ${who}${one ? " was the mole" : " were the moles"}.` : "The room caught the mole.";
     if (s.stole === true) return `${base} Then ${one ? "they" : "one of them"} guessed the prompt, and the moles took it.`;
@@ -58,7 +67,7 @@ function face(s: Sleeve): string {
 // One sleeve on the wall: a button that opens its liner notes (the dialog on the
 // shop page, which the 3D wall opens too).
 export function wallItem(s: Sleeve, opts: { fresh?: boolean } = {}): string {
-  const label = `${s.prompt}. ${MOOD_NAME[s.mood]}, booth ${s.table}, round ${s.round}, ${s.picks.length} ${s.picks.length === 1 ? "pick" : "picks"}. ${s.caught ? "Mole caught" : "Mole got away"}`;
+  const label = `${s.prompt}. ${MOOD_NAME[s.mood]}, booth ${s.table}, round ${s.round}, ${s.picks.length} ${s.picks.length === 1 ? "pick" : "picks"}. ${s.caught ? "Mole caught" : s.format === "knockout" ? "No mole caught" : "Mole got away"}${s.escaped?.length ? `, ${list(s.escaped)} got away` : ""}`;
   return `<li class="wall-item${opts.fresh ? " fresh" : ""}" data-id="${esc(s.id)}">
   <button type="button" class="wall-sleeve" data-wall="${esc(s.id)}" aria-haspopup="dialog" aria-label="${esc(label)}">${face(s)}<span class="wall-card" aria-hidden="true"><span class="hand">${esc(s.prompt)}</span><span class="wall-meta mono">${esc(s.table)} · R${s.round}${s.caught ? " · CAUGHT" : ""}</span></span></button>
 </li>`;

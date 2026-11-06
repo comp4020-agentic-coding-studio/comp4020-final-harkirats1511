@@ -135,8 +135,86 @@ it("keeps a Knockout mole off the wall until they are voted out, and names them 
   const [r2, r1] = sleevesOf(w);
   expect(r2).toMatchObject({ round: 2, caught: true, moles: [nameOf(w, mole)] });
   expect(r2.stole).toBeUndefined();
-  expect(r1).toMatchObject({ round: 1, caught: false, moles: [nameOf(w, mole)] });
+  // A sleeve says what was true of its own round: round 1 caught nobody, even after the game.
+  expect(r1).toMatchObject({ round: 1, caught: false, moles: [] });
+  expect(r1.escaped).toBeUndefined();
+  // Nobody got away: the only mole was caught.
+  expect(r2.escaped).toBeUndefined();
   expect(JSON.stringify(sleevesOf(w))).not.toMatch(/"(guess|ghost|ghostGuesses|voter|choice)"/);
+});
+
+// The review's case (s5 M1): 6 players, 2 moles A and B. Round 1 catches A (the steal misses), round 2
+// puts a player out, round 3 catches B (players win) or, in the variant, B is never caught and gets away.
+// Each sleeve names only the mole caught in its own round; only the last sleeve, after the game, says
+// who got away; and before the game is over no sleeve names a mole who hadn't been caught by then.
+function twoMoles(variant: "caught" | "away") {
+  const w = world(6, { format: "knockout" });
+  const moles = w.ids.filter((id) => G.myView(w.code, id).role === "mole");
+  expect(moles).toHaveLength(2);
+  const [A, B] = moles;
+  const players = w.ids.filter((id) => !moles.includes(id));
+  const alive = () => db.select().from(S.gamePlayers).where(eq(S.gamePlayers.gameId, game(w).id)).all().filter((p) => p.ejectedRound === null).map((p) => p.personId);
+  // Everyone still in votes `out` (who votes for someone else); "skip" makes everyone skip.
+  const voteOut = (out: string | "skip") => {
+    const here = alive();
+    for (const id of here) vote(w, id, out === "skip" ? "skip" : id === out ? here.find((i) => i !== out)! : out);
+    lock(w);
+  };
+  const missSteal = (mole: string) => {
+    expect(game(w).phase).toBe("steal");
+    const real = db.select().from(S.gamePrompts).where(and(eq(S.gamePrompts.gameId, game(w).id), eq(S.gamePrompts.round, game(w).round))).get()!.promptId;
+    expect(G.castSteal(w.code, mole, (JSON.parse(game(w).stealOptions!) as string[]).find((o) => o !== real)!)).toEqual({ ok: true });
+  };
+  const before = (caughtSoFar: string[]) => {
+    expect(game(w).winner).toBeNull();
+    for (const x of sleevesOf(w)) {
+      expect(x.escaped).toBeUndefined();
+      for (const m of x.moles) expect(caughtSoFar.map((id) => nameOf(w, id))).toContain(m);
+    }
+  };
+  // Round 1: A is voted out and misses the steal.
+  pickAll(w); toVote(w); voteOut(A); missSteal(A);
+  expect(game(w).phase).toBe("reveal");
+  before([A]);
+  G.advance(w.code);
+  // Round 2: a player is voted out.
+  pickAll(w); toVote(w); voteOut(players[0]);
+  before([A]);
+  G.advance(w.code);
+  if (variant === "caught") {
+    // Round 3: B is voted out and misses the steal. Players win.
+    pickAll(w); toVote(w); voteOut(B); missSteal(B);
+    expect(game(w).winner).toBe("players");
+  } else {
+    // Round 3: another player is out (B, P3, P4 left); round 4: everyone skips, so the moles win.
+    pickAll(w); toVote(w); voteOut(players[1]);
+    before([A]);
+    G.advance(w.code);
+    pickAll(w); toVote(w); voteOut("skip");
+    expect(game(w).winner).toBe("moles");
+  }
+  const [a, b] = [nameOf(w, A), nameOf(w, B)];
+  const shown = sleevesOf(w).sort((x, y) => x.round - y.round).map((x) => ({ round: x.round, moles: x.moles, caught: x.caught, escaped: x.escaped, stole: x.stole }));
+  return { shown, a, b };
+}
+
+it("says on each Knockout sleeve only who was caught that round, and after the game who got away (2 moles, both caught)", () => {
+  const { shown, a, b } = twoMoles("caught");
+  expect(shown).toEqual([
+    { round: 1, moles: [a], caught: true, escaped: undefined, stole: undefined },
+    { round: 2, moles: [], caught: false, escaped: undefined, stole: undefined },
+    { round: 3, moles: [b], caught: true, escaped: undefined, stole: undefined },
+  ]);
+});
+
+it("says on each Knockout sleeve only who was caught that round, and after the game who got away (2 moles, one got away)", () => {
+  const { shown, a, b } = twoMoles("away");
+  expect(shown).toEqual([
+    { round: 1, moles: [a], caught: true, escaped: undefined, stole: undefined },
+    { round: 2, moles: [], caught: false, escaped: undefined, stole: undefined },
+    { round: 3, moles: [], caught: false, escaped: undefined, stole: undefined },
+    { round: 4, moles: [], caught: false, escaped: [b], stole: undefined },
+  ]);
 });
 
 it("names a Knockout mole who was caught but the game goes on only on their own round, and keeps the other mole hidden", () => {

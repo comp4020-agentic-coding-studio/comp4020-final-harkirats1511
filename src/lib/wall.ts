@@ -10,8 +10,9 @@ import { gamePlayers, gamePrompts, games, people, picks, roundResults, tables } 
 // stored rounds alone (game_prompts.revealed_at says a round's reveal has opened), so it survives a
 // restart. It holds only what that table saw at the reveal: the prompt, its mood, the picks with their
 // pickers and lenders, the moles and whether they were caught, and Four rounds' best card. Never who
-// voted for whom, a ghost's guess, a score, or a steal guess before it resolved. A Knockout mole is
-// named only once revealed: the one ejected (or who stole it) at their round, all of them at game over.
+// voted for whom, a ghost's guess, a score, or a steal guess before it resolved. A sleeve says what was
+// true of its own round: a Knockout sleeve names only the mole caught that round (ejected, or who stole
+// it), and once the game is over its last sleeve names the moles who were never caught (`escaped`).
 
 export type Sleeve = {
   id: string;
@@ -22,9 +23,14 @@ export type Sleeve = {
   prompt: string;
   mood: Slot;
   picks: { picker: string; lender?: string; trackId: number; title: string; artist: string; cover?: string; best?: boolean }[];
+  // Four rounds: the round's moles. Knockout: the mole caught this round, if any (never anyone else).
   moles: string[];
   caught: boolean;
   stole?: boolean;
+  // Knockout, game over, last sleeve only: the moles never caught (they got away).
+  escaped?: string[];
+  // Knockout: how many moles the game had (public: the table's setting), so the words say "a" or "the".
+  moleCount?: number;
 };
 
 export const WALL_DEFAULT = 20;
@@ -74,6 +80,8 @@ function sleeves(rows: Row[]): Sleeve[] {
     let moles: string[];
     let caught: boolean;
     let stole: boolean | undefined;
+    let escaped: string[] | undefined;
+    let moleCount: number | undefined;
     let best = new Set<number>();
     if (four) {
       const res = results.find((x) => x.gameId === r.gameId && x.round === r.round);
@@ -89,9 +97,19 @@ function sleeves(rows: Row[]): Sleeve[] {
       const accused = ejected ?? stoleIt;
       caught = accused?.role === "mole";
       stole = !!stoleIt;
-      // Every mole is public at game over (an abandoned game names none); before then only the caught one.
+      // Only the mole caught this round, before and after game over: a sleeve never says someone was
+      // caught in a round they weren't.
+      moles = caught ? [accused!.name] : [];
+      const all = inGame.filter((p) => p.role === "mole");
+      moleCount = all.length;
+      // Game over (an abandoned game names nobody): the last sleeve names the moles nobody caught, the
+      // ones never ejected and not the one who stole it (who was caught, then guessed right).
       const over = !!g.winner && g.winner !== "none";
-      moles = over ? inGame.filter((p) => p.role === "mole").map((p) => p.name).sort() : caught ? [accused!.name] : [];
+      const last = Math.max(...cards.filter((c) => c.gameId === r.gameId).map((c) => c.round));
+      if (over && r.round === last) {
+        const away = all.filter((p) => p.ejected === null && p.id !== stoleIt?.id).map((p) => p.name).sort();
+        if (away.length) escaped = away;
+      }
     }
     return [{
       id: `${r.gameId}:${r.round}`,
@@ -108,6 +126,8 @@ function sleeves(rows: Row[]): Sleeve[] {
       moles,
       caught,
       ...(stole ? { stole: true } : {}),
+      ...(escaped ? { escaped } : {}),
+      ...(moleCount !== undefined ? { moleCount } : {}),
     }];
   });
 }
@@ -157,8 +177,8 @@ export function watchWall(fn: (s: Sleeve) => void): () => void {
 }
 
 // Called by the engine after a transaction that opened a reveal (or ended a game) commits. Sends the
-// new sleeve; when a Knockout game is over, its earlier sleeves too (the moles are named now), so a
-// page that upserts by id keeps every sleeve right. Never throws into the engine.
+// new sleeve; when a Knockout game is over, its earlier sleeves too (re-sent as they stand; the last one
+// now names who got away), so a page that upserts by id keeps every sleeve right. Never throws into the engine.
 export function announceReveal(gameId: string, round: number): void {
   try {
     if (!bus.listenerCount("sleeve")) return;
