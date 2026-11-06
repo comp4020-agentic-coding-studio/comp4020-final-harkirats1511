@@ -114,7 +114,8 @@ it("keeps keyboard focus useful after Keep, Keep all and Swap", async () => {
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => (document.activeElement as HTMLElement | null)?.dataset.fk === "keep:up:11");
   await page.keyboard.press("Enter");
-  await page.waitForFunction(() => /^empty:|^keep:/.test((document.activeElement as HTMLElement | null)?.dataset.fk ?? ""));
+  // Wait for focus to leave the button just pressed (it stays there until the redraw), then check where it went.
+  await page.waitForFunction(() => (document.activeElement as HTMLElement | null)?.dataset.fk !== "keep:up:11");
   expect(await active()).toMatch(/^empty:/);
   // Keep all: focus goes to the progress bar.
   await page.click("#keep-all");
