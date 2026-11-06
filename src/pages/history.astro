@@ -126,8 +126,16 @@ const games = historyFor(me.id).map((g) => ({ ...g, result: g.winner === "points
       ? `<p class="notes-loved"><span>${song(n.mostLoved)}</span><span class="stamp">${n.mostLoved.votes} best-pick ${n.mostLoved.votes === 1 ? "vote" : "votes"}</span></p>`
       : `<p class="notes-empty">No best-pick votes yet. Four rounds games hand them out.</p>`);
     out.push(`<h3>Songs you share</h3>`);
-    out.push(n.shared?.length
-      ? `<ul class="notes-list">${n.shared.map((x) => `<li>You and <b>${esc(x.with)}</b> both played ${song(x.track)}</li>`).join("")}</ul>`
+    // One line per song, naming everyone who played it too (the API gives one row per person and song).
+    const bySong = new Map<number, { track: (typeof n.shared)[number]["track"]; with: string[] }>();
+    for (const x of n.shared ?? []) {
+      const e = bySong.get(x.track.trackId) ?? { track: x.track, with: [] };
+      if (!e.with.includes(x.with)) e.with.push(x.with);
+      bySong.set(x.track.trackId, e);
+    }
+    const names = (w: string[]) => w.map((x) => `<b>${esc(x)}</b>`).join(w.length > 2 ? ", " : " and ").replace(/, (<b>[^<]*<\/b>)$/, " and $1");
+    out.push(bySong.size
+      ? `<ul class="notes-list">${[...bySong.values()].map((e) => `<li>You and ${names(e.with)} ${e.with.length > 1 ? "all" : "both"} played ${song(e.track)}</li>`).join("")}</ul>`
       : `<p class="notes-empty">Nobody has picked one of your songs alongside you yet.</p>`);
     out.push(`<h3>Borrowed</h3>`);
     out.push(n.borrows?.length
