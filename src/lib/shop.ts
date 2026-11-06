@@ -2,9 +2,11 @@ import type { Person } from "./auth.ts";
 import type { Avatar } from "./avatar.ts";
 import { getAvatar } from "./avatars.ts";
 import { booths } from "./booths.ts";
+import { floorChanged, getJukebox, watchJukebox } from "./jukebox.ts";
 import { log, tag } from "./log.ts";
 import { getRadio, watchRadio } from "./radio.ts";
 import { watchAnyTable } from "./tables.ts";
+import { watchWall } from "./wall.ts";
 
 // Who is in the shop and where (decisions 0004, 0005). Memory only, gone after
 // a restart: nothing a game depends on lives here. The server is the referee:
@@ -88,6 +90,8 @@ function startWatching() {
   unwatch = [
     watchAnyTable(boothsChanged),
     watchRadio((r) => broadcast(sse("radio", r))),
+    watchJukebox((j) => broadcast(sse("jukebox", j))),
+    watchWall((sleeve) => broadcast(sse("wall", { sleeve }))),
   ];
 }
 
@@ -130,6 +134,7 @@ export function enter(me: Person, send: (text: string) => void): { leave: () => 
     here.set(me.id, p);
     log("shop", `${tag(me)} walked in`);
     broadcast(sse("joined", { name: p.name, avatar: p.avatar, ...spot(p) }), p);
+    floorChanged(here.keys());
   }
   p.streams.add(send);
   send(sse("snapshot", {
@@ -137,6 +142,7 @@ export function enter(me: Person, send: (text: string) => void): { leave: () => 
     people: [...here.values()].map((q) => ({ name: q.name, avatar: q.avatar, ...spot(q) })),
     booths: booths(),
     radio: getRadio(),
+    jukebox: getJukebox(),
   }));
   const self = p;
   return {
@@ -150,6 +156,7 @@ export function enter(me: Person, send: (text: string) => void): { leave: () => 
       lastSpot.set(self.id, { ...spot(self), until: now + REJOIN_MS });
       log("shop", `${tag(self)} walked out`);
       broadcast(sse("left", { name: self.name }));
+      floorChanged(here.keys());
       if (!here.size) stopWatching();
     },
   };
