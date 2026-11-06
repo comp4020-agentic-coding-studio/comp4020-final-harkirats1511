@@ -165,6 +165,9 @@ export const games = sqliteTable(
     slotOrder: text("slot_order"),
     // The table's format when this game started ("knockout" | "four"); never changes mid-game.
     format: text("format").notNull().default("knockout"),
+    // Whether the table was private when this game started (it can't change mid-game). The shop wall
+    // (decision 0011) shows only rounds of games that were public; older games take their table's flag.
+    private: integer("private", { mode: "boolean" }).notNull().default(false),
     // The steal phase: the voted-out mole, the eight prompt ids they may guess
     // from (JSON, shuffled; moles only ever see them in /me), their guess, and
     // whether it was right (read at the reveal). Cleared when the next round begins.
@@ -221,8 +224,10 @@ export const gamePrompts = sqliteTable(
     round: integer("round").notNull(),
     promptId: text("prompt_id").notNull(),
     slot: text("slot").notNull(),
+    // Epoch ms the round's reveal opened, null until then. The shop wall lists rounds by it.
+    revealedAt: integer("revealed_at"),
   },
-  (t) => [primaryKey({ columns: [t.gameId, t.round] })],
+  (t) => [primaryKey({ columns: [t.gameId, t.round] }), index("game_prompts_revealed").on(t.revealedAt)],
 );
 
 // The theme pair drawn for a round by the old hidden-theme game (no longer
