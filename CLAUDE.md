@@ -101,7 +101,8 @@ They are decisions, not defaults (see `docs/decisions/0009`).
 
 ## Formats
 
-The host picks one when starting (see `docs/decisions/0010`). Everything above
+The host picks one when starting (see `docs/decisions/0010`); Four rounds is
+the default (`0011`). Everything above
 holds in both unless this section says otherwise.
 
 - **Knockout** is the game above: vote someone out each round, ghosts watch, it
@@ -204,7 +205,7 @@ did when something goes wrong, so it stays after any crit.
 
 The app is a record shop after hours: the home page is the shopfront, `/shop`
 is the floor you walk around as your character, and tables are listening
-booths. See `docs/decisions/0004`, `0005` and `0006`.
+booths. See `docs/decisions/0004`, `0005`, `0006` and `0011`.
 
 - **Positions are not game state.** Where people stand lives in server memory
   only and is gone after a restart. Nothing a game depends on may ever live
@@ -228,6 +229,23 @@ booths. See `docs/decisions/0004`, `0005` and `0006`.
   until it ends. It starts only after a tap, always has a visible off control,
   and the choice is saved on the device. Sound effects are synthesised with Web
   Audio, never files. No sound is the only signal for anything.
+- **The wall remembers what was revealed, and nothing more.** Each revealed
+  round of a public table goes on the shop wall: prompt, mood, picks with their
+  pickers and lenders, the moles and whether they were caught, and Four rounds'
+  best card. It goes up only after that round's reveal, never from a private
+  table, and is built from the stored rounds, so it survives restarts. Nothing
+  else about a game (who voted for whom, ghost guesses, steal guesses before
+  they resolve) is on it.
+- **The jukebox.** Someone on the shop floor may queue one song at a time from
+  their own crate, and only a song clean enough for the crate starter. The shop
+  hears it with the picker's name; with nothing queued, the radio plays. Skips
+  from enough of the people on the floor move it on. A jukebox play never marks
+  a song as heard in a game. It follows the radio's sound rules.
+- **Booths you can see into.** The shop shows each public booth's round, phase,
+  mood and, while a card plays, its title and picker. Nothing a player at that
+  table couldn't see, and the same in words in the booth list.
+- **Taste notes** on "Your past games" come only from games you sat in, and only
+  from what those games revealed.
 - **The look is the record shop.** Tokens and fonts come from
   `src/styles/global.css` (wall plum, lamp amber, neon pink only for the sign and
   the mole stamp, sleeve cream, wood). The reference is the mockups the student
