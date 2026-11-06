@@ -14,10 +14,11 @@ const chrome = [process.env.CHROME_PATH, "/usr/bin/google-chrome", "/usr/bin/goo
   (p): p is string => !!p && existsSync(p),
 );
 let browser: Browser;
+// Chrome's first start on a fresh CI runner can take well over vitest's default 10 s.
 beforeAll(async () => {
   expect(chrome, "a Chrome for the page specs: set CHROME_PATH").toBeTruthy();
   browser = await chromium.launch({ executablePath: chrome, args: ["--no-sandbox", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
-});
+}, 60_000);
 afterAll(async () => { await browser?.close(); });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
