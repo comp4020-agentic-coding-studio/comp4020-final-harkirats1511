@@ -171,9 +171,15 @@ export function gameSleeves(gameId: string, round?: number): Sleeve[] {
 const bus = new EventEmitter();
 bus.setMaxListeners(0);
 
-export function watchWall(fn: (s: Sleeve) => void): () => void {
+export function watchWall(fn: (s: Sleeve) => void, gone?: (table: string) => void): () => void {
   bus.on("sleeve", fn);
-  return () => bus.off("sleeve", fn);
+  if (gone) bus.on("gone", gone);
+  return () => { bus.off("sleeve", fn); if (gone) bus.off("gone", gone); };
+}
+
+// A table made private takes its sleeves down (CLAUDE.md, 0011): tell open shop pages to drop them too.
+export function announceGone(table: string): void {
+  bus.emit("gone", table);
 }
 
 // Called by the engine after a transaction that opened a reveal (or ended a game) commits. Sends the

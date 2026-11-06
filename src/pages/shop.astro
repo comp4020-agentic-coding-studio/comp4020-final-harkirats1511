@@ -775,6 +775,11 @@ const list = booths();
   es.addEventListener("radio", (e) => { radio.update(parse(e as MessageEvent), { changed: true }); if (!juke?.now) sfx.clunk(); });
   es.addEventListener("jukebox", (e) => setJuke(parse(e as MessageEvent)));
   es.addEventListener("wall", (e) => { const d = parse(e as MessageEvent); if (d?.sleeve) addSleeve(d.sleeve); });
+  // A booth that went private takes its sleeves down (its code is what keeps it private).
+  es.addEventListener("wall-gone", (e) => {
+    const t = parse(e as MessageEvent)?.table;
+    if (t && sleeves.some((x) => x.table === t)) { sleeves = sleeves.filter((x) => x.table !== t); renderWall(); }
+  });
   }
   connect();
   void loadWall();

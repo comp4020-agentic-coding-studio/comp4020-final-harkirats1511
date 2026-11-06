@@ -215,6 +215,37 @@ it("hangs every Four rounds round after its reveal with its moles and best card,
   stream.close();
 });
 
+it("takes a table's sleeves down, on the wall and on open shop pages, when it goes private", async () => {
+  const ps = await Promise.all([0, 1, 2].map((i) => player("wg", i)));
+  const [host] = ps;
+  const watcher = { s: session(), name: uniqueName("wgw"), ids: [] as number[] };
+  await watcher.s.call("/api/join", { body: { name: watcher.name, pin: "1357" } });
+  const stream = await watcher.s.open("/api/shop/events");
+  await stream.next((e) => e.event === "snapshot");
+  const { code } = (await (await host.s.call("/api/tables", { body: { pickSeconds: 6, voteSeconds: 60 } })).json()) as { code: string };
+  for (const p of ps.slice(1)) await p.s.call(at(code, "join"), { body: {} });
+  expect((await host.s.call(at(code, "start"), { body: {} })).status).toBeLessThan(300);
+  // Round 1 to its reveal, so a sleeve goes up.
+  await until(host, code, (st) => st.game?.phase === "pick");
+  for (const p of ps) expect((await p.s.call(at(code, "pick"), { body: { trackId: p.ids[0] } })).status).toBe(200);
+  await until(host, code, (st) => st.game?.phase === "listen");
+  await host.s.call(at(code, "advance"), { body: {} });
+  await until(host, code, (st) => st.game?.phase === "vote");
+  for (const p of ps) { await p.s.call(at(code, "vote"), { body: { skip: true } }); }
+  await until(host, code, (st) => st.game?.phase === "reveal", 90_000);
+  for (let i = 0; i < 50 && (await wallOf(code)).length === 0; i++) await sleep(200);
+  expect((await wallOf(code)).length).toBe(1);
+  // Nobody picks in round 2: the game is abandoned, and the host may change who can sit down.
+  await host.s.call(at(code, "advance"), { body: {} });
+  await until(host, code, (st) => !st.game || !!st.game.winner, 60_000);
+  expect((await host.s.call(at(code, "visibility"), { body: { private: true } })).status).toBeLessThan(300);
+  const gone = await stream.next((e) => e.event === "wall-gone" && e.data.table === code, 5000);
+  expect(gone, "a wall-gone event for the table").not.toBeNull();
+  expect(Object.keys(gone!.data)).toEqual(["table"]);
+  expect(await wallOf(code)).toEqual([]);
+  stream.close();
+});
+
 it("refuses a bad page and needs no sign-in", async () => {
   expect((await getUrl("/api/wall")).status).toBe(200);
   for (const q of ["limit=0", "limit=41", "limit=x", "before=-5", "before=abc"]) expect((await getUrl(`/api/wall?${q}`)).status, q).toBe(400);

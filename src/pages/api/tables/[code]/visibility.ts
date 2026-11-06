@@ -2,6 +2,7 @@ import type { APIRoute } from "astro";
 import { json, personFromCookies } from "../../../../lib/auth.ts";
 import { log, refused, tableScope, tag } from "../../../../lib/log.ts";
 import { isHost, normaliseCode, notifyTable, publicState, setPrivate, tableExists, tableOptions } from "../../../../lib/tables.ts";
+import { announceGone } from "../../../../lib/wall.ts";
 
 // Body {private}: the host makes the booth private or public, before a game starts.
 export const POST: APIRoute = async ({ params, cookies, request }) => {
@@ -23,6 +24,7 @@ export const POST: APIRoute = async ({ params, cookies, request }) => {
     return json({ error: "A game is in progress." }, 409);
   }
   setPrivate(code, body.private);
+  if (body.private) announceGone(code);
   log(tableScope(code), `${tag(me)} made the booth ${body.private ? "private" : "public"}`);
   notifyTable(code);
   return json(publicState(code));

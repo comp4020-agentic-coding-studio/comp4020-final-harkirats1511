@@ -91,7 +91,7 @@ function startWatching() {
     watchAnyTable(boothsChanged),
     watchRadio((r) => broadcast(sse("radio", r))),
     watchJukebox((j) => broadcast(sse("jukebox", j))),
-    watchWall((sleeve) => broadcast(sse("wall", { sleeve }))),
+    watchWall((sleeve) => broadcast(sse("wall", { sleeve })), (table) => broadcast(sse("wall-gone", { table }))),
   ];
 }
 
