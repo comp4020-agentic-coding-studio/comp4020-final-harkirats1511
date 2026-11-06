@@ -167,7 +167,22 @@ it("allows only the listed emotes, one a second", async () => {
   watch.close();
 });
 
-it("sends public state only: no prompt, role, crate, title or picker during a game", async () => {
+// Every key the shop stream may carry outside a `wall` frame (decision 0011 added the jukebox and what a
+// public booth shows of its game). title and picker are there for the jukebox and a booth's card in listen.
+const SHOP_KEYS = new Set([
+  "you", "people", "booths", "radio", "jukebox", "name", "avatar", "x", "z", "yaw", "emote",
+  "character", "colour", "hat", "accessory", "aid", "mood",
+  "spot", "private", "code", "host", "seated", "bots", "max", "status", "round", "phase", "format", "playing", "votes",
+  "mode", "stations", "id", "slotMs", "epoch", "now", "next", "trackId", "station", "startedAt",
+  "queue", "skips", "needed", "title", "artist", "cover", "picker", "ms",
+]);
+const keysOf = (v: unknown, out = new Set<string>()): Set<string> => {
+  if (Array.isArray(v)) for (const x of v) keysOf(x, out);
+  else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) { out.add(k); keysOf(x, out); }
+  return out;
+};
+
+it("sends public state only: no prompt, role, crate, title or picker during a game's pick", async () => {
   const people = await Promise.all([signedIn("shopg"), signedIn("shopg"), signedIn("shopg")]);
   const watcher = await signedIn("shopw");
   const stream = await watcher.s.open("/api/shop/events");
@@ -179,9 +194,20 @@ it("sends public state only: no prompt, role, crate, title or picker during a ga
   const playing = await stream.next((e) => e.event === "booths" && e.data.some((b: { code?: string; status: string }) => b.code === code && b.status === "playing"), 3000);
   expect(playing).not.toBeNull();
   await sleep(500);
-  for (const word of ["theme", "prompt", "role", "mole", "title", "owner", "picker", "crate", "card", "pick", "vote"]) {
-    expect(stream.raw.toLowerCase()).not.toContain(`"${word}`);
+  // Nothing but the listed keys, on any frame but the wall (whose sleeves are revealed rounds, spec/wall.test.ts).
+  for (const e of stream.seen.filter((e) => e.event !== "wall")) {
+    for (const k of keysOf(e.data)) expect(SHOP_KEYS.has(k), `${e.event} carries "${k}"`).toBe(true);
   }
+  for (const word of ["theme", "prompt", "role", "mole", "owner", "crate", "card", "voter", "guess"]) {
+    expect(stream.raw.replace(/event: wall\ndata: .*\n/g, "").toLowerCase()).not.toContain(`"${word}`);
+  }
+  // This booth, in its pick: the phase, format and mood, never a card or a count.
+  const booth = playing!.data.find((b: { code?: string }) => b.code === code);
+  expect(booth.phase).toBe("pick");
+  expect(booth.playing).toBeUndefined();
+  expect(booth.votes).toBeUndefined();
+  // Nobody here walked into the shop, so their names appear nowhere but as the host.
+  for (const p of people.slice(1)) expect(stream.raw).not.toContain(p.name);
   stream.close();
 });
 
@@ -211,6 +237,8 @@ it("sends nothing about a table on the shop stream when someone picks", async ()
   // Anything that arrived has this table's booth exactly as before the picks (so a pick moved nothing it shows).
   const lastBefore = [...stream.seen.slice(0, mark)].reverse().find((e) => e.event === "booths")?.data.find(mine);
   for (const e of after.filter((e) => e.event === "booths")) expect(e.data.find(mine)).toEqual(lastBefore);
-  expect(after.filter((e) => e.event !== "booths" && e.event !== "moves" && e.event !== "radio" && e.event !== "joined" && e.event !== "left" && e.event !== "emote")).toEqual([]);
+  // Other tables' wall sleeves and the jukebox may arrive too; never a sleeve of this table.
+  const other = (e: { event: string; data: any }) => e.event === "jukebox" || (e.event === "wall" && e.data.sleeve.table !== code);
+  expect(after.filter((e) => e.event !== "booths" && e.event !== "moves" && e.event !== "radio" && e.event !== "joined" && e.event !== "left" && e.event !== "emote" && !other(e))).toEqual([]);
   stream.close();
 });

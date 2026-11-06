@@ -165,7 +165,7 @@ it("rematch: refused before a game ends; \"I'm in\" is public and resets at the 
 it("a bot game with 1 human and 3 bots runs to game over by itself, then a rematch resets 'in'", async () => {
   const host = await human("bg1");
   const ids = await fillCrate(host.s, 5);
-  const code = await newTable(host, { pickSeconds: 5, voteSeconds: 5, slotSeconds: 2, autoplay: true });
+  const code = await newTable(host, { format: "knockout", pickSeconds: 5, voteSeconds: 5, slotSeconds: 2, autoplay: true });
   await addBots(host, code, 3);
   // The log ring is small and shared with every other spec running at once: collect this table's lines as they come.
   const seen = new Set<string>();

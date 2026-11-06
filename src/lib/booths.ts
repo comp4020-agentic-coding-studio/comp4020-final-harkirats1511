@@ -1,7 +1,8 @@
-import { asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "./db.ts";
-import { currentGame, isRemoved, MAX_PLAYERS, tableWatchers } from "./tables.ts";
-import { people, tableMembers, tables } from "./schema.ts";
+import { currentGame, isRemoved, MAX_PLAYERS, tableFrame, tableWatchers } from "./tables.ts";
+import { gamePrompts, people, tableMembers, tables } from "./schema.ts";
+import type { Slot } from "./prompts.ts";
 
 // Booths are the shop's view of tables: only what publicState already shows
 // (status, host, how many, round), and the code only for a public booth.
@@ -21,6 +22,15 @@ export type Booth = {
   max: number;
   status: "waiting" | "playing";
   round?: number;
+  // A public booth that is playing (decision 0011, "booths you can see into"): only what anyone at the
+  // table sees. phase, format and the round's mood (every player knows it: the mole gets it in place of
+  // the prompt); the card playing, only while one plays in listen; and how many have voted so far in an
+  // open vote, a count from the public tally, never who or for whom. None of it moves on a pick.
+  phase?: "pick" | "listen" | "vote" | "steal" | "reveal";
+  mood?: Slot;
+  format?: "knockout" | "four";
+  playing?: { title: string; artist: string; picker: string };
+  votes?: number;
 };
 type Row = Booth & { code: string };
 
@@ -76,8 +86,24 @@ function rows(): Row[] {
     .sort((a, b) => (a.spot < 0 ? 1 : 0) - (b.spot < 0 ? 1 : 0) || a.spot - b.spot);
 }
 
+// What a public, playing booth shows of its game, from the table's public state (the frame its own
+// streams share, so this costs nothing extra on a busy table).
+function seeInto(code: string): Partial<Booth> {
+  const game = tableFrame(code)?.state.game;
+  if (!game || game.winner) return {};
+  const g = currentGame(code);
+  const mood = g && db.select({ slot: gamePrompts.slot }).from(gamePrompts).where(and(eq(gamePrompts.gameId, g.id), eq(gamePrompts.round, game.round))).get()?.slot;
+  const out: Partial<Booth> = { phase: game.phase as Booth["phase"], format: game.format, ...(mood ? { mood: mood as Slot } : {}) };
+  if (game.phase === "listen" && game.nowPlaying !== null) {
+    const c = game.cards?.find((x) => x.order === game.nowPlaying);
+    if (c) out.playing = { title: c.title, artist: c.artist, picker: c.picker };
+  }
+  if (game.phase === "vote" && game.tally) out.votes = game.tally.reduce((n, t) => n + t.votes, 0) + (game.skips ?? 0);
+  return out;
+}
+
 export function booths(): Booth[] {
-  return rows().map(({ code, ...rest }) => (rest.private ? rest : { ...rest, code }));
+  return rows().map(({ code, ...rest }) => (rest.private ? rest : { ...rest, code, ...(rest.status === "playing" ? seeInto(code) : {}) }));
 }
 
 // The public, waiting booth with the most people that has room and that this

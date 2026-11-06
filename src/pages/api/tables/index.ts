@@ -26,7 +26,8 @@ export const POST: APIRoute = async ({ cookies, request }) => {
   const priv = body.private ?? false;
   if (typeof priv !== "boolean") return json({ error: "private is true or false." }, 400);
   if (body.format !== undefined && !isFormat(body.format)) return json({ error: "format is knockout or four." }, 400);
-  const format = body.format ?? "knockout";
+  // Four rounds is the default (decision 0011); the host may still choose Knockout.
+  const format = body.format ?? "four";
   // A pace preset ("quick" | "normal" | "chill") sets the three timings; a number sent
   // alongside it still wins, so the form's Custom disclosure needs no preset.
   if (body.pace !== undefined && !isPace(body.pace)) return json({ error: "pace is quick, normal or chill." }, 400);

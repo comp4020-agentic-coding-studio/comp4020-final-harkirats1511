@@ -25,7 +25,7 @@ async function setup(opts: Record<string, unknown>) {
   }
   const crates: number[][] = [];
   for (const [i, p] of ps.entries()) crates.push(await fillCrate(p.s, i));
-  const res = await ps[0].s.call("/api/tables", { body: { pickSeconds: 30, voteSeconds: 30, ...opts } });
+  const res = await ps[0].s.call("/api/tables", { body: { format: "knockout", pickSeconds: 30, voteSeconds: 30, ...opts } });
   const { code } = (await res.json()) as { code: string };
   for (const p of ps.slice(1)) await p.s.call(`/api/tables/${code}/join`, { body: {} });
   await ps[0].s.call(`/api/tables/${code}/start`, { body: {} });

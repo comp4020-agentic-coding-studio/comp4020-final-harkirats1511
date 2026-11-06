@@ -44,7 +44,7 @@ async function people(n: number) {
 it("lists only finished games the person played, with their own picks, newest first", async () => {
   const ps = await people(3);
   const [host] = ps;
-  const { code } = (await (await host.s.call("/api/tables", { body: { pickSeconds: 30, voteSeconds: 30 } })).json()) as {
+  const { code } = (await (await host.s.call("/api/tables", { body: { format: "knockout", pickSeconds: 30, voteSeconds: 30 } })).json()) as {
     code: string;
   };
   for (const p of ps.slice(1)) await p.s.call(`/api/tables/${code}/join`, { body: {} });
