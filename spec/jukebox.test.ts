@@ -137,7 +137,8 @@ it("refuses someone off the floor, a song not in your crate, an explicit song an
   st = await box();
   expect(st.now?.id).not.toBe(play.id);
   expect(st.skips).toBe(0);
-  // a's song is gone, so a may queue again.
+  // a's song is gone, so a may queue again (after a second: a has queued 5 times just now, the limit).
+  await sleep(1100);
   expect((await queue(a.s, CLEAN_2)).status).toBe(201);
   await quiet([a.s, b.s, c.s]);
   sa.close(); sb.close(); sc.close();
