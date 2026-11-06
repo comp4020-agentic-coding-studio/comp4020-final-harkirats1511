@@ -1,8 +1,9 @@
 import type { APIRoute } from "astro";
 import { json, personFromCookies } from "../../../../lib/auth.ts";
 import { DEEZER_BUSY, DeezerBusy, DeezerDown, logDeezer } from "../../../../lib/deezer.ts";
-import { getJukebox, queueSong } from "../../../../lib/jukebox.ts";
-import { refused } from "../../../../lib/log.ts";
+import { getJukebox, queueSong, sayRefused } from "../../../../lib/jukebox.ts";
+import { actedTooFast } from "../../../../lib/limits.ts";
+import { refused, tag } from "../../../../lib/log.ts";
 
 // What the jukebox is playing and what is queued: songs and their pickers, all public in the shop.
 export const GET: APIRoute = () => json(getJukebox());
@@ -12,9 +13,11 @@ export const GET: APIRoute = () => json(getJukebox());
 export const POST: APIRoute = async ({ cookies, request }) => {
   const me = personFromCookies(cookies);
   if (!me) {
-    refused("shop", null, "queue a song on the jukebox", "not signed in");
+    sayRefused(null, "queue", "not signed in", () => refused("shop", null, "queue a song on the jukebox", "not signed in"));
     return json({ error: "Sign in first." }, 401);
   }
+  // At most 5 a second per person, like picks and votes (logged once a minute).
+  if (actedTooFast(`${me.id}:jukebox-queue`, () => refused("shop", tag(me), "queue a song on the jukebox", "too many requests in a second"))) return json({ error: "Slow down." }, 429);
   const b = ((await request.json().catch(() => ({}))) ?? {}) as { trackId?: unknown };
   const id = b.trackId;
   if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) return json({ error: "trackId is a number." }, 400);

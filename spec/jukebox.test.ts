@@ -1,12 +1,16 @@
 import { expect, it, vi } from "vitest";
-import { CRATES, fillCrate, getUrl, session, uniqueName } from "./helpers";
+import { baseUrl, CRATES, fillCrate, getUrl, session, uniqueName } from "./helpers";
 
 // Contract (decision 0011, CLAUDE.md "The shop"):
 //   GET  /api/shop/jukebox        -> {now: Play|null, queue: Play[], skips, needed}
 //   POST /api/shop/jukebox {trackId} -> 201 {play} | 400/403/409 {error}: signed in, on the shop floor,
 //        a song of your own crate, clean by the starter's rules, one queued per person, at most 12 queued.
 //   POST /api/shop/jukebox/skip   -> 200 {skips, needed}: on the floor, one per person per play; at
-//        needed = max(2, ceil(people on the floor / 3)) the next play starts.
+//        needed = max(1, ceil(floor / 3)) with 1-2 people on the floor (someone alone can skip), else
+//        max(2, ceil(floor / 3)), the next play starts. Someone who walks out (their last stream closes)
+//        takes their queued song with them; one playing now plays out.
+//   Refusals are rate-limited (5 a second per person) and logged once a minute per person and reason,
+//   so one person can't flush the /api/logs ring.
 //   Play = {id, trackId, title, artist, cover?, picker, startedAt?, ms: 30000}. The snapshot has `jukebox`,
 //   and a `jukebox` event (the GET shape) fires on every change. A jukebox play never marks a song heard.
 // The jukebox is shared by everything the suite runs at once, so these wait for it to be quiet first.
@@ -16,9 +20,15 @@ type Session = ReturnType<typeof session>;
 type Play = { id: string; trackId: number; title: string; artist: string; picker: string; startedAt?: number; ms: number };
 type Box = { now: Play | null; queue: Play[]; skips: number; needed: number };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-// 1123844 ("On & On", in crate 1) is marked explicit by Deezer; crate 0's songs are clean.
+// 1123844 ("On & On", in crate 1) is marked explicit by Deezer. Not all of crate 0 is clean: Deezer marks
+// 2465911 "Jazz (We've Got)" and 2791780102 "Feather" explicit, so these name the songs they rely on, each
+// one Deezer marks clean: crate 0's 13159670 "Electric Relaxation" and 829306252 "Taste", crate 1's
+// 445960982 "Don't Cry" (CRATES is left as it is: many specs depend on it).
 const EXPLICIT = 1123844;
-const CLEAN = CRATES[0][0];
+const CLEAN = 13159670;
+const CLEAN_2 = 829306252;
+const CLEAN_B = 445960982;
+if (CRATES[0][0] !== CLEAN || CRATES[0][1] !== CLEAN_2 || CRATES[1][1] !== CLEAN_B) throw new Error("the clean songs moved in CRATES");
 
 async function person(prefix: string, crate?: number) {
   const s = session();
@@ -47,7 +57,7 @@ it("needs a sign-in to queue or skip, and anyone may read it", async () => {
   expect((await anon.call("/api/shop/jukebox/skip", { body: {} })).status).toBe(401);
   const b = await box();
   expect(b).toMatchObject({ queue: expect.any(Array), skips: expect.any(Number), needed: expect.any(Number) });
-  expect(b.needed).toBeGreaterThanOrEqual(2);
+  expect(b.needed).toBeGreaterThanOrEqual(1);
 });
 
 it("refuses someone off the floor, a song not in your crate, an explicit song and a second queue; skips move it on", async () => {
@@ -87,11 +97,11 @@ it("refuses someone off the floor, a song not in your crate, an explicit song an
   const ev = await sa.next((e) => e.event === "jukebox" && e.data.now?.id === play.id, 3000, mark);
   expect(ev).not.toBeNull();
   // A second queue from the same person while theirs plays.
-  const twice = await queue(a.s, CRATES[0][1]);
+  const twice = await queue(a.s, CLEAN_2);
   expect(twice.status).toBe(409);
   expect(((await twice.json()) as { error: string }).error).toMatch(/already/i);
   // b queues a clean song of their own behind it.
-  const next = await queue(b.s, CRATES[1][1]);
+  const next = await queue(b.s, CLEAN_B);
   expect(next.status).toBe(201);
   let st = await box();
   expect(st.now?.id).toBe(play.id);
@@ -128,13 +138,13 @@ it("refuses someone off the floor, a song not in your crate, an explicit song an
   expect(st.now?.id).not.toBe(play.id);
   expect(st.skips).toBe(0);
   // a's song is gone, so a may queue again.
-  expect((await queue(a.s, CRATES[0][1])).status).toBe(201);
+  expect((await queue(a.s, CLEAN_2)).status).toBe(201);
   await quiet([a.s, b.s, c.s]);
   sa.close(); sb.close(); sc.close();
   for (const e of extra) e.close();
 });
 
-it("needs max(2, ceil(floor/3)) skips, and a jukebox play never marks a song heard in a game", async () => {
+it("needs max(2, ceil(floor/3)) skips from 3 people up, and a jukebox play never marks a song heard in a game", async () => {
   const host = await person("jkh", 0);
   const crowd = await Promise.all([1, 2, 3, 4, 5, 6].map(() => person("jkf")));
   const streams = [await host.s.open("/api/shop/events")];
@@ -162,4 +172,67 @@ it("needs max(2, ceil(floor/3)) skips, and a jukebox play never marks a song hea
   expect((await host.s.call(`/api/tables/${code}/pick`, { body: { trackId: CLEAN } })).status).toBe(200);
   await quiet([host.s, ...crowd.map((p) => p.s)]);
   for (const s of streams) s.close();
+});
+
+it("needs one skip with one or two on the floor, and at least two from three up", async () => {
+  // The snapshot carries the floor and the jukebox from the same moment, so `needed` can be read
+  // against how many are on the floor. Each new person walking in is checked.
+  const want = (n: number) => Math.max(n <= 2 ? 1 : 2, Math.ceil(n / 3));
+  const streams: { close: () => void }[] = [];
+  for (let i = 0; i < 4; i++) {
+    const p = await person("jne");
+    const st = await p.s.open("/api/shop/events");
+    const snap = await st.next((e) => e.event === "snapshot");
+    streams.push(st);
+    const n = (snap!.data.people as unknown[]).length;
+    expect(snap!.data.jukebox.needed, `${n} on the floor`).toBe(want(n));
+  }
+  for (const s of streams) s.close();
+});
+
+it("drops a leaver's queued song when they walk out, and lets one playing now play out", async () => {
+  const a = await person("jla", 0);
+  const l = await person("jll", 1);
+  const sa = await a.s.open("/api/shop/events");
+  await sa.next((e) => e.event === "snapshot");
+  const sl = await l.s.open("/api/shop/events");
+  await sl.next((e) => e.event === "snapshot");
+  // A second tab: walking out is the last stream closing, not the first.
+  const sl2 = await l.s.open("/api/shop/events");
+  await sl2.next((e) => e.event === "snapshot");
+  await quiet([a.s, l.s]);
+  const first = await queue(a.s, CLEAN);
+  expect(first.status).toBe(201);
+  const playing = ((await first.json()) as { play: Play }).play;
+  expect((await queue(l.s, CLEAN_B)).status).toBe(201);
+  expect((await box()).queue.some((p) => p.picker === l.name)).toBe(true);
+  sl.close();
+  await sleep(500);
+  expect((await box()).queue.some((p) => p.picker === l.name), "one tab closed: still on the floor").toBe(true);
+  sl2.close();
+  const end = Date.now() + 5000;
+  while ((await box()).queue.some((p) => p.picker === l.name) && Date.now() < end) await sleep(150);
+  expect((await box()).queue.some((p) => p.picker === l.name), "the leaver's song left with them").toBe(false);
+  // Someone whose song plays now and walks out: it plays out.
+  sa.close();
+  await sleep(500);
+  const b = await box();
+  if (b.now?.id === playing.id) expect(b.now.picker).toBe(a.name);
+  else expect(Date.now() - playing.startedAt!).toBeGreaterThan(25_000);
+});
+
+const TOKEN = process.env.LOG_TOKEN;
+(TOKEN ? it : it.skip)("keeps 200 refused queues and skips from one person to a few log lines", async () => {
+  const p = await person("jfl");
+  // Off the floor (no stream open) and no crate, so every one is refused (and nothing else names them).
+  const codes: number[] = [];
+  for (let i = 0; i < 200; i++) codes.push((await queue(p.s, CLEAN)).status);
+  for (let i = 0; i < 200; i++) codes.push((await p.s.call("/api/shop/jukebox/skip", { body: {} })).status);
+  expect(codes.every((c) => c === 409 || c === 429)).toBe(true);
+  expect(codes).toContain(429);
+  const text = await (await fetch(new URL("/api/logs", baseUrl), { headers: { authorization: `Bearer ${TOKEN}` } })).text();
+  const mine = text.split("\n").filter((l) => l.includes(p.name));
+  // At most: signed in, one 409 and one "too many" per route.
+  expect(mine.length, mine.join("\n")).toBeLessThanOrEqual(6);
+  expect(mine.filter((l) => l.includes("REFUSED")).length).toBeLessThanOrEqual(4);
 });

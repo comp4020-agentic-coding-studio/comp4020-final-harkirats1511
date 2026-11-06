@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { Person } from "./auth.ts";
 import { cleanVerdict, UNSAYABLE } from "./deezer.ts";
+import { firstSaying } from "./limits.ts";
 import { log, refused, tag } from "./log.ts";
 import { crateTrack } from "./taste.ts";
 
@@ -25,7 +26,8 @@ let timer: NodeJS.Timeout | null = null;
 const bus = new EventEmitter();
 bus.setMaxListeners(0);
 
-export const neededSkips = (onFloor: number) => Math.max(2, Math.ceil(onFloor / 3));
+// One or two on the floor: one skip will do (someone alone can skip). Three or more: at least two.
+export const neededSkips = (onFloor: number) => Math.max(onFloor <= 2 ? 1 : 2, Math.ceil(onFloor / 3));
 const pub = ({ personId: _p, ...play }: Entry): Play => play;
 
 export function getJukebox(): Jukebox {
@@ -57,12 +59,18 @@ function next() {
   }
 }
 
-// Who is on the shop floor, from shop.ts whenever someone walks in or out. Skips from people who have
+// Who is on the shop floor, from shop.ts whenever someone walks in or out (their last stream closed).
+// A leaver's queued song leaves with them (one playing now plays out). Skips from people who have
 // left stop counting, and a smaller floor may need fewer skips: either can move the song on.
 export function floorChanged(ids: Iterable<string>) {
   floor = new Set(ids);
   const before = JSON.stringify(getJukebox());
   for (const id of [...skippers]) if (!floor.has(id)) skippers.delete(id);
+  for (let i = queue.length - 1; i >= 0; i--) {
+    if (floor.has(queue[i].personId)) continue;
+    log("shop", `jukebox dropped a queued song · ${tag({ id: queue[i].personId, name: queue[i].picker })} walked out`);
+    queue.splice(i, 1);
+  }
   if (now && skippers.size >= neededSkips(floor.size)) {
     log("shop", `jukebox moved on · skipped`);
     next();
@@ -71,8 +79,13 @@ export function floorChanged(ids: Iterable<string>) {
 }
 
 export type Refusal = { ok: false; status: number; error: string };
+// A refusal is logged once a minute per person and kind (the answer itself always goes back), so one
+// person tapping in a loop can't push everyone else's lines out of the /api/logs ring.
+export function sayRefused(personId: string | null, what: string, error: string, say: () => void) {
+  if (firstSaying(`j${personId ?? "anon"}:${what}:${error}`)) say();
+}
 const no = (me: Person, status: number, error: string, why: string): Refusal => {
-  refused("shop", tag(me), "queue a song on the jukebox", why);
+  sayRefused(me.id, "queue", error, () => refused("shop", tag(me), "queue a song on the jukebox", why));
   return { ok: false, status, error };
 };
 
@@ -111,7 +124,7 @@ export async function queueSong(me: Person, trackId: number): Promise<{ ok: true
 // One skip per person per play, from someone on the floor.
 export function skipSong(me: Person): { ok: true; skips: number; needed: number } | Refusal {
   const refuse = (status: number, error: string, why: string): Refusal => {
-    refused("shop", tag(me), "skip the jukebox song", why);
+    sayRefused(me.id, "skip", error, () => refused("shop", tag(me), "skip the jukebox song", why));
     return { ok: false, status, error };
   };
   if (!floor.has(me.id)) return refuse(409, "Walk into the shop first: the jukebox is on the shop floor.", "not on the shop floor");
