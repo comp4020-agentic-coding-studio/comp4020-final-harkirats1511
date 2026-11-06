@@ -1,9 +1,10 @@
 import { randomInt, randomUUID } from "node:crypto";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "./db.ts";
 import { bestVotes, gamePlayers, gamePrompts, games, ghostGuesses, people, picks, roundMoles, roundResults, roundScores, tableMembers, tableRemovals, tables, votes } from "./schema.ts";
 import { log, personTag, tableScope } from "./log.ts";
 import { PROMPTS, SLOTS, type Slot } from "./prompts.ts";
+import { announceReveal } from "./wall.ts";
 import { crateComplete, crateTrack, TASTE_MAX } from "./taste.ts";
 import {
   botSeats, currentGame, effectiveMoles, humanCount, isBotPerson, MAX_PLAYERS, MIN_PLAYERS, notifyTable, playedTrackIds, promptById, SECONDS_PER_TRACK, tableOptions,
@@ -94,6 +95,8 @@ export const phaseOf = (g: { phase: string; winner: string | null }): Phase => (
 // Tables whose public state changed inside a transaction that has not committed yet.
 const dirty = new Set<string>();
 const touch = (code: string) => void dirty.add(code);
+// Rounds whose reveal opened inside a transaction, announced to the shop wall once it commits.
+const revealed = new Map<string, { gameId: string; round: number }[]>();
 
 // Move a game to phase `to`: checks the move is allowed from `from`, sets the
 // phase, its deadline and its resets, then whatever `set` adds for this
@@ -108,6 +111,13 @@ function enter(d: Tx, g: { id: string; tableCode: string; round: number; phase: 
     .set({ ...entry.clear, phase: to === "over" ? "reveal" : to, deadline: entry.deadline(t, { cards: o.cards ?? 0 }), ...o.set })
     .where(eq(games.id, g.id))
     .run();
+  // The round is revealed (the shop wall's clock): at its reveal, or at a game over that shows it.
+  // An abandoned game ("none") reveals nothing of the round it stopped in.
+  if (to === "reveal" || (to === "over" && o.set?.winner !== "none")) {
+    const set = d.update(gamePrompts).set({ revealedAt: Date.now() })
+      .where(and(eq(gamePrompts.gameId, g.id), eq(gamePrompts.round, g.round), isNull(gamePrompts.revealedAt))).run();
+    if (set.changes) revealed.set(g.tableCode, [...(revealed.get(g.tableCode) ?? []), { gameId: g.id, round: g.round }]);
+  }
   touch(g.tableCode);
 }
 
@@ -220,7 +230,7 @@ export function startGame(code: string, by?: string): StartResult {
     const slotOrder = JSON.stringify(shuffle([...SLOTS]));
     const format = t.format === "four" ? "four" : "knockout";
     tx.insert(games)
-      .values({ id, tableCode: code, round: 1, phase: "pick", deadline: PHASES.pick.deadline(t, { cards: 0 }), startedAt: now, slotOrder, format })
+      .values({ id, tableCode: code, round: 1, phase: "pick", deadline: PHASES.pick.deadline(t, { cards: 0 }), startedAt: now, slotOrder, format, private: t.private })
       .run();
     // Roles are dealt after the crates lock (they lock the moment this row exists). Four rounds
     // keeps game_players.role "player" for everyone: its moles are dealt per round (round_moles).
@@ -701,6 +711,9 @@ function changed(code: string) {
   dirty.delete(code);
   schedule(code);
   notifyTable(code);
+  const done = revealed.get(code);
+  revealed.delete(code);
+  for (const r of done ?? []) announceReveal(r.gameId, r.round);
 }
 
 // After a transaction: tell everyone if anything public changed in it (a phase
