@@ -189,6 +189,27 @@ export function suggestable(r: Raw): Track | null {
   return toTrack(r);
 }
 
+// Whether a track is clean enough for strangers to hear (the jukebox, decision 0011): the same rule
+// as the starter (suggestable). Asked of Deezer once per track at normal priority and remembered for
+// the hour, since a track's flags don't change; a failure is never remembered. Null: no such track.
+export type Verdict = { track: Track; clean: true } | { track: Track | null; clean: false; why: "explicit" | "no preview" | "missing" };
+const verdicts = new Map<number, { v: Verdict; at: number }>();
+export async function cleanVerdict(id: number): Promise<Verdict> {
+  const hit = verdicts.get(id);
+  if (hit && Date.now() - hit.at < TTL) return hit.v;
+  const body = (await get(`/track/${id}`, "normal")) as Raw | null;
+  const track = body ? toTrack(body) : null;
+  const ok = body ? suggestable(body) : null;
+  const v: Verdict = ok ? { track: ok, clean: true }
+    : !track ? { track: null, clean: false, why: "missing" }
+    : !body!.preview ? { track, clean: false, why: "no preview" }
+    : { track, clean: false, why: "explicit" };
+  if (verdicts.size >= CACHE_MAX) verdicts.delete(verdicts.keys().next().value!);
+  verdicts.set(id, { v, at: Date.now() });
+  if (track) put(cache, CACHE_MAX, track);
+  return v;
+}
+
 // A plain search for a bot's crate: clean tracks only, at the lowest priority.
 export async function searchClean(q: string, limit = 50): Promise<Track[]> {
   const body = await get(`/search?q=${encodeURIComponent(q)}&limit=${limit}`, "background", 6000);
