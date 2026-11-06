@@ -632,8 +632,12 @@ export async function startShopScene(slot: HTMLElement, hooks: ShopHooks, onFirs
     const k = 1 - Math.exp(-dt * 4);
     camPos.lerp(camPos, tmp.set(tx, up, tz + back), k);
     // On an upright phone, look further ahead so the room fills the tall screen
-    // rather than the street behind you.
-    camLook.lerp(camLook, tmp.set(tx, 0.6, tz - (seated ? 0.2 : portrait ? 2.2 : 0.6)), k);
+    // rather than the street behind you. Near the door (where you walk in), look
+    // further up the room and towards the wall of sleeves, so the room's memory
+    // is in view from the door; it eases off as you walk in.
+    const door = seated ? 0 : Math.min(1, Math.max(0, (tz - 1.5) / 2.5));
+    const ahead = seated ? 0.2 : (portrait ? 2.2 : 0.6) + door * (portrait ? 1.2 : 2.6);
+    camLook.lerp(camLook, tmp.set(tx + door * (portrait ? -3.2 : -0.8), 0.6 + door * (portrait ? 0.4 : 1.1), tz - ahead), k);
     camE.setPosition(camPos);
     camE.lookAt(camLook);
 
@@ -653,11 +657,14 @@ export async function startShopScene(slot: HTMLElement, hooks: ShopHooks, onFirs
     }
     for (const s of slotted.values()) {
       cam.worldToScreen(tmp.set(s.model.x, 2.05, s.model.z), sp);
+      // A booth far up the room would put its sign above the scene's top edge (under the page's top
+      // bar): clamp the pair so the sign, when shown, stays whole inside the scene.
+      const y = Math.max(sp.y, (s.sign.hidden ? s.tag.offsetHeight : s.sign.offsetHeight + 28) + 8);
       s.tag.style.display = sp.z > 0 ? "" : "none";
-      s.tag.style.transform = `translate(${sp.x.toFixed(1)}px, ${sp.y.toFixed(1)}px) translate(-50%, -100%)`;
+      s.tag.style.transform = `translate(${sp.x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%)`;
       if (!s.sign.hidden) {
         s.sign.style.display = sp.z > 0 ? "" : "none";
-        s.sign.style.transform = `translate(${sp.x.toFixed(1)}px, ${(sp.y - 28).toFixed(1)}px) translate(-50%, -100%)`;
+        s.sign.style.transform = `translate(${sp.x.toFixed(1)}px, ${(y - 28).toFixed(1)}px) translate(-50%, -100%)`;
       }
     }
     if (!jukeTag.hidden) {
