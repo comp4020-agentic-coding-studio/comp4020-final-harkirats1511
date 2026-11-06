@@ -35,7 +35,8 @@ it("puts you at the door on connect and 409s a move when you aren't in", async (
   expect(data.you).toBe(a.name);
   // somewhere just inside the door (people are spread out so they don't overlap)
   const at = data.people.find((p) => p.name === a.name)!;
-  expect(Math.abs(at.x - 0.6)).toBeLessThanOrEqual(1.2);
+  // 1.2 either side, give or take float rounding (0.6 - -0.6 is 1.2000000000000002).
+  expect(Math.abs(at.x - 0.6)).toBeLessThanOrEqual(1.2 + 1e-9);
   expect(at.z).toBeGreaterThanOrEqual(3.6);
   expect(at.z).toBeLessThanOrEqual(4.2);
   stream.close();
