@@ -12,6 +12,11 @@ const games = historyFor(me.id).map((g) => ({ ...g, result: g.winner === "points
   <a class="back-link" href="/"><span aria-hidden="true">&larr;</span>Back</a>
   <p class="kicker">Your shelf</p>
   <h1>Your past games</h1>
+  <section class="card paper notes" id="taste-notes" aria-labelledby="notes-h">
+    <p class="kicker notes-k">Staff notes on you</p>
+    <h2 id="notes-h">Taste notes</h2>
+    <div id="notes-body" aria-busy="true"><p class="hint">Reading your shelf…</p></div>
+  </section>
   {games.length === 0 ? (
     <section class="card empty-card">
       <p><strong>No finished games yet.</strong> Start a table and play one.</p>
@@ -75,7 +80,70 @@ const games = historyFor(me.id).map((g) => ({ ...g, result: g.winner === "points
     </>
   )}
 </Base>
+<style>
+  .notes { padding: 1rem 1.1rem 1.1rem; margin-bottom: 1.75rem; transform: rotate(-0.3deg); }
+  .notes h2 { margin: 0 0 0.6rem; }
+  .notes-k { margin: 0 0 0.2rem; }
+  .notes :global(h3) { color: var(--ink-2); margin: 1rem 0 0.4rem; }
+  .notes :global(.notes-moods) { display: grid; gap: 0.6rem 1rem; grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr)); margin: 0; }
+  .notes :global(.notes-mood) { margin: 0; }
+  .notes :global(.notes-mood dt) { font: 600 0.75rem/1.2 var(--cat); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink); border-bottom: 2px solid var(--ink); padding-bottom: 0.2rem; margin-bottom: 0.3rem; }
+  .notes :global(.notes-mood dt span) { color: var(--ink-2); letter-spacing: 0.04em; text-transform: none; font-weight: 500; }
+  .notes :global(.notes-mood dd) { margin: 0; font-size: var(--step--1); color: var(--ink-2); overflow-wrap: anywhere; padding: 0.15rem 0; }
+  .notes :global(.notes-mood dd b), .notes :global(.notes-list b), .notes :global(.notes-loved b) { color: var(--ink); }
+  .notes :global(.notes-loved) { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.7rem; overflow-wrap: anywhere; }
+  .notes :global(.notes-loved .stamp) { color: var(--ink); }
+  .notes :global(.notes-list) { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; font-size: var(--step--1); color: var(--ink-2); }
+  .notes :global(.notes-list li) { overflow-wrap: anywhere; border-bottom: 1px solid rgba(27, 20, 32, 0.18); padding: 0.2rem 0; }
+  .notes :global(.notes-list li:last-child) { border-bottom: 0; }
+  .notes :global(.hand) { font: 600 1.35rem/1.1 var(--hand); color: var(--ink); }
+  .notes :global(.notes-empty) { margin: 0; color: var(--ink-2); }
+</style>
 <script>
+  type T = { trackId: number; title: string; artist: string; cover?: string };
+  type Mood = "up" | "down" | "out" | "in";
+  type TasteNotes = {
+    byMood: Record<Mood, T[]>;
+    mostLoved?: T & { votes: number };
+    shared: { with: string; track: T }[];
+    borrows: { from?: string; to?: string; track: T }[];
+  };
+  const esc = (s: string) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+  const song = (t: T) => `<b>${esc(t.title)}</b>, ${esc(t.artist)}`;
+  const MOODS: [Mood, string, string][] = [["up", "Up", "energy, hype"], ["down", "Down", "sad, slow"], ["out", "Out", "going out, social"], ["in", "In", "alone, cosy"]];
+  // Short, like a staff note on a shelf card. Only what your games revealed.
+  function renderNotes(n: TasteNotes): string {
+    const by = n.byMood ?? { up: [], down: [], out: [], in: [] };
+    const any = MOODS.some(([m]) => (by[m] ?? []).length) || n.mostLoved || n.shared?.length || n.borrows?.length;
+    if (!any) return `<p class="notes-empty">Nothing on your card yet. Play a game and the shop starts taking notes: what you reach for in each mood, the song the room loved, and who you borrowed from.</p>`;
+    const out: string[] = [];
+    out.push(`<h3>What you reach for</h3><dl class="notes-moods">${MOODS.map(([m, name, hint]) => {
+      const list = by[m] ?? [];
+      return `<div class="notes-mood"><dt>${name} <span>${hint}</span></dt>${list.length ? list.slice(0, 5).map((t) => `<dd>${song(t)}</dd>`).join("") + (list.length > 5 ? `<dd>and ${list.length - 5} more</dd>` : "") : "<dd>Nothing yet.</dd>"}</div>`;
+    }).join("")}</dl>`);
+    out.push(`<h3>Most loved</h3>`);
+    out.push(n.mostLoved
+      ? `<p class="notes-loved"><span>${song(n.mostLoved)}</span><span class="stamp">${n.mostLoved.votes} best-pick ${n.mostLoved.votes === 1 ? "vote" : "votes"}</span></p>`
+      : `<p class="notes-empty">No best-pick votes yet. Four rounds games hand them out.</p>`);
+    out.push(`<h3>Songs you share</h3>`);
+    out.push(n.shared?.length
+      ? `<ul class="notes-list">${n.shared.map((x) => `<li>You and <b>${esc(x.with)}</b> both played ${song(x.track)}</li>`).join("")}</ul>`
+      : `<p class="notes-empty">Nobody has picked one of your songs alongside you yet.</p>`);
+    out.push(`<h3>Borrowed</h3>`);
+    out.push(n.borrows?.length
+      ? `<ul class="notes-list">${n.borrows.map((x) => `<li>${x.from ? `You borrowed ${song(x.track)} from <b>${esc(x.from)}</b>` : x.to ? `<b>${esc(x.to)}</b> borrowed ${song(x.track)} from you` : song(x.track)}</li>`).join("")}</ul>`
+      : `<p class="notes-empty">No borrows either way yet.</p>`);
+    return out.join("");
+  }
+  // Taste notes, from the games you sat in (GET /api/me/taste).
+  const body = document.getElementById("notes-body")!;
+  fetch("/api/me/taste", { credentials: "same-origin" })
+    .then(async (r) => {
+      if (!r.ok) throw new Error(String(r.status));
+      body.innerHTML = renderNotes((await r.json()) as TasteNotes);
+    })
+    .catch(() => { body.innerHTML = `<p class="hint">Your taste notes didn't load just now. Reload the page to try again.</p>`; })
+    .finally(() => body.removeAttribute("aria-busy"));
   // Dates in the reader's own time zone.
   for (const t of document.querySelectorAll<HTMLTimeElement>("time[data-ts]")) {
     t.textContent = new Date(Number(t.dataset.ts)).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });

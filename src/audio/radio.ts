@@ -8,6 +8,7 @@
 // and mute(false) after it, without touching the saved preference.
 
 export type Slot = { trackId: number; station: string; startedAt: number };
+export type JukeboxSlot = { id: string; trackId: number; startedAt: number; ms: number; title: string };
 export type RadioInfo = {
   mode: string;
   stations: { id: string; name: string }[];
@@ -23,6 +24,8 @@ export type RadioState = {
   volume: number;
   mode: string;
   stationName: string;
+  // A jukebox play is on instead of the radio.
+  jukebox: boolean;
 };
 export type RadioPlayer = {
   state(): RadioState;
@@ -37,6 +40,10 @@ export type RadioPlayer = {
   gesture(): void;
   // Feed it the radio from the snapshot, the `radio` event or a GET.
   update(r: RadioInfo, opts?: { changed?: boolean }): void;
+  // The shop jukebox (decision 0011): while a play is set, its preview plays
+  // in sync with its start instead of the radio; null hands back to the radio.
+  // Same rules: only after a gesture, never with the preference off or muted.
+  jukebox(p: JukeboxSlot | null): void;
   // Called whenever the state above changes. Returns an unsubscribe.
   subscribe(fn: (s: RadioState) => void): () => void;
   destroy(): void;
@@ -107,6 +114,7 @@ export function createRadio(opts: { endpoint?: string } = {}): RadioPlayer {
   let muted = false;
   let gestured = false;
   let radio: RadioInfo | null = null;
+  let juke: JukeboxSlot | null = null;
   let destroyed = false;
   let lastFetch = 0;
   const failed = new Set<string>();
@@ -124,7 +132,7 @@ export function createRadio(opts: { endpoint?: string } = {}): RadioPlayer {
     if (!radio) return "";
     return radio.mode === "mix" ? `Mix: ${radio.stations.find((s) => s.id === radio!.now.station)?.name ?? ""}` : (radio.stations.find((s) => s.id === radio!.mode)?.name ?? "");
   };
-  const state = (): RadioState => ({ on: pref, playing: should() && !!cur, muted, volume, mode: radio?.mode ?? "mix", stationName: stationName() });
+  const state = (): RadioState => ({ on: pref, playing: should() && !!cur, muted, volume, mode: radio?.mode ?? "mix", stationName: juke ? `Jukebox: ${juke.title}` : stationName(), jukebox: !!juke });
   const emit = () => { const s = state(); for (const fn of listeners) fn(s); };
 
   async function previewUrl(id: number): Promise<string | null> {
@@ -204,8 +212,17 @@ export function createRadio(opts: { endpoint?: string } = {}): RadioPlayer {
 
   // Once a second: which slot should be playing, and is a crossfade due?
   function tick() {
-    if (!should() || !radio) return;
+    if (!should()) return;
     const now = Date.now();
+    if (juke) {
+      // The jukebox holds the floor: play its preview from where the shop is in it.
+      const slot: Slot = { trackId: juke.trackId, station: "jukebox", startedAt: juke.startedAt };
+      const key = `${slot.trackId}@${slot.startedAt}`;
+      if (now < juke.startedAt + juke.ms && cur?.key !== key && !failed.has(key)) void play(slot, cur ? SWITCH_FADE_MS : 600);
+      else if (now >= juke.startedAt + juke.ms && cur?.key === key) stopAll(); // its time is up; the next play or the radio follows
+      return;
+    }
+    if (!radio) return;
     const { now: a, next: b, slotMs } = radio;
     let slot: Slot | null = null;
     if (now >= a.startedAt && now < a.startedAt + slotMs) slot = a;
@@ -232,6 +249,7 @@ export function createRadio(opts: { endpoint?: string } = {}): RadioPlayer {
   function update(r: RadioInfo, o: { changed?: boolean } = {}) {
     const modeChanged = !!radio && radio.mode !== r.mode;
     radio = r;
+    if (juke) { emit(); return; } // the radio waits behind the jukebox
     if (modeChanged || o.changed) {
       // The jukebox was used: swap now with a short fade.
       if (should()) void play(r.now, SWITCH_FADE_MS);
@@ -275,6 +293,14 @@ export function createRadio(opts: { endpoint?: string } = {}): RadioPlayer {
       sync();
     },
     update,
+    jukebox(p) {
+      const was = juke;
+      juke = p && Number.isFinite(p.startedAt) ? p : null;
+      if (was?.id === juke?.id) return; // the same play: keep its first start, no restart
+      // Either way the tick finds what should be playing and crossfades to it.
+      if (should()) { if (juke || radio) tick(); else void refresh(); }
+      emit();
+    },
     subscribe(fn) {
       listeners.add(fn);
       return () => listeners.delete(fn);

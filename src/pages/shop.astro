@@ -46,7 +46,7 @@ const list = booths();
     <p class="shop-note shop-stream-note" id="shop-stream-note" role="status" hidden></p>
 
     <details id="shop-2d" class="shop-2d" open>
-      <summary id="shop-2d-sum">Booths, people and radio</summary>
+      <summary id="shop-2d-sum">Booths, the jukebox, the wall and people</summary>
 
       <section aria-labelledby="booths-h" class="shop-sec">
         <div class="shop-sec-head">
@@ -58,6 +58,31 @@ const list = booths();
         <p class="shop-note"><a href="/">Start a table</a> from the home page and it opens as a booth here.</p>
       </section>
 
+      <section aria-labelledby="juke-h" class="shop-sec juke" id="juke">
+        <div class="shop-sec-head">
+          <h2 id="juke-h">Jukebox</h2>
+          <button type="button" id="juke-skip" class="shop-btn ghost sm" disabled>Skip</button>
+        </div>
+        <div id="juke-now" class="juke-box"><p class="juke-idle">Nothing queued, so the radio plays.</p></div>
+        <p class="shop-msg" id="juke-msg" role="status"></p>
+        <div id="juke-queue"></div>
+        <details class="juke-add" id="juke-add">
+          <summary>Queue a song from your crate</summary>
+          <p class="shop-note">One song at a time. Everyone on the floor hears it with your name on it, so only songs clean enough for the crate starter can go on.</p>
+          <div id="juke-crate" class="juke-crate"><p class="shop-note">Opening your crate…</p></div>
+        </details>
+      </section>
+
+      <section aria-labelledby="wall-h" class="shop-sec wall">
+        <details class="wall-fold" id="wall-fold" open>
+          <summary><h2 id="wall-h">The wall</h2><span class="wall-count mono" id="wall-count"></span></summary>
+          <p class="shop-note">Every revealed round from a public booth goes up here: the prompt, every pick and who picked it, and whether the mole was caught. Newest first.</p>
+          <ul class="wall-grid" id="wall-list"><li class="wall-empty">Opening the wall…</li></ul>
+          <button type="button" class="shop-btn ghost" id="wall-more" hidden>More</button>
+          <p class="shop-msg" id="wall-msg" role="status"></p>
+        </details>
+      </section>
+
       <section aria-labelledby="people-h" class="shop-sec">
         <h2 id="people-h">In the shop</h2>
         <ul class="shop-people" id="people-list"><li>Connecting…</li></ul>
@@ -65,7 +90,7 @@ const list = booths();
 
       <section aria-labelledby="radio-h" class="shop-sec">
         <h2 id="radio-h">Radio</h2>
-        <p id="radio-now" class="shop-note">The jukebox picks the station for the whole shop, once a minute.</p>
+        <p id="radio-now" class="shop-note">The station is shared by the whole shop and can change once a minute. While a queued song plays, the radio waits.</p>
         <div class="shop-stations" id="stations" role="group" aria-label="Station">
           <button type="button" class="shop-btn ghost" data-mode="mix" aria-pressed="false">Mix</button>
           <button type="button" class="shop-btn ghost" data-mode="after-hours" aria-pressed="false">After Hours</button>
@@ -75,6 +100,13 @@ const list = booths();
         <p class="shop-msg" id="radio-msg" role="status"></p>
       </section>
     </details>
+
+    <dialog id="wall-dialog" class="wall-dialog" aria-labelledby="wall-dialog-h">
+      <div class="wall-dialog-in">
+        <div class="wall-dialog-head"><h2 id="wall-dialog-h">On the wall</h2><button type="button" class="shop-btn ghost sm" id="wall-close">Close</button></div>
+        <div id="wall-dialog-body"></div>
+      </div>
+    </dialog>
   </div>
 </Base>
 
@@ -83,7 +115,9 @@ const list = booths();
   import type { Booth } from "../lib/booths.ts";
   import { createRadio, type RadioInfo } from "../audio/radio.ts";
   import { createSfx } from "../audio/sfx.ts";
-  import { boothList, esc } from "../scene/shop-list.ts";
+  import { boothList, boothSeen, esc } from "../scene/shop-list.ts";
+  import type { Jukebox, Sleeve, WallPage } from "../scene/shop-types.ts";
+  import { clock, linerNotes, msLeft, nowPlaying, playSay, queueList, wallItem } from "../scene/shop-wall.ts";
 
   const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
   const shop = $("shop");
@@ -103,7 +137,9 @@ const list = booths();
     soundBtn.setAttribute("aria-pressed", String(s.on));
     sfx.setEnabled(s.on);
     const name = s.stationName;
-    $("radio-now").textContent = name ? `Now on the radio: ${name}.${s.on ? "" : " (Sound is off.)"}` : "The jukebox picks the station for the whole shop, once a minute.";
+    $("radio-now").textContent = s.jukebox
+      ? `The radio waits while a queued song plays.${s.on ? "" : " (Sound is off.)"}`
+      : name ? `Now on the radio: ${name}.${s.on ? "" : " (Sound is off.)"}` : "The station is shared by the whole shop and can change once a minute.";
     const mode = s.mode;
     for (const b of document.querySelectorAll<HTMLButtonElement>("[data-mode]")) b.setAttribute("aria-pressed", String(b.dataset.mode === mode));
     sheetRefresh();
@@ -174,6 +210,7 @@ const list = booths();
         sendEmote: (e) => void post("/api/shop/emote", { emote: e }).catch(() => {}),
         onNear: (t) => { near = t; sheetRefresh(true); },
         onPrimary: () => primary(),
+        onSleeve: (id) => openSleeve(id),
         sfx,
       }, () => $("shop-loading").classList.add("done"));
       if (!sceneWanted || sceneDead) { s.destroy(); sceneLoading = false; return; }
@@ -182,6 +219,8 @@ const list = booths();
       s.setYou(myName);
       if (snapshot) { s.reset(snapshot.people); }
       s.setBooths(booths);
+      s.setWall(sleeves);
+      s.setJukebox(juke);
       syncPause();
       details.open = false;
     } catch (err) {
@@ -377,7 +416,189 @@ const list = booths();
     if (m) void setStation(m, (t) => ($("radio-msg").textContent = t));
   });
 
-  // ---- the 3D bottom sheet: the booth or jukebox you are standing at ----
+  // ---- the wall: every revealed round of a public booth, newest first ----
+  let sleeves: Sleeve[] = [];
+  let wallMore = false;
+  let wallLoaded = false;
+  const announced = new Set<string>();
+  const wallList = $("wall-list");
+  const wallBtn = $<HTMLButtonElement>("wall-more");
+  function renderWall(freshId?: string) {
+    $("wall-count").textContent = sleeves.length ? `${sleeves.length}${wallMore ? "+" : ""} ${sleeves.length === 1 ? "sleeve" : "sleeves"}` : "";
+    wallList.innerHTML = sleeves.length
+      ? sleeves.map((x) => wallItem(x, { fresh: x.id === freshId && !matchMedia("(prefers-reduced-motion: reduce)").matches })).join("")
+      : `<li class="wall-empty">Nothing on the wall yet. When a public booth reveals a round, its sleeve goes up here.</li>`;
+    wallBtn.hidden = !wallMore;
+    // newest 40 on the 3D wall (it caps itself); the 2D list holds everything loaded
+    scene?.setWall(sleeves, freshId);
+    if (near?.kind === "wall") sheetRefresh(true);
+  }
+  // The newest page: on first load it is the wall; later (a reconnect) it only
+  // adds what arrived while the stream was out, keeping what "More" loaded.
+  function setWallFirst(pg: WallPage) {
+    const have = new Set(sleeves.map((x) => x.id));
+    const add = pg.sleeves.filter((x) => !have.has(x.id));
+    for (const x of pg.sleeves) announced.add(x.id);
+    if (!wallLoaded) wallMore = pg.more;
+    wallLoaded = true;
+    if (!add.length && sleeves.length) return;
+    sleeves = sleeves.concat(add).sort((a, b) => b.revealedAt - a.revealedAt);
+    renderWall();
+  }
+  async function loadWall() {
+    try {
+      const r = await fetch("/api/wall?limit=20", { credentials: "same-origin" });
+      if (!r.ok) throw new Error(String(r.status));
+      setWallFirst((await r.json()) as WallPage);
+    } catch {
+      if (!wallLoaded) wallList.innerHTML = `<li class="wall-empty">The wall didn't load. It will try again when the shop reconnects.</li>`;
+    }
+  }
+  wallBtn.addEventListener("click", async () => {
+    const last = sleeves[sleeves.length - 1];
+    if (!last) return;
+    wallBtn.disabled = true;
+    $("wall-msg").textContent = "Loading older sleeves…";
+    try {
+      const r = await fetch(`/api/wall?before=${last.revealedAt}&limit=20`, { credentials: "same-origin" });
+      if (!r.ok) throw new Error(String(r.status));
+      const pg = (await r.json()) as WallPage;
+      const have = new Set(sleeves.map((x) => x.id));
+      const firstNew = pg.sleeves.find((x) => !have.has(x.id));
+      sleeves = sleeves.concat(pg.sleeves.filter((x) => !have.has(x.id)));
+      wallMore = pg.more;
+      for (const x of pg.sleeves) announced.add(x.id);
+      renderWall();
+      $("wall-msg").textContent = pg.sleeves.length ? `${pg.sleeves.length} older ${pg.sleeves.length === 1 ? "sleeve" : "sleeves"} added.` : "That's the whole wall.";
+      if (firstNew) wallList.querySelector<HTMLElement>(`[data-wall="${CSS.escape(firstNew.id)}"]`)?.focus();
+      else if (!wallMore) $("wall-h").closest("summary")?.focus();
+    } catch {
+      $("wall-msg").textContent = "Couldn't load more just now.";
+    } finally {
+      wallBtn.disabled = false;
+    }
+  });
+  function addSleeve(x: Sleeve) {
+    if (sleeves.some((y) => y.id === x.id)) return;
+    sleeves = [x, ...sleeves];
+    renderWall(x.id);
+    // once per sleeve, politely
+    if (!announced.has(x.id)) {
+      announced.add(x.id);
+      live(`New on the wall: "${x.prompt}", from booth ${x.table}.`);
+    }
+  }
+  wallList.addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>("[data-wall]");
+    if (b) openSleeve(b.dataset.wall!, b);
+  });
+  const dialog = $<HTMLDialogElement>("wall-dialog");
+  let opener: HTMLElement | null = null;
+  function openSleeve(id: string, from?: HTMLElement) {
+    const x = sleeves.find((y) => y.id === id);
+    if (!x) return;
+    opener = from ?? (document.activeElement as HTMLElement | null);
+    $("wall-dialog-h").textContent = `On the wall: booth ${x.table}, round ${x.round}`;
+    $("wall-dialog-body").innerHTML = linerNotes(x);
+    if (!dialog.open) dialog.showModal();
+    $("wall-close").focus();
+  }
+  $("wall-close").addEventListener("click", () => dialog.close());
+  dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
+  dialog.addEventListener("close", () => { if (opener?.isConnected) opener.focus(); opener = null; });
+
+  // ---- the jukebox: one song at a time from someone's crate, heard by the whole floor ----
+  let juke: Jukebox | null = null;
+  let saidPlay = "";
+  let jukeFirst = true;
+  const skipped = new Set<string>();
+  const skipBtn = $<HTMLButtonElement>("juke-skip");
+  function setJuke(j: Jukebox) {
+    juke = j;
+    const p = j.now;
+    $("juke-now").innerHTML = nowPlaying(j);
+    $("juke-queue").innerHTML = queueList(j);
+    skipBtn.disabled = !p || skipped.has(p.id);
+    skipBtn.textContent = p ? `Skip ${j.skips}/${j.needed}` : "Skip";
+    skipBtn.setAttribute("aria-label", p ? `Skip this song. ${j.skips} of ${j.needed} skips needed${skipped.has(p.id) ? "; you skipped it" : ""}` : "Skip (nothing playing)");
+    radio.jukebox(p ? { id: p.id, trackId: p.trackId, startedAt: p.startedAt ?? Date.now(), ms: p.ms, title: p.title } : null);
+    scene?.setJukebox(j);
+    // a new song is said once, politely
+    if (p && p.id !== saidPlay) {
+      saidPlay = p.id;
+      // the song already on when the page opened is in the list, not announced
+      if (!jukeFirst) { live(`Jukebox: ${playSay(p)}.`); sfx.clunk(); }
+    }
+    jukeFirst = false;
+    if (!p) saidPlay = "";
+    if (near?.kind === "jukebox") sheetRefresh();
+    paintSound();
+  }
+  // time left, once a second, without announcing it
+  setInterval(() => {
+    const p = juke?.now;
+    const el = document.querySelector<HTMLElement>("[data-juke-left]");
+    if (p && el) el.textContent = clock(msLeft(p));
+  }, 1000);
+  async function skip(say: (m: string) => void) {
+    const p = juke?.now;
+    if (!p || skipped.has(p.id)) return;
+    sfx.click();
+    const res = await post("/api/shop/jukebox/skip");
+    if (!res.ok) return say(await errorOf(res, "The skip didn't count."));
+    skipped.add(p.id);
+    const d = (await res.json().catch(() => null)) as { skips?: number; needed?: number } | null;
+    if (juke && d && typeof d.skips === "number" && typeof d.needed === "number" && juke.now?.id === p.id) setJuke({ ...juke, skips: d.skips, needed: d.needed });
+    else if (juke) setJuke(juke);
+    say(d && typeof d.skips === "number" && typeof d.needed === "number" && d.skips < d.needed ? `You skipped. ${d.skips} of ${d.needed}.` : "Skipped.");
+  }
+  skipBtn.addEventListener("click", () => void skip((m) => ($("juke-msg").textContent = m)));
+  async function loadJuke() {
+    try {
+      const r = await fetch("/api/shop/jukebox", { credentials: "same-origin" });
+      if (r.ok) setJuke((await r.json()) as Jukebox);
+    } catch { /* the stream brings it */ }
+  }
+  // Your crate, to queue from (GET /api/taste: your own songs, by mood).
+  type CrateSong = { id: number; title: string; artist: string; cover?: string | null; slot: "up" | "down" | "out" | "in" | null };
+  let crate: CrateSong[] | null = null;
+  const MOODS = [["up", "Up"], ["down", "Down"], ["out", "Out"], ["in", "In"]] as const;
+  async function loadCrate() {
+    if (crate) return;
+    const box = $("juke-crate");
+    try {
+      const r = await fetch("/api/taste", { credentials: "same-origin" });
+      if (!r.ok) throw new Error(String(r.status));
+      crate = (await r.json()) as CrateSong[];
+    } catch {
+      box.innerHTML = `<p class="shop-note">Your crate didn't load. Close this and try again.</p>`;
+      return;
+    }
+    if (!crate.length) {
+      box.innerHTML = `<p class="shop-note">Your crate is empty. <a href="/taste">Fill your crate</a> and come back to queue a song.</p>`;
+      return;
+    }
+    const group = (slot: string | null) => crate!.filter((t) => (t.slot ?? null) === slot);
+    const row = (t: CrateSong) => `<li><span class="juke-song"><b>${esc(t.title)}</b> <span>${esc(t.artist)}</span></span><button type="button" class="shop-btn ghost sm" data-queue="${t.id}" aria-label="Queue ${esc(t.title)} by ${esc(t.artist)}">Queue</button></li>`;
+    const parts = MOODS.filter(([m]) => group(m).length).map(([m, n]) => `<h3 class="juke-mood mono">${n}</h3><ul class="juke-songs">${group(m).map(row).join("")}</ul>`);
+    if (group(null).length) parts.push(`<h3 class="juke-mood mono">Not sorted</h3><ul class="juke-songs">${group(null).map(row).join("")}</ul>`);
+    box.innerHTML = parts.join("") + `<p class="shop-msg" id="juke-add-msg" role="status"></p>`;
+  }
+  $("juke-add").addEventListener("toggle", () => { if ($<HTMLDetailsElement>("juke-add").open) void loadCrate(); });
+  $("juke-crate").addEventListener("click", async (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-queue]");
+    if (!b) return;
+    const say = (m: string) => { const el = document.getElementById("juke-add-msg"); if (el) el.textContent = m; };
+    sfx.click();
+    b.disabled = true;
+    const res = await post("/api/shop/jukebox", { trackId: Number(b.dataset.queue) });
+    b.disabled = false;
+    if (!res.ok) return say(await errorOf(res, "The jukebox didn't take that one."));
+    const d = (await res.json().catch(() => null)) as { play?: { title?: string } } | null;
+    say(`Queued${d?.play?.title ? `: ${d.play.title}` : ""}. Everyone hears it with your name on it.`);
+  });
+
+  // ---- the 3D bottom sheet: the booth, jukebox or wall you are standing at ----
   const sheet = $("shop-sheet");
   let near: Target = null;
   let sheetKey = "";
@@ -397,8 +618,10 @@ const list = booths();
             <p class="shop-msg" role="status"></p>`;
         } else {
           key = `o-${b.code}-${b.seated}-${b.status}`;
+          const seen = boothSeen(b);
+          key += `-${seen}`;
           html = `<div class="row"><h2>Booth ${esc(b.code)}</h2><span class="shop-pill">${b.status === "playing" ? "Playing" : "Open to anyone"}</span></div>
-            <p>${esc(b.host)}'s table. ${b.seated} of ${b.max} seats taken. ${status}</p>
+            <p>${esc(b.host)}'s table. ${b.seated} of ${b.max} seats taken. ${status}</p>${seen ? `<p class="shop-seen mono">${esc(seen)}</p>` : ""}
             <div class="row"><button type="button" class="shop-btn" data-s="sit" data-code="${b.code}"${full || leaving ? " disabled" : ""}>Take a seat</button>
             <details class="shop-report"><summary>Report</summary><form data-s="report" data-code="${b.code}" novalidate><label class="sr-only" for="sheet-why">Reason</label><select id="sheet-why" name="reason">${["rude names", "spam", "trolling the game", "something else"].map((r) => `<option>${r}</option>`).join("")}</select><button type="submit" class="shop-btn ghost sm">Send</button></form></details></div>
             <p class="shop-msg" role="status"></p>`;
@@ -406,11 +629,23 @@ const list = booths();
       }
     } else if (near?.kind === "jukebox") {
       const s = radio.state();
-      key = `j-${s.mode}-${s.stationName}`;
-      html = `<div class="row"><h2>Jukebox</h2><span class="shop-pill">${esc(s.stationName || "Radio")}</span></div>
-        <p>Pick the station for everyone in the shop. It can change once a minute.</p>
-        <div class="stations">${STATIONS.map(([m, n]) => `<button type="button" class="shop-btn ghost sm" data-s="station" data-mode="${m}" aria-pressed="${s.mode === m}">${n}</button>`).join("")}</div>
-        <p class="shop-msg" role="status"></p>`;
+      const p = juke?.now;
+      key = `j-${s.mode}-${s.stationName}-${p?.id ?? ""}-${juke?.skips ?? 0}-${juke?.queue.length ?? 0}`;
+      html = p
+        ? `<div class="row"><h2>Jukebox</h2><span class="shop-pill">Playing</span></div>
+          <p><b>${esc(p.title)}</b>, ${esc(p.artist)}. Picked by ${esc(p.picker)}.${juke!.queue.length ? ` ${juke!.queue.length} more queued.` : ""}</p>
+          <div class="stations"><button type="button" class="shop-btn ghost sm" data-s="skip"${skipped.has(p.id) ? " disabled" : ""}>Skip (${juke!.skips}/${juke!.needed})</button><button type="button" class="shop-btn sm" data-s="queue">Queue a song</button></div>
+          <p class="shop-msg" role="status"></p>`
+        : `<div class="row"><h2>Jukebox</h2><span class="shop-pill">${esc(s.stationName || "Radio")}</span></div>
+          <p>Nothing queued, so the radio plays. Queue a song from your crate, or pick the station; it can change once a minute.</p>
+          <div class="stations"><button type="button" class="shop-btn sm" data-s="queue">Queue a song</button>${STATIONS.map(([m, n]) => `<button type="button" class="shop-btn ghost sm" data-s="station" data-mode="${m}" aria-pressed="${s.mode === m}">${n}</button>`).join("")}</div>
+          <p class="shop-msg" role="status"></p>`;
+    } else if (near?.kind === "wall") {
+      const here = near.ids.map((id) => sleeves.find((x) => x.id === id)).filter((x): x is Sleeve => !!x);
+      key = `w-${near.ids.join(",")}`;
+      html = `<div class="row"><h2>The wall</h2><span class="shop-pill">${here.length} ${here.length === 1 ? "sleeve" : "sleeves"}</span></div>
+        <p class="wall-sheet-note">Rounds from the booths, as they were revealed. Open one for its picks.</p>
+        <div class="sheet-sleeves">${here.map((x) => `<button type="button" class="shop-btn ghost sm" data-s="sleeve" data-id="${esc(x.id)}">${esc(x.prompt)}</button>`).join("")}</div>`;
     }
     if (key === sheetKey && !force) return;
     if (key === sheetKey && sheet.contains(document.activeElement)) return;
@@ -428,6 +663,15 @@ const list = booths();
     const say = (m: string) => { const el = sheet.querySelector(".shop-msg"); if (el) el.textContent = m; };
     if (t?.dataset.s === "sit") void sitDown(t.dataset.code!, say);
     else if (t?.dataset.s === "station") void setStation(t.dataset.mode!, say);
+    else if (t?.dataset.s === "skip") void skip(say);
+    else if (t?.dataset.s === "sleeve") openSleeve(t.dataset.id!);
+    else if (t?.dataset.s === "queue") {
+      details.open = true;
+      $<HTMLDetailsElement>("juke-add").open = true;
+      void loadCrate();
+      $("juke").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+      $("juke-add").querySelector("summary")?.focus({ preventScroll: true });
+    }
   });
   sheet.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -492,6 +736,7 @@ const list = booths();
   }
   function wire(es: EventSource) {
   es.addEventListener("snapshot", (e) => {
+    if (gotSnapshot) { void loadWall(); void loadJuke(); } // back after a drop: catch up
     gotSnapshot = true; retryMs = 2000; streamNote.hidden = true; clearInterval(pollTimer); syncScene();
     const d = parse(e as MessageEvent);
     snapshot = d;
@@ -501,6 +746,9 @@ const list = booths();
     booths = d.booths;
     renderList();
     radio.update(d.radio);
+    if (d.jukebox) setJuke(d.jukebox);
+    if (Array.isArray(d.wall)) setWallFirst({ sleeves: d.wall, more: d.wall.length >= 20 });
+    else if (d.wall && Array.isArray(d.wall.sleeves)) setWallFirst(d.wall);
     scene?.setYou(d.you);
     scene?.reset(d.people);
     scene?.setBooths(booths);
@@ -522,9 +770,13 @@ const list = booths();
   });
   es.addEventListener("emote", (e) => { const d = parse(e as MessageEvent); scene?.emote(d.name, d.emote); });
   es.addEventListener("booths", (e) => { booths = parse(e as MessageEvent); renderList(); scene?.setBooths(booths); });
-  es.addEventListener("radio", (e) => { radio.update(parse(e as MessageEvent), { changed: true }); sfx.clunk(); });
+  es.addEventListener("radio", (e) => { radio.update(parse(e as MessageEvent), { changed: true }); if (!juke?.now) sfx.clunk(); });
+  es.addEventListener("jukebox", (e) => setJuke(parse(e as MessageEvent)));
+  es.addEventListener("wall", (e) => { const d = parse(e as MessageEvent); if (d?.sleeve) addSleeve(d.sleeve); });
   }
   connect();
+  void loadWall();
+  void loadJuke();
   addEventListener("online", () => { if (!gotSnapshot || es.readyState === EventSource.CLOSED) { retryMs = 2000; clearTimeout(retryTimer); connect(); } });
 
   addEventListener("pagehide", () => { clearTimeout(retryTimer); clearInterval(pollTimer); es.close(); radio.destroy(); sfx.destroy(); scene?.destroy(); });
@@ -648,6 +900,106 @@ const list = booths();
   .shop-people { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.4rem; }
   .shop-people li { background: var(--s-panel); border: 1px solid var(--s-rule); border-radius: 999px; padding: 0.25rem 0.8rem; font-size: 0.9rem; }
   .shop-stations { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.6rem 0 0.3rem; }
+
+  /* ---- booths you can see into ---- */
+  .shop-booth .shop-seen, .shop-sheet .shop-seen { margin: -0.4rem 0 0.75rem; font-size: 0.8rem; color: var(--s-lamp); overflow-wrap: anywhere; }
+  .shop-labels .booth-sign { font: 600 11px var(--s-mono); white-space: nowrap; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; padding: 3px 8px; border-radius: 4px; background: rgba(27,20,32,.88); color: var(--s-lamp); border: 1px solid rgba(244,184,96,.5); }
+  .shop-labels .booth-sign[hidden] { display: none; }
+  .shop-labels .tag.juke { max-width: 52vw; overflow: hidden; text-overflow: ellipsis; }
+  .shop-labels .tag.juke[hidden] { display: none; }
+
+  /* ---- the jukebox ---- */
+  .juke-box { background: var(--s-panel); border: 1px solid var(--s-rule); border-radius: 14px; padding: 0.85rem 1rem; }
+  .juke-idle { color: var(--s-muted); font-size: 0.9rem; }
+  .juke-now { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 0.85rem; align-items: center; }
+  .juke-art { width: 64px; height: 64px; border-radius: 4px; overflow: hidden; background: var(--s-sleeve); display: grid; place-items: center; box-shadow: 0 4px 10px rgba(0,0,0,.35); }
+  .juke-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .juke-by { font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--s-lamp); }
+  .juke-title { font-size: 1.05rem; overflow-wrap: anywhere; }
+  .juke-title span { color: var(--s-muted); font-size: 0.9rem; }
+  .juke-left { font-size: 0.8rem; color: var(--s-muted); font-variant-numeric: tabular-nums; }
+  .juke-q-h { font: 600 0.72rem/1.2 var(--s-mono) !important; letter-spacing: 0.1em; text-transform: uppercase; color: var(--s-lamp) !important; margin: 0.9rem 0 0.4rem !important; }
+  .juke-queue { margin: 0; padding-left: 1.4rem; display: grid; gap: 0.3rem; font-size: 0.9rem; overflow-wrap: anywhere; }
+  .juke-queue .mono { color: var(--s-muted); font-size: 0.75rem; }
+  .juke-add { margin-top: 0.75rem; }
+  .juke-add > summary, .shop-sec .wall-fold > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; gap: 0.75rem; font-weight: 700; }
+  .juke-add > summary { color: var(--s-lamp); }
+  .juke-add .shop-note { margin: 0.25rem 0 0.5rem; }
+  .juke-mood { font: 600 0.72rem/1.2 var(--s-mono) !important; letter-spacing: 0.1em; color: var(--s-lamp) !important; margin: 0.75rem 0 0.3rem !important; }
+  .juke-songs { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; }
+  .juke-songs li { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; border-bottom: 1px solid var(--s-rule); padding: 0.2rem 0; }
+  .juke-song { min-width: 0; overflow-wrap: anywhere; font-size: 0.9rem; }
+  .juke-song span { color: var(--s-muted); }
+
+  /* ---- the wall: sleeves hung face out on rails, a staff-pick card on each ---- */
+  .wall-fold > summary h2 { margin: 0 !important; }
+  .wall-fold > summary::-webkit-details-marker { display: none; }
+  .wall-fold > summary { list-style: none; }
+  .wall-fold > summary::before { content: "+"; font: 600 1.1rem var(--s-mono); color: var(--s-lamp); width: 1rem; }
+  .wall-fold[open] > summary::before { content: "\2212"; }
+  .wall-count { color: var(--s-muted); font-size: 0.78rem; letter-spacing: 0.06em; }
+  .wall-fold > .shop-note { margin: 0.2rem 0 0.75rem; }
+  .wall-grid { list-style: none; margin: 0 0 0.75rem; padding: 0.9rem 0.75rem 0.25rem; display: grid; gap: 1.4rem 0.9rem; grid-template-columns: repeat(auto-fill, minmax(min(30%, 9.5rem), 1fr));
+    background: #2a1f30; border-radius: 6px; border: 1px solid var(--s-rule); }
+  .wall-empty { grid-column: 1 / -1; color: var(--s-muted); font-size: 0.9rem; padding: 0.5rem 0 1rem; }
+  .wall-item { position: relative; padding-bottom: 6px; border-bottom: 5px solid #4a3020; }
+  .shop .wall-sleeve { all: unset; box-sizing: border-box; display: block; width: 100%; cursor: pointer; border-radius: 3px; }
+  .shop .wall-sleeve:focus-visible { outline: 3px solid var(--s-lamp); outline-offset: 3px; }
+  .wall-face { position: relative; display: block; aspect-ratio: 1; border-radius: 3px; overflow: hidden; box-shadow: 0 6px 14px rgba(0,0,0,.45); }
+  .wall-face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .wall-face.mood-up { background: var(--s-lamp); }
+  .wall-face.mood-down { background: #85728c; }
+  .wall-face.mood-out { background: #7a5333; }
+  .wall-face.mood-in { background: #e4dac4; }
+  .wall-ring { position: absolute; right: 12%; top: 14%; width: 44%; aspect-ratio: 1; border-radius: 50%; box-shadow: inset 0 0 0 2px rgba(27,20,32,.2); }
+  .wall-mood { position: absolute; left: 6px; top: 6px; font-size: 0.65rem; letter-spacing: 0.1em; padding: 2px 5px; background: var(--s-sleeve); color: var(--s-ink); border-radius: 2px; }
+  .wall-card { position: relative; display: block; margin: -1.4rem 0.4rem 0; padding: 0.4rem 0.55rem 0.45rem; background: var(--s-sleeve); color: var(--s-ink); border-radius: 2px; box-shadow: 0 4px 10px rgba(0,0,0,.35); transform: rotate(-1.2deg); }
+  .wall-item:nth-child(even) .wall-card { transform: rotate(1deg); }
+  .wall-card .hand { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font: 600 1.15rem/1.05 "Caveat", "Segoe Print", cursive; overflow-wrap: anywhere; }
+  .wall-meta { display: block; margin-top: 0.2rem; font-size: 0.62rem; letter-spacing: 0.08em; color: #5b4e4a; }
+  .wall-sleeve:hover .wall-face { filter: brightness(1.06); }
+  .wall-item.fresh .wall-face { animation: wall-hang 900ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .wall-item.fresh .wall-card { animation: wall-card 900ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+  @keyframes wall-hang { from { transform: translateY(-10px) rotate(-2deg); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes wall-card { from { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .wall-item.fresh .wall-face, .wall-item.fresh .wall-card { animation: none; } }
+
+  /* a round's liner notes, on paper */
+  .wall-dialog { border: 0; padding: 0; width: min(34rem, calc(100vw - 32px)); max-height: calc(100svh - 32px); border-radius: 10px; background: var(--s-sleeve); color: var(--s-ink); box-shadow: 0 18px 40px rgba(0,0,0,.6); }
+  .wall-dialog::backdrop { background: rgba(14,10,16,.72); }
+  .wall-dialog-in { padding: 1rem 1.1rem 1.2rem; }
+  .wall-dialog-head .shop-btn { flex: none; white-space: nowrap; }
+  .wall-dialog-head { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; border-bottom: 2px solid var(--s-ink); padding-bottom: 0.6rem; margin-bottom: 0.7rem; }
+  .shop .wall-dialog h2 { color: var(--s-ink); font-size: 1.05rem; }
+  .shop .wall-dialog .shop-btn.ghost { color: var(--s-ink); border-color: var(--s-ink); }
+  .shop .wall-dialog button:focus-visible { outline-color: var(--s-ink); }
+  .wall-notes p { margin: 0 0 0.5rem; }
+  .wall-notes-k { font-size: 0.7rem; letter-spacing: 0.08em; color: #5b4e4a; text-transform: uppercase; }
+  .wall-notes-prompt .hand { font: 600 1.7rem/1.05 "Caveat", "Segoe Print", cursive; overflow-wrap: anywhere; }
+  .wall-notes-mood { font-size: 0.75rem; letter-spacing: 0.08em; color: #5b4e4a; }
+  .shop .wall-notes-h { font: 600 0.72rem/1.2 var(--s-mono); letter-spacing: 0.1em; text-transform: uppercase; color: #5b4e4a; margin: 0.8rem 0 0.35rem; }
+  .wall-picks { margin: 0 0 0.75rem; padding: 0; list-style: none; counter-reset: side; border-top: 1px solid rgba(27,20,32,.25); }
+  .wall-picks li { counter-increment: side; display: grid; grid-template-columns: 1.8rem minmax(0, 1fr) auto; gap: 0 0.5rem; align-items: baseline; padding: 0.4rem 0; border-bottom: 1px solid rgba(27,20,32,.18); overflow-wrap: anywhere; }
+  .wall-picks li::before { content: counter(side, decimal-leading-zero); font: 600 0.75rem var(--s-mono); color: #5b4e4a; grid-row: 1 / span 2; }
+  .wall-picks .who { font-weight: 700; grid-column: 2; }
+  .wall-picks .who small { font-weight: 500; color: #5b4e4a; }
+  .wall-picks .what { grid-column: 2; font-size: 0.9rem; color: #5b4e4a; }
+  .wall-picks .what b { color: var(--s-ink); }
+  .wall-picks .best-stamp { grid-column: 3; grid-row: 1 / span 2; align-self: center; color: var(--s-ink); font-size: 0.65rem; }
+  .wall-notes-moles .stamp { color: #a81c55; border-color: #a81c55; font-size: 0.7rem; margin-right: 0.3rem; }
+  .wall-notes-best { font-size: 0.9rem; }
+
+  /* the 3D sheet at the wall */
+  .shop-sheet .sheet-sleeves { display: flex; flex-direction: column; gap: 6px; max-height: 9.5rem; overflow-y: auto; }
+  @media (max-width: 560px) {
+    .shop-sheet .wall-sheet-note { display: none; }
+    .shop-sheet .sheet-sleeves { max-height: 6.4rem; }
+    .wall-grid { gap: 1.1rem 0.6rem; padding: 0.75rem 0.5rem 0.25rem; }
+    .wall-card { margin: -1.1rem 0.25rem 0; padding: 0.3rem 0.4rem 0.35rem; }
+    .wall-card .hand { font-size: 1rem; }
+    .wall-meta { font-size: 0.56rem; letter-spacing: 0.04em; }
+  }
+  .shop-sheet .sheet-sleeves .shop-btn { text-align: left; justify-content: flex-start; font-weight: 600; }
   @media (prefers-reduced-motion: reduce) { .shop-sheet, .shop-loading { transition: none; } }
   /* A phone: the bar fits one line (the slider's label stays for screen readers),
      the floor fills what's left of the screen, and the HUD title sits small

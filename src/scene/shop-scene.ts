@@ -12,11 +12,14 @@ import type { Booth } from "../lib/booths.ts";
 import type { Sfx } from "../audio/sfx.ts";
 import { Character, Kit } from "./character.ts";
 import { createEngine } from "./engine.ts";
-import { type BoothModel, buildRoom, JUKEBOX, type Room, SPOT_AT, WALK } from "./shop-room.ts";
+import { type BoothModel, buildRoom, JUKEBOX, type Room, SPOT_AT, WALK, WALL } from "./shop-room.ts";
+import { boothSeen } from "./shop-list.ts";
+import type { Jukebox, SeenBooth, Sleeve } from "./shop-types.ts";
+import { buildSleeveWall } from "./shop-wall-3d.ts";
 
 export type Emote = "wave" | "nope" | "jump" | "dance";
 export type Spot = { name: string; avatar: Avatar; x: number; z: number; yaw: number };
-export type Target = { kind: "booth"; spot: number } | { kind: "jukebox" } | null;
+export type Target = { kind: "booth"; spot: number } | { kind: "jukebox" } | { kind: "wall"; ids: string[] } | null;
 
 export type ShopHooks = {
   // Your position, at most ~8 a second while moving and once more when you stop.
@@ -27,6 +30,8 @@ export type ShopHooks = {
   onNear(t: Target): void;
   // The E key.
   onPrimary(): void;
+  // Tapped a sleeve on the wall: open its round.
+  onSleeve(id: string): void;
   sfx: Sfx;
 };
 
@@ -38,6 +43,9 @@ export type ShopScene = {
   moves(list: { name: string; x: number; z: number; yaw: number }[]): void;
   emote(name: string, e: Emote): void;
   setBooths(list: Booth[]): void;
+  // The wall's sleeves, newest first; freshId arrived just now (a quiet arrival).
+  setWall(list: Sleeve[], freshId?: string): void;
+  setJukebox(j: Jukebox | null): void;
   setStick(x: number, z: number): void;
   myEmote(e: Emote): void;
   walkToBooth(spot: number): void;
@@ -57,6 +65,7 @@ const SEND_MS = 130;
 const NEAR_BOOTH = 2.3;
 const NEAR_BOOTH_OUT = 2.7;
 const NEAR_JUKEBOX = 1.9;
+const NEAR_WALL = 1.6;
 const HOP_MS = 650;
 const HOP_H = 0.55;
 const CHAIR_Y = 0.2;
@@ -109,6 +118,13 @@ export async function startShopScene(slot: HTMLElement, hooks: ShopHooks, onFirs
   const world = new Entity("shop");
   app.root.addChild(world);
   const room: Room = buildRoom(kit, world);
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const wall = buildSleeveWall(kit, world, { reduced });
+  let jukebox: Jukebox | null = null;
+  const jukeTag = document.createElement("div");
+  jukeTag.className = "tag juke";
+  jukeTag.hidden = true;
+  labels.append(jukeTag);
 
   // ---- camera ----
   const camE = new Entity("camera");
@@ -121,7 +137,7 @@ export async function startShopScene(slot: HTMLElement, hooks: ShopHooks, onFirs
   const cam = camE.camera!;
 
   // ---- booths ----
-  type Slotted = { spot: number; key: string; model: BoothModel; data: Booth; tag: HTMLElement };
+  type Slotted = { spot: number; key: string; model: BoothModel; data: Booth; tag: HTMLElement; sign: HTMLElement; sleeve: Entity };
   const slotted = new Map<number, Slotted>();
   let circles: { x: number; z: number; r: number }[] = [];
   const tagText = (b: Booth) => (b.private ? "Private" : `${b.code} · ${b.status === "playing" ? "playing" : "open"} · ${b.seated}/${b.max}`);
@@ -133,6 +149,7 @@ export async function startShopScene(slot: HTMLElement, hooks: ShopHooks, onFirs
       if (!next.has(spot)) {
         s.model.destroy();
         s.tag.remove();
+        s.sign.remove();
         slotted.delete(spot);
       }
     }
@@ -145,15 +162,26 @@ export async function startShopScene(slot: HTMLElement, hooks: ShopHooks, onFirs
       }
       have?.model.destroy();
       const tag = have?.tag ?? document.createElement("div");
-      if (!have) labels.append(tag);
+      const sign = have?.sign ?? document.createElement("div");
+      if (!have) labels.append(sign, tag);
+      sign.className = "booth-sign";
       tag.className = b.private ? "tag private" : "tag";
-      slotted.set(spot, { spot, key, model: room.buildBooth(spot, { open: !b.private }), data: b, tag });
+      const model = room.buildBooth(spot, { open: !b.private });
+      // the playing card's sleeve, leaning on the record player (cream: a white label, no title)
+      const sleeve = kit.prim("box", kit.flat("#efe7d7"), [0.34, 0.64, -0.12], [0.26, 0.26, 0.015], [-10, 20, 0], model.entity);
+      sleeve.enabled = false;
+      slotted.set(spot, { spot, key, model, data: b, tag, sign, sleeve });
     }
     circles = [...slotted.values()].flatMap((s) => s.model.circles);
     for (const s of slotted.values()) {
       s.tag.className = s.data.private ? "tag private" : "tag";
       const t = tagText(s.data);
       if (s.tag.textContent !== t) s.tag.textContent = t;
+      // what you can see into: the same words as the booth list
+      const seen = boothSeen(s.data);
+      if (s.sign.textContent !== seen) s.sign.textContent = seen;
+      s.sign.hidden = !seen;
+      s.sleeve.enabled = !!(s.data as SeenBooth).playing;
     }
   }
 
@@ -336,6 +364,19 @@ export async function startShopScene(slot: HTMLElement, hooks: ShopHooks, onFirs
     const t = -a.y / (b.y - a.y);
     return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t };
   }
+  // Where a tap meets the back wall's plane, if it is on the wall of sleeves.
+  function wallPoint(cx: number, cy: number) {
+    const r = canvas.getBoundingClientRect();
+    const a = new Vec3(), b = new Vec3();
+    cam.screenToWorld(cx - r.left, cy - r.top, cam.nearClip, a);
+    cam.screenToWorld(cx - r.left, cy - r.top, cam.farClip, b);
+    if (Math.abs(b.z - a.z) < 1e-5) return null;
+    const t = (WALL.z - a.z) / (b.z - a.z);
+    if (t < 0 || t > 1) return null;
+    const y = a.y + (b.y - a.y) * t;
+    if (y < 0) return null; // the floor is in front of it
+    return { x: a.x + (b.x - a.x) * t, y };
+  }
   // Somewhere on the open side of a booth to stand at.
   function approach(cx: number, cz: number, r: number) {
     if (!me) return { x: cx, z: cz + r };
@@ -352,9 +393,18 @@ export async function startShopScene(slot: HTMLElement, hooks: ShopHooks, onFirs
   }
   const onPointer = (e: PointerEvent) => {
     if (!me || me.mode !== "free" || e.button > 0) return;
+    sfx.unlock();
+    const w = wallPoint(e.clientX, e.clientY);
+    if (w) {
+      const hit = wall.at(w.x, w.y);
+      if (hit) {
+        walkTo = { x: clamp(w.x, WALK.minX, WALK.maxX), z: WALK.minZ + 0.15 };
+        hooks.onSleeve(hit.id);
+        return;
+      }
+    }
     const p = floorPoint(e.clientX, e.clientY);
     if (!p) return;
-    sfx.unlock();
     const booth = [...slotted.values()].find((s) => Math.hypot(p.x - s.model.x, p.z - s.model.z) < 1.9);
     if (booth) walkTo = approach(booth.model.x, booth.model.z, 2.1);
     else if (Math.hypot(p.x - JUKEBOX.x, p.z - JUKEBOX.z) < 1.3) walkTo = approach(JUKEBOX.x, JUKEBOX.z, 1.5);
@@ -518,8 +568,15 @@ export async function startShopScene(slot: HTMLElement, hooks: ShopHooks, onFirs
       }
     }
     const dj = Math.hypot(me.x - JUKEBOX.x, me.z - JUKEBOX.z);
-    if (dj < NEAR_JUKEBOX && dj < bestD) best = { kind: "jukebox" };
-    const same = (best === null && near === null) || (best && near && best.kind === near.kind && (best.kind === "jukebox" || (near.kind === "booth" && best.spot === near.spot)));
+    if (dj < NEAR_JUKEBOX && dj < bestD) { best = { kind: "jukebox" }; bestD = dj; }
+    // standing at the wall of sleeves: the column in front of you
+    const dw = me.z - WALL.z;
+    if (dw < NEAR_WALL && dw < bestD && me.x > WALL.x0 - WALL.pitch && me.x < WALL.x0 + WALL.cols * WALL.pitch) {
+      const ids = wall.column(me.x).map((x) => x.id);
+      if (ids.length) best = { kind: "wall", ids };
+    }
+    const key = (t: Target) => (!t ? "" : t.kind === "booth" ? `b${t.spot}` : t.kind === "wall" ? `w${t.ids.join(",")}` : "j");
+    const same = key(best) === key(near);
     if (!same) {
       near = best;
       hooks.onNear(best);
@@ -533,6 +590,8 @@ export async function startShopScene(slot: HTMLElement, hooks: ShopHooks, onFirs
     const dt = Math.min(rawDt, 0.05);
     const t = now();
     for (const s of slotted.values()) if (s.data.status === "playing") s.model.platter.rotateLocal(0, -dt * 200, 0);
+    wall.tick(t);
+    room.jukeboxGlow(!!jukebox?.now, reduced ? 0 : t);
 
     if (me) driveMe(dt, t);
     for (const f of people.values()) {
@@ -596,6 +655,15 @@ export async function startShopScene(slot: HTMLElement, hooks: ShopHooks, onFirs
       cam.worldToScreen(tmp.set(s.model.x, 2.05, s.model.z), sp);
       s.tag.style.display = sp.z > 0 ? "" : "none";
       s.tag.style.transform = `translate(${sp.x.toFixed(1)}px, ${sp.y.toFixed(1)}px) translate(-50%, -100%)`;
+      if (!s.sign.hidden) {
+        s.sign.style.display = sp.z > 0 ? "" : "none";
+        s.sign.style.transform = `translate(${sp.x.toFixed(1)}px, ${(sp.y - 28).toFixed(1)}px) translate(-50%, -100%)`;
+      }
+    }
+    if (!jukeTag.hidden) {
+      cam.worldToScreen(tmp.set(JUKEBOX.x, 2.1, JUKEBOX.z), sp);
+      jukeTag.style.display = sp.z > 0 ? "" : "none";
+      jukeTag.style.transform = `translate(${Math.min(sp.x, w - 8).toFixed(1)}px, ${sp.y.toFixed(1)}px) translate(-100%, -100%)`;
     }
   });
   const nearestBooth = (x: number, z: number) => {
@@ -679,6 +747,15 @@ export async function startShopScene(slot: HTMLElement, hooks: ShopHooks, onFirs
       }
     },
     setBooths,
+    setWall(list, freshId) {
+      wall.set(list, freshId);
+    },
+    setJukebox(j) {
+      jukebox = j;
+      const t = j?.now ? `Now: ${j.now.title} · ${j.now.picker}` : "";
+      if (jukeTag.textContent !== t) jukeTag.textContent = t;
+      jukeTag.hidden = !t;
+    },
     setStick(x, z) {
       stick = { x, z };
       if (x || z) walkTo = null;
@@ -745,6 +822,8 @@ export async function startShopScene(slot: HTMLElement, hooks: ShopHooks, onFirs
         me: me && { x: me.x, z: me.z, yaw: me.yaw, mode: me.mode },
         people: [...people.values()].map((f) => ({ name: f.name, x: +f.x.toFixed(2), z: +f.z.toFixed(2), moving: f.moving })),
         tags: [...slotted.values()].map((s) => s.tag.textContent),
+        signs: [...slotted.values()].map((s) => s.sign.textContent),
+        jukebox: jukeTag.hidden ? "" : jukeTag.textContent,
         near,
       };
     },
@@ -758,6 +837,7 @@ export async function startShopScene(slot: HTMLElement, hooks: ShopHooks, onFirs
       for (const n of [...people.keys()]) remove(n);
       for (const s of slotted.values()) s.model.destroy();
       slotted.clear();
+      wall.destroy();
       room.destroy();
       engine.destroy();
       canvas.remove();

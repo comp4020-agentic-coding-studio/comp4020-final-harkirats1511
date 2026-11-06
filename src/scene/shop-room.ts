@@ -28,6 +28,9 @@ export const SPOT_AT: [number, number][] = [
   [-4.0, 1.2], [4.0, 1.2], [0.0, 1.2],
 ];
 export const JUKEBOX = { x: 6.8, z: -5.4 };
+// The wall of sleeves (decision 0011): the back wall left of the sign, 8 across
+// and 5 up, newest top left. 40 at most, so a phone stays smooth.
+export const WALL = { x0: -7.4, y0: 1.0, z: -5.97, cols: 8, rows: 5, pitch: 0.56, size: 0.48 };
 
 export type BoothLook = { open: boolean };
 export type BoothModel = {
@@ -49,7 +52,7 @@ const local = (pos: [number, number, number], scale: [number, number, number], r
 type Group = { pos: number[]; nrm: number[]; uv: number[]; idx: number[] };
 
 // Collects primitives with a world matrix and bakes them into one mesh per material.
-class Merge {
+export class Merge {
   private groups = new Map<StandardMaterial, Group>();
   private src = new Map<Prim, { p: number[]; n: number[]; t: number[]; i: number[] }>();
   readonly meshes: Mesh[] = [];
@@ -108,7 +111,7 @@ class Merge {
   }
 }
 
-function canvasTexture(kit: Kit, cv: HTMLCanvasElement, wrap = false): Texture {
+export function canvasTexture(kit: Kit, cv: HTMLCanvasElement, wrap = false): Texture {
   const t = new Texture(kit.engine.app.graphicsDevice, {
     width: cv.width, height: cv.height, format: PIXELFORMAT_SRGBA8, mipmaps: true,
     minFilter: FILTER_LINEAR_MIPMAP_LINEAR, magFilter: FILTER_LINEAR,
@@ -120,6 +123,8 @@ function canvasTexture(kit: Kit, cv: HTMLCanvasElement, wrap = false): Texture {
 
 export type Room = {
   boxes: Box[];
+  // The jukebox lights up while a song someone queued is playing.
+  jukeboxGlow(on: boolean, t: number): void;
   buildBooth(spot: number, look: BoothLook): BoothModel;
   destroy(): void;
 };
@@ -129,6 +134,8 @@ export function buildRoom(kit: Kit, world: Entity): Room {
   const owned: { destroy(): void }[] = [];
   const mg = new Merge(kit);
   const boxes: Box[] = [];
+  let juke: { gm: StandardMaterial; jl: Entity } | null = null;
+  let jukeOn = -1;
   const P = (k: Prim, mat: StandardMaterial, pos: [number, number, number], scale: [number, number, number], r?: [number, number, number], parent?: Mat4) => mg.add(k, mat, pos, scale, r, parent);
 
   // floorboards: a tiled canvas texture on the floor slab
@@ -224,8 +231,12 @@ export function buildRoom(kit: Kit, world: Entity): Room {
     world.addChild(l);
   }
 
-  // wall shelves of records on the back wall, either side of the sign
-  for (const [sx, w] of [[-5.2, 4.2], [5.2, 2.0]] as [number, number][]) {
+  // the wall of sleeves' frame: a wood rail under each row (the sleeves are shop-wall-3d.ts)
+  for (let r = 0; r < WALL.rows; r++) {
+    P("box", flat(C.woodDark), [WALL.x0 + (WALL.cols * WALL.pitch) / 2 - WALL.pitch / 2 + 0.0, WALL.y0 + r * WALL.pitch - WALL.size / 2 - 0.03, ROOM.z0 + 0.04], [WALL.cols * WALL.pitch + 0.1, 0.035, 0.08]);
+  }
+  // record shelves on the back wall, right of the sign
+  for (const [sx, w] of [[5.2, 2.0]] as [number, number][]) {
     for (const y of [1.35, 2.05]) {
       P("box", flat(C.woodDark), [sx, y, ROOM.z0 + 0.18], [w, 0.05, 0.32]);
       const n = Math.floor(w / 0.32);
@@ -265,6 +276,19 @@ export function buildRoom(kit: Kit, world: Entity): Room {
     l.setLocalPosition(JUKEBOX.x, 1.4, JUKEBOX.z + 0.8);
     world.addChild(l);
     boxes.push({ x0: 6.15, x1: 7.45, z0: -5.85, z1: -4.95 });
+    // the window that glows lamp-amber while a queued song plays, and its light
+    const gm = new StandardMaterial();
+    gm.diffuse = new Color(0.1, 0.07, 0.05);
+    gm.emissive = new Color().fromString(C.lamp);
+    gm.emissiveIntensity = 0.15;
+    gm.update();
+    owned.push(gm);
+    kit.prim("box", gm, [JUKEBOX.x, 0.7, JUKEBOX.z + 0.37], [0.9, 0.12, 0.02], [0, 0, 0], world);
+    const jl = new Entity();
+    jl.addComponent("light", { type: "omni", color: new Color().fromString(C.lamp), range: 3.5, intensity: 0, castShadows: false });
+    jl.setLocalPosition(JUKEBOX.x, 1.1, JUKEBOX.z + 1.0);
+    world.addChild(jl);
+    juke = { gm, jl };
   }
 
   // the counter, with a till and a lamp
@@ -364,6 +388,16 @@ export function buildRoom(kit: Kit, world: Entity): Room {
 
   return {
     boxes,
+    jukeboxGlow(on, t) {
+      if (!juke) return;
+      // a slow breath while playing, so it reads as "on" without flashing
+      const k = on ? 1.6 + Math.sin(t * 0.0025) * 0.35 : 0.15;
+      if (!on && jukeOn === 0) return;
+      jukeOn = on ? 1 : 0;
+      juke.gm.emissiveIntensity = k;
+      juke.gm.update();
+      juke.jl.light!.intensity = on ? 1.1 + Math.sin(t * 0.0025) * 0.2 : 0;
+    },
     buildBooth,
     destroy() {
       for (const o of owned) o.destroy();
