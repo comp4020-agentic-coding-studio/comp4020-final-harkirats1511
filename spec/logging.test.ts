@@ -82,7 +82,7 @@ withToken("logs a round without the prompt, moles, picks or votes before they're
     ps.push({ s, name, ids: await fillCrate(s, i) });
   }
   const titles = (await (await ps[0].s.call("/api/taste")).json()) as { id: number; title: string }[];
-  const { code } = (await (await ps[0].s.call("/api/tables", { body: { pickSeconds: 30, voteSeconds: 30 } })).json()) as {
+  const { code } = (await (await ps[0].s.call("/api/tables", { body: { format: "knockout", pickSeconds: 30, voteSeconds: 30 } })).json()) as {
     code: string;
   };
   for (const p of ps.slice(1)) await p.s.call(`/api/tables/${code}/join`, { body: {} });
@@ -169,7 +169,7 @@ withToken("doesn't say a pick was a borrow, or log a round cut short by a leaver
     await s.call("/api/join", { body: { name, pin: "4680" } });
     ps.push({ s, name, ids: await fillCrate(s, i) });
   }
-  const { code } = (await (await ps[0].s.call("/api/tables", { body: { pickSeconds: 60, voteSeconds: 30 } })).json()) as { code: string };
+  const { code } = (await (await ps[0].s.call("/api/tables", { body: { format: "knockout", pickSeconds: 60, voteSeconds: 30 } })).json()) as { code: string };
   for (const p of ps.slice(1)) await p.s.call(`/api/tables/${code}/join`, { body: {} });
   await ps[0].s.call(`/api/tables/${code}/start`, { body: {} });
   const views = await Promise.all(ps.map(async (p) => (await (await p.s.call(`/api/tables/${code}/me`)).json()) as { role: string }));

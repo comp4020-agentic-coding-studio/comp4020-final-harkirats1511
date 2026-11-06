@@ -3,7 +3,7 @@ import { baseUrl, fillCrate, session, uniqueName } from "./helpers";
 
 // Contract for the Four rounds format and the ghost guess, over HTTP (CLAUDE.md "Formats"; decision 0010).
 // The rules themselves (scoring, ties, restart) are in four-engine.test.ts, on the engine.
-//   POST /api/tables {format?: "knockout"|"four"}        default knockout; 400 for anything else
+//   POST /api/tables {format?: "knockout"|"four"}        default four (decision 0011); 400 for anything else
 //   POST /api/tables/:code/format {format}               host only, between games (409 mid-game)
 //   POST /api/tables/:code/best {order}                  Four rounds, vote: a card's number, never your own
 //   POST /api/tables/:code/guess {name}                  Knockout, vote: a ghost's private guess
@@ -57,8 +57,11 @@ it("picks the format on create or in the lobby: host only, validated, not during
   const guest = await human("fg");
   expect((await host.s.call("/api/tables", { body: { format: "chess" } })).status).toBe(400);
   expect((await host.s.call("/api/tables", { body: { format: 4 } })).status).toBe(400);
+  // Four rounds is the default (decision 0011); Knockout is chosen.
   const plain = await newTable(host);
-  expect((await state(host.s, plain)).format).toBe("knockout");
+  expect((await state(host.s, plain)).format).toBe("four");
+  const ko = await newTable(host, { format: "knockout" });
+  expect((await state(host.s, ko)).format).toBe("knockout");
   const code = await newTable(host, { format: "four" });
   expect((await state(host.s, code)).format).toBe("four");
   await guest.s.call(at(code, "join"), { body: {} });

@@ -88,7 +88,7 @@ const at = (code: string, path: string) => `/api/tables/${code}/${path}`;
 async function table(n: number, opts: Record<string, unknown> = {}) {
   const players = await Promise.all(Array.from({ length: n }, (_, i) => player(`p${i}`, i)));
   const [host] = players;
-  const { code } = (await (await host.s.call("/api/tables", { body: { pickSeconds: 15, voteSeconds: 15, ...opts } })).json()) as { code: string };
+  const { code } = (await (await host.s.call("/api/tables", { body: { format: "knockout", pickSeconds: 15, voteSeconds: 15, ...opts } })).json()) as { code: string };
   for (const p of players.slice(1)) await p.s.call(at(code, "join"), { body: {} });
   return { code, host, players };
 }
@@ -204,7 +204,7 @@ it("refuses 2 players and a ninth seat, and starts with 3 to 8", async () => {
 it("starts with 8 players and deals 2 moles", async () => {
   const players = await Promise.all(Array.from({ length: 8 }, (_, i) => player("eight", i)));
   const [host] = players;
-  const { code } = (await (await host.s.call("/api/tables", { body: {} })).json()) as { code: string };
+  const { code } = (await (await host.s.call("/api/tables", { body: { format: "knockout" } })).json()) as { code: string };
   for (const p of players.slice(1)) expect((await p.s.call(at(code, "join"), { body: {} })).status).toBeLessThan(300);
   expect((await host.s.call(at(code, "start"), { body: {} })).status).toBeLessThan(300);
   await waitFor(code, (s) => s.game?.phase === "pick");
@@ -1008,7 +1008,7 @@ it("steal decoys are never a prompt used earlier in the game", async () => {
   const trio = await Promise.all([0, 1, 2, 3].map((i) => player("dc", i)));
   const run = async () => {
     const [host, ...others] = trio;
-    const { code } = (await (await host.s.call("/api/tables", { body: { voteSeconds: 2 } })).json()) as { code: string };
+    const { code } = (await (await host.s.call("/api/tables", { body: { format: "knockout", voteSeconds: 2 } })).json()) as { code: string };
     for (const p of others) await p.s.call(at(code, "join"), { body: {} });
     expect((await host.s.call(at(code, "start"), { body: {} })).status).toBeLessThan(300);
     await waitFor(code, (s) => s.game?.phase === "pick");
