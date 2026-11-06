@@ -479,7 +479,9 @@ const list = booths();
     }
   });
   function addSleeve(x: Sleeve) {
-    if (sleeves.some((y) => y.id === x.id)) return;
+    // A Knockout game's end sends its earlier sleeves again, now naming the moles: replace in place.
+    const at = sleeves.findIndex((y) => y.id === x.id);
+    if (at >= 0) { sleeves = sleeves.map((y, i) => (i === at ? x : y)); renderWall(); return; }
     sleeves = [x, ...sleeves];
     renderWall(x.id);
     // once per sleeve, politely
