@@ -2,10 +2,32 @@
 // two cannot drift. Public booth state only (the Booth type): a private booth
 // has no code here, so none can reach the HTML.
 import type { Booth } from "../lib/booths.ts";
+import { MOOD_NAME, type Phase, type SeenBooth } from "./shop-types.ts";
 
 export const REPORT_REASONS = ["rude names", "spam", "trolling the game", "something else"];
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+
+const PHASE_NAME: Record<Phase, string> = { pick: "Picking", listen: "Listening", vote: "Vote", steal: "Steal", reveal: "Reveal" };
+
+// What you can see of a playing public booth's round, in words: the same line
+// the 3D sign shows. Only the contract's public fields (decision 0011).
+export function boothSeen(booth: Booth): string {
+  const b = booth as SeenBooth;
+  if (b.private || b.status !== "playing" || !b.phase) return "";
+  const parts: string[] = [];
+  if (b.round) parts.push(`Round ${b.round}`);
+  if (b.phase === "listen" && b.playing) {
+    const p = b.playing;
+    const whose = `${p.picker}${/s$/i.test(p.picker) ? "'" : "'s"}`;
+    parts.push(`Listening: ${p.title} by ${p.artist} (${whose} pick)`);
+    return parts.join(" · ");
+  }
+  parts.push(PHASE_NAME[b.phase] ?? b.phase);
+  if (b.mood && MOOD_NAME[b.mood]) parts.push(MOOD_NAME[b.mood]);
+  if (b.phase === "vote" && typeof b.votes === "number") parts.push(`${b.votes} voted`);
+  return parts.join(" · ");
+}
 
 export function boothItem(b: Booth, i: number): string {
   const full = b.seated >= b.max;
@@ -29,6 +51,7 @@ export function boothItem(b: Booth, i: number): string {
   return `<li class="shop-booth" data-key="${b.code}">
   <div class="shop-booth-head"><h3>Booth ${esc(b.code)}</h3><span class="shop-pill">Open to anyone</span></div>
   <p>${esc(b.host)}'s table. ${seats}. ${status}.${b.status === "playing" ? " You would join the next game." : ""}</p>
+  ${boothSeen(b) ? `<p class="shop-seen mono">${esc(boothSeen(b))}</p>` : ""}
   <div class="shop-actions">
     <button type="button" class="shop-btn" data-act="sit" data-code="${b.code}"${full ? " disabled" : ""}>Take a seat</button>
     <details class="shop-report">
