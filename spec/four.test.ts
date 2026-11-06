@@ -217,7 +217,7 @@ it("a bot game in Four rounds reaches game over by itself, moles named only at t
 it("a Knockout game with a ghost: the ghost can guess, nobody sees it before game over, bots guess too", async () => {
   const host = await human("fk");
   const ids = await fillCrate(host.s, 3);
-  const code = await newTable(host, { pickSeconds: 5, voteSeconds: 6, slotSeconds: 2, autoplay: true });
+  const code = await newTable(host, { format: "knockout", pickSeconds: 5, voteSeconds: 6, slotSeconds: 2, autoplay: true });
   await addBots(host, code, 4);
   const stream = await host.s.open(at(code, "events"));
   const me = async () => (await (await host.s.call(at(code, "me"))).json()) as Me & { guess?: { name: string } };
