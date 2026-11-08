@@ -222,7 +222,6 @@ const list = booths();
       s.setWall(sleeves);
       s.setJukebox(juke);
       syncPause();
-      details.open = false;
     } catch (err) {
       // The 2D list is complete without it: drop the scene quietly (a note for whoever reads the console).
       console.debug("3D shop unavailable", err);
@@ -245,9 +244,10 @@ const list = booths();
     const listBtn = $<HTMLButtonElement>("hud-list");
     const sync = () => listBtn.setAttribute("aria-expanded", String(details.open));
     details.addEventListener("toggle", sync);
+    // The list stays open under the 3D room, so people find it by scrolling; the button takes you there.
     listBtn.addEventListener("click", () => {
-      details.open = !details.open;
-      if (details.open) details.scrollIntoView({ behavior: "smooth", block: "start" });
+      details.open = true;
+      details.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
     });
     sync();
     // joystick (touch devices show it by CSS)
